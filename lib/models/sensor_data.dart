@@ -8,7 +8,7 @@ class SensorReading {
   final double value;
   final double minNormal;
   final double maxNormal;
-  final String icon; // emoji icon
+  final String icon;
   final int colorHex;
 
   const SensorReading({
@@ -28,10 +28,10 @@ class SensorReading {
     return 'Normal';
   }
 
-  /// Returns 0.0–1.0 progress for gauge display
   double get normalizedValue {
-    final range = maxNormal * 1.4;
-    return (value / range).clamp(0.0, 1.0);
+    final range = maxNormal - minNormal;
+    if (range == 0) return 0;
+    return ((value - minNormal) / range).clamp(0, 1);
   }
 }
 

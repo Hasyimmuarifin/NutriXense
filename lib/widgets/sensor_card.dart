@@ -1,4 +1,3 @@
-// lib/widgets/sensor_card.dart
 // Reusable card widget that displays a single sensor reading with status indicator
 
 import 'package:flutter/material.dart';
@@ -70,9 +69,11 @@ class SensorCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Center(
-                      child: Text(
+                      child: Image.asset(
                         reading.icon,
-                        style: const TextStyle(fontSize: 20),
+                        width: 22,
+                        height: 22,
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),

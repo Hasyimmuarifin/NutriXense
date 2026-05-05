@@ -1,13 +1,16 @@
-// lib/screens/home_screen.dart
 // Main monitoring dashboard – shows live sensor cards + mini real-time chart
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../models/dummy_data.dart';
+
 import '../models/sensor_data.dart';
+
+import '../services/mqtt_service.dart';
 import '../theme/app_theme.dart';
+
 import '../widgets/sensor_card.dart';
-// import '../widgets/mini_line_chart.dart';
 import '../widgets/section_header.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -17,21 +20,78 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  late final List<SensorReading> _readings;
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+  late List<SensorReading> _readings;
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
+
+  final MQTTService mqttService = MQTTService();
+  
+  StreamSubscription? sensorSub;
+
+  // chart history
+  List<double> nitrogenHistory = [];
+  List<double> phosphorusHistory = [];
+  List<double> potassiumHistory = [];
+
+  void initMQTT() async {
+    await mqttService.init();
+    mqttService.subscribe("nutrixense/sensor");
+
+    sensorSub = mqttService.sensorStream.listen((data) {
+      updateSensorData(data);
+    });
+  }
+
+  void updateSensorData(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    setState(() {
+      // update cards
+      _readings = [
+        SensorReading(
+          value: (data["nitrogen"] ?? 0).toDouble(), label: "N", unit: "mg/kg", minNormal: 20, maxNormal: 80, icon: "assets/icons/leaf.png", colorHex: 0xFF4CAF50
+        ),
+        SensorReading(
+          value: (data["phosphorus"] ?? 0).toDouble(), label: "P", unit: "mg/kg", minNormal: 15, maxNormal: 60, icon: "assets/icons/root.png", colorHex: 0xFF2196F3
+        ),
+        SensorReading(
+          value: (data["potassium"] ?? 0).toDouble(), label: "K", unit: "mg/kg", minNormal: 20, maxNormal: 100, icon: "assets/icons/crop.png", colorHex: 0xFFFF9800
+        ),
+        SensorReading(
+          value: (data["ph"] ?? 0).toDouble(), label: "pH", unit: "pH", minNormal: 6.0, maxNormal: 7.5, icon: "assets/icons/ph.png", colorHex: 0xFF9E9E9E
+        ),
+        SensorReading(
+          value: (data["humidity"] ?? 0).toDouble(), label: "H", unit: "%", minNormal: 40, maxNormal: 80, icon: "assets/icons/water.png", colorHex: 0xFF2196F3
+        ),
+        SensorReading(
+          value: (data["temperature"] ?? 0).toDouble(), label: "T", unit: "°C", minNormal: 15, maxNormal: 30, icon: "assets/icons/temp.png", colorHex: 0xFFF44336
+        ),
+      ];
+
+      // update chart history
+      nitrogenHistory.add((data["nitrogen"] ?? 0).toDouble());
+      phosphorusHistory.add((data["phosphorus"] ?? 0).toDouble());
+      potassiumHistory.add((data["potassium"] ?? 0).toDouble());
+
+      if (nitrogenHistory.length > 20) nitrogenHistory.removeAt(0);
+      if (phosphorusHistory.length > 20) phosphorusHistory.removeAt(0);
+      if (potassiumHistory.length > 20) potassiumHistory.removeAt(0);
+    });
+  }
 
   @override
   void initState() {
     super.initState();
-    _readings = DummyData.getCurrentReadings();
+    _readings = [];
+
+    initMQTT();
 
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
+
     _fadeAnim = CurvedAnimation(
       parent: _animController,
       curve: Curves.easeOut,
@@ -41,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    sensorSub?.cancel();
     _animController.dispose();
     super.dispose();
   }
@@ -222,18 +283,11 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ─── Real-time trend chart (NPK + pH) ────────────────────────────────────────
   Widget _buildRealTimeChart() {
-    final history = DummyData.getHistoryData(days: 1);
-    final n = history.map((d) => d.nitrogen).toList();
-    final p = history.map((d) => d.phosphorus).toList();
-    final k = history.map((d) => d.potassium).toList();
 
     List<FlSpot> toSpots(List<double> vals) {
       return List.generate(
-        vals.length > 12 ? 12 : vals.length,
-        (i) {
-          final idx = vals.length - (vals.length > 12 ? 12 : vals.length) + i;
-          return FlSpot(i.toDouble(), vals[idx]);
-        },
+        vals.length,
+        (i) => FlSpot(i.toDouble(), vals[i]),
       );
     }
 
@@ -316,9 +370,9 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 lineBarsData: [
-                  _bar(toSpots(n), AppTheme.primaryGreen),
-                  _bar(toSpots(p), AppTheme.primaryBlue),
-                  _bar(toSpots(k), AppTheme.statusHigh),
+                  _bar(toSpots(nitrogenHistory), AppTheme.primaryGreen),
+                  _bar(toSpots(phosphorusHistory), AppTheme.primaryBlue),
+                  _bar(toSpots(potassiumHistory), AppTheme.statusHigh),
                 ],
               ),
             ),
