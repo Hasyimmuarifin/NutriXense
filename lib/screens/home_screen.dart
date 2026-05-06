@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../models/sensor_data.dart';
 
@@ -20,13 +21,24 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   late List<SensorReading> _readings;
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
+  late StreamSubscription connectivitySub;
+
+  bool isInternetConnected = true;
+  bool isMqttConnected = false;
+  bool get isFullyConnected {
+    return isInternetConnected && isMqttConnected;
+  }
+
+  DateTime? lastDataReceived;
+  Timer? connectionTimer;
 
   final MQTTService mqttService = MQTTService();
-  
+
   StreamSubscription? sensorSub;
 
   // chart history
@@ -36,10 +48,59 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void initMQTT() async {
     await mqttService.init();
+
+    mqttService.onConnectionChanged = (status) {
+      if (!mounted) return;
+
+      setState(() {
+        isMqttConnected = status;
+      });
+    };
+
     mqttService.subscribe("nutrixense/sensor");
 
     sensorSub = mqttService.sensorStream.listen((data) {
+      lastDataReceived = DateTime.now();
+      setState(() {
+        isMqttConnected = true;
+      });
       updateSensorData(data);
+    });
+  }
+
+  void initConnectivity() {
+    connectivitySub = Connectivity()
+        .onConnectivityChanged
+        .listen((List<ConnectivityResult> results) {
+        final hasInternet = results.any(
+          (r) => r != ConnectivityResult.none,
+        );
+
+      setState(() {
+        isInternetConnected = hasInternet;
+      });
+
+      if (!hasInternet) {
+        setState(() {
+          isMqttConnected = false;
+        });
+      }
+    });
+  }
+
+  void startConnectionMonitor() {
+    connectionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+
+      setState(() {
+        // If data is stale for more than 3 seconds, consider MQTT disconnected
+        if (lastDataReceived != null) {
+          final diff = DateTime.now().difference(lastDataReceived!);
+          if (diff.inSeconds >= 3) {
+            isMqttConnected = false;
+          }
+        }
+      });
     });
   }
 
@@ -50,23 +111,53 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       // update cards
       _readings = [
         SensorReading(
-          value: (data["nitrogen"] ?? 0).toDouble(), label: "N", unit: "mg/kg", minNormal: 20, maxNormal: 80, icon: "assets/icons/leaf.png", colorHex: 0xFF4CAF50
-        ),
+            value: (data["nitrogen"] ?? 0).toDouble(),
+            label: "Nitrogen",
+            unit: "mg/kg",
+            minNormal: 20,
+            maxNormal: 80,
+            icon: "assets/icons/leaf.png",
+            colorHex: 0xFF4CAF50),
         SensorReading(
-          value: (data["phosphorus"] ?? 0).toDouble(), label: "P", unit: "mg/kg", minNormal: 15, maxNormal: 60, icon: "assets/icons/root.png", colorHex: 0xFF2196F3
-        ),
+            value: (data["phosphorus"] ?? 0).toDouble(),
+            label: "Phosporus",
+            unit: "mg/kg",
+            minNormal: 15,
+            maxNormal: 60,
+            icon: "assets/icons/root.png",
+            colorHex: 0xFF2196F3),
         SensorReading(
-          value: (data["potassium"] ?? 0).toDouble(), label: "K", unit: "mg/kg", minNormal: 20, maxNormal: 100, icon: "assets/icons/crop.png", colorHex: 0xFFFF9800
-        ),
+            value: (data["potassium"] ?? 0).toDouble(),
+            label: "Potassium",
+            unit: "mg/kg",
+            minNormal: 20,
+            maxNormal: 100,
+            icon: "assets/icons/crop.png",
+            colorHex: 0xFFFF9800),
         SensorReading(
-          value: (data["ph"] ?? 0).toDouble(), label: "pH", unit: "pH", minNormal: 6.0, maxNormal: 7.5, icon: "assets/icons/ph.png", colorHex: 0xFF9E9E9E
-        ),
+            value: (data["ph"] ?? 0).toDouble(),
+            label: "pH Level",
+            unit: "pH",
+            minNormal: 6.0,
+            maxNormal: 7.5,
+            icon: "assets/icons/ph.png",
+            colorHex: 0xFF9E9E9E),
         SensorReading(
-          value: (data["humidity"] ?? 0).toDouble(), label: "H", unit: "%", minNormal: 40, maxNormal: 80, icon: "assets/icons/water.png", colorHex: 0xFF2196F3
-        ),
+            value: (data["humidity"] ?? 0).toDouble(),
+            label: "Soil Moisture",
+            unit: "%",
+            minNormal: 40,
+            maxNormal: 80,
+            icon: "assets/icons/water.png",
+            colorHex: 0xFF2196F3),
         SensorReading(
-          value: (data["temperature"] ?? 0).toDouble(), label: "T", unit: "°C", minNormal: 15, maxNormal: 30, icon: "assets/icons/temp.png", colorHex: 0xFFF44336
-        ),
+            value: (data["temperature"] ?? 0).toDouble(),
+            label: "Temperature",
+            unit: "°C",
+            minNormal: 15,
+            maxNormal: 30,
+            icon: "assets/icons/temp.png",
+            colorHex: 0xFFF44336),
       ];
 
       // update chart history
@@ -85,7 +176,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     super.initState();
     _readings = [];
 
+    initConnectivity();
     initMQTT();
+    startConnectionMonitor();
 
     _animController = AnimationController(
       vsync: this,
@@ -102,6 +195,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     sensorSub?.cancel();
+    connectivitySub.cancel();
+    connectionTimer?.cancel();
     _animController.dispose();
     super.dispose();
   }
@@ -116,7 +211,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           slivers: [
             // ─── Gradient App Bar ────────────────────────────────────────────
             SliverAppBar(
-              expandedHeight: 160,
+              expandedHeight: 220,
               pinned: true,
               backgroundColor: AppTheme.primaryGreen,
               flexibleSpace: FlexibleSpaceBar(
@@ -124,105 +219,155 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   decoration: const BoxDecoration(
                     gradient: AppTheme.headerGradient,
                   ),
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ─── Top row ──────────────────────────────────────
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Stack(
+                    children: [
+                      // ─── Watermark background logo (center, very transparent) ──
+                      Positioned.fill(
+                        child: Align(
+                          alignment:
+                              const Alignment(0, 1), // 0.3 = agak ke bawah
+                          child: Opacity(
+                            opacity: 0.06,
+                            child: Image.asset(
+                              'assets/images/w_nutrixense_cropped.png',
+                              width: 280,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // ─── Foreground content ──────────────────────────────
+                      SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              // ─── Top row: Logo + App Name | WiFi Icon ────
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    'Good Morning 🌱',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.8),
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w400,
-                                    ),
+                                  // Logo dari assets + App Name
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      Image.asset(
+                                        'assets/images/w_nutrixense.png',
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.contain,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      const Text(
+                                        'NutriXense',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.3,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const Text(
-                                    'NutriXense',
-                                    style: TextStyle(
+
+                                  // WiFi Status Icon
+                                  AnimatedSwitcher(
+                                    duration: Duration(milliseconds: 300),
+                                    transitionBuilder: (child, animation) =>
+                                        ScaleTransition(scale: animation, child: child),
+                                    child: Icon(
+                                      isFullyConnected ? Icons.wifi : Icons.wifi_off,
+                                      key: ValueKey(isFullyConnected),
                                       color: Colors.white,
-                                      fontSize: 26,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.5,
+                                      size: 26,
                                     ),
-                                  ),
+                                  )
                                 ],
                               ),
-                              // Live badge
+
+                              const SizedBox(height: 16),
+
+                              // ─── Greeting ─────────────────────────────────
+                              Text(
+                                'Good Morning,',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.95),
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+
+                              const SizedBox(height: 16),
+
+                              // ─── STATS BOX (Rounded White Border) ─────────
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
+                                width: double.infinity,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
-                                    color: Colors.white.withOpacity(0.3),
+                                    color: Colors.white,
+                                    width: 2,
                                   ),
                                 ),
                                 child: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
                                   children: [
-                                    Container(
-                                      width: 7,
-                                      height: 7,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF69F0AE),
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    const Text(
-                                      'Live',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                                    _statItem('6', 'Sensors'),
+                                    _divider(),
+                                    _statItem('4', 'Alerts'),
+                                    _divider(),
+                                    _statItem('3', 'Pumps'),
                                   ],
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 14),
-
-                          // ─── Quick stats row ──────────────────────────────
-                          Row(
-                            children: [
-                              _quickStat('6', 'Sensors'),
-                              const SizedBox(width: 20),
-                              _quickStat('3', 'Alerts'),
-                              const SizedBox(width: 20),
-                              _quickStat('3', 'Pumps'),
-                            ],
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),
             ),
 
+            // ─── Panel putih dengan rounded corners kiri-kanan atas ──────────
+            SliverToBoxAdapter(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(28),
+                    topRight: Radius.circular(28),
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 10,
+                      offset: Offset(0, -3),
+                    ),
+                  ],
+                ),
+                child: const SizedBox(height: 20),
+              ),
+            ),
+
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   // ─── Real-time chart ──────────────────────────────────────
                   _buildRealTimeChart(),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 40),
 
                   // ─── Sensor grid ──────────────────────────────────────────
                   const SectionHeader(title: 'Sensor Readings'),
-                  const SizedBox(height: 14),
                   GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -256,34 +401,42 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // ─── Quick stat pill ─────────────────────────────────────────────────────────
-  Widget _quickStat(String value, String label) {
+  // ─── Vertical divider antar stat item ────────────────────────────────────────
+  Widget _divider() {
+    return Container(
+      width: 1,
+      height: 36,
+      color: Colors.white.withOpacity(0.4),
+    );
+  }
+
+  // ─── Stat item for bordered box ─────────────────────────────────────────────
+  Widget _statItem(String value, String label) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           value,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
           ),
         ),
+        const SizedBox(height: 4),
         Text(
           label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.7),
-            fontSize: 11,
-            fontWeight: FontWeight.w400,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
           ),
         ),
       ],
     );
   }
 
-  // ─── Real-time trend chart (NPK + pH) ────────────────────────────────────────
+  // ─── Real-time trend chart (NPK) ─────────────────────────────────────────────
   Widget _buildRealTimeChart() {
-
     List<FlSpot> toSpots(List<double> vals) {
       return List.generate(
         vals.length,

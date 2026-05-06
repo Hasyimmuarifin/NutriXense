@@ -24,9 +24,9 @@ class SectionHeader extends StatelessWidget {
         Text(
           title,
           style: const TextStyle(
-            fontSize: 16,
+            fontSize: 20,
             fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimary,
+            color: Color(0xFF37909D),
           ),
         ),
         if (actionLabel != null)

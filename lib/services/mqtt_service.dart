@@ -9,6 +9,7 @@ class MQTTService {
   late MqttServerClient client;
   final _sensorStreamController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get sensorStream => _sensorStreamController.stream;
+  Function(bool)? onConnectionChanged;
 
   Map<String, dynamic> parseMessage(String message) {
     try {
@@ -29,6 +30,9 @@ class MQTTService {
     client.securityContext = SecurityContext.defaultContext;
 
     client.keepAlivePeriod = 20;
+
+    client.autoReconnect = true;
+    client.resubscribeOnAutoReconnect = true;
 
     client.onConnected = onConnected;
     client.onDisconnected = onDisconnected;
@@ -84,10 +88,12 @@ class MQTTService {
   }
 
   void onConnected() {
+    onConnectionChanged?.call(true);
     print('MQTT Connected Callback');
   }
 
   void onDisconnected() {
+    onConnectionChanged?.call(false);
     print('MQTT Disconnected');
   }
 
