@@ -158,6 +158,14 @@ class _HomeScreenState extends State<HomeScreen>
             maxNormal: 30,
             icon: "assets/icons/temp.png",
             colorHex: 0xFFF44336),
+        SensorReading(
+            value: (data["ec"] ?? 0).toDouble(),
+            label: "Electrical Conductivity",
+            unit: "mS/cm",
+            minNormal: 1.0,
+            maxNormal: 3.0,
+            icon: "assets/icons/ec.png",
+            colorHex: 0xFF7C4DFF),
       ];
 
       // update chart history
@@ -378,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen>
                       mainAxisSpacing: 12,
                       childAspectRatio: 0.92,
                     ),
-                    itemCount: _readings.length,
+                    itemCount: _readings.length > 6 ? 6 : _readings.length,
                     itemBuilder: (context, index) {
                       return TweenAnimationBuilder<double>(
                         tween: Tween(begin: 0, end: 1),
@@ -392,6 +400,21 @@ class _HomeScreenState extends State<HomeScreen>
                       );
                     },
                   ),
+
+                  // ─── EC Card (full-width) ──────────────────────────────────
+                  if (_readings.length > 6) ...[
+                    const SizedBox(height: 12),
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: 1),
+                      duration: const Duration(milliseconds: 900),
+                      curve: Curves.easeOut,
+                      builder: (context, value, child) => Transform.scale(
+                        scale: 0.8 + 0.2 * value,
+                        child: Opacity(opacity: value, child: child),
+                      ),
+                      child: _buildECCard(_readings[6]),
+                    ),
+                  ],
                 ]),
               ),
             ),
@@ -541,6 +564,181 @@ class _HomeScreenState extends State<HomeScreen>
               _legend('Phosphorus', AppTheme.primaryBlue),
               const SizedBox(width: 16),
               _legend('Potassium', AppTheme.statusHigh),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildECCard(SensorReading reading) {
+    final color = Color(reading.colorHex);
+
+    Color statusColor;
+    IconData statusIcon;
+    switch (reading.status) {
+      case 'Low':
+        statusColor = AppTheme.statusLow;
+        statusIcon = Icons.arrow_downward_rounded;
+        break;
+      case 'High':
+        statusColor = AppTheme.statusHigh;
+        statusIcon = Icons.arrow_upward_rounded;
+        break;
+      default:
+        statusColor = AppTheme.statusNormal;
+        statusIcon = Icons.check_circle_rounded;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ─── Header: icon + label + status badge ───────────────────
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Image.asset(
+                    reading.icon,
+                    width: 22,
+                    height: 22,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      reading.label,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      reading.unit,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textLight,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Status badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 11, color: statusColor),
+                    const SizedBox(width: 3),
+                    Text(
+                      reading.status,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: statusColor,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
+          // ─── Value + progress bar ───────────────────────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${reading.value}',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  height: 1.0,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  reading.unit,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textLight,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          // ─── Progress bar (full width) ──────────────────────────────
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: reading.normalizedValue,
+              backgroundColor: color.withOpacity(0.1),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 6,
+            ),
+          ),
+
+          // ─── Min / Max label ────────────────────────────────────────
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Min ${reading.minNormal} ${reading.unit}',
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppTheme.textLight,
+                ),
+              ),
+              Text(
+                'Max ${reading.maxNormal} ${reading.unit}',
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppTheme.textLight,
+                ),
+              ),
             ],
           ),
         ],
