@@ -486,7 +486,7 @@ class _HomeScreenState extends State<HomeScreen>
           const SectionHeader(title: 'Real-Time Trends'),
           const SizedBox(height: 6),
           Text(
-            'NPK levels — past 24 hours',
+            'NPK levels over the last few hours',
             style: TextStyle(
               fontSize: 12,
               color: AppTheme.textLight,

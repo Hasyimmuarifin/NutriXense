@@ -4,7 +4,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import '../models/dummy_data.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
 
@@ -15,14 +16,14 @@ class HistoryScreen extends StatefulWidget {
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen>
-    with SingleTickerProviderStateMixin {
+class _HistoryScreenState extends State<HistoryScreen> {
   int _selectedFilter = 0; // 0=Today, 1=7 Days, 2=30 Days
   int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp
   late List<SensorDataPoint> _data;
 
   final List<String> _filters = ['Today', '7 Days', '30 Days'];
   final List<int> _filterDays = [1, 7, 30];
+  bool _isLoading = false;
 
   final List<Map<String, dynamic>> _sensors = [
     {'label': 'NPK', 'icon': Icons.eco_rounded},
@@ -34,11 +35,38 @@ class _HistoryScreenState extends State<HistoryScreen>
   @override
   void initState() {
     super.initState();
+    _data = [];
     _loadData();
   }
 
-  void _loadData() {
-    _data = DummyData.getHistoryData(days: _filterDays[_selectedFilter]);
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    try {
+      final now = DateTime.now();
+
+      final startDate = now.subtract(
+        Duration(days: _filterDays[_selectedFilter]),
+      );
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('sensor_history')
+          .where(
+            'timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
+          )
+          .orderBy('timestamp', descending: false)
+          .get();
+
+      setState(() {
+        _data = snapshot.docs
+            .map((doc) => SensorDataPoint.fromFirestore(doc))
+            .toList();
+      });
+    } catch (e) {
+      debugPrint('Firestore Error: $e');
+    }
+
+    setState(() => _isLoading = false);
   }
 
   // Build chart lines based on selected sensor
@@ -165,10 +193,13 @@ class _HistoryScreenState extends State<HistoryScreen>
                     _filters.length,
                     (i) => Expanded(
                       child: GestureDetector(
-                        onTap: () => setState(() {
-                          _selectedFilter = i;
-                          _loadData();
-                        }),
+                        onTap: () async {
+                          setState(() {
+                            _selectedFilter = i;
+                          });
+
+                          await _loadData();
+                        },
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
                           margin: EdgeInsets.only(right: i < _filters.length - 1 ? 8 : 0),
@@ -315,12 +346,12 @@ class _HistoryScreenState extends State<HistoryScreen>
                     children: [
                       SizedBox(
                         height: 220,
-                        child: LineChart(
+                        child: _isLoading ? const Center(child: CircularProgressIndicator(),) : _data.isEmpty ? const Center(child: Text('No history data', style: TextStyle( color: AppTheme.textSecondary,),),) : LineChart(
                           LineChartData(
                             gridData: FlGridData(
                               show: true,
                               drawVerticalLine: false,
-                              horizontalInterval: 20,
+                              horizontalInterval: _selectedSensor == 1 ? 1 : 20,
                               getDrawingHorizontalLine: (_) => FlLine(
                                 color: Colors.grey.withOpacity(0.1),
                                 strokeWidth: 1,
@@ -348,8 +379,11 @@ class _HistoryScreenState extends State<HistoryScreen>
                                 sideTitles: SideTitles(
                                   showTitles: true,
                                   reservedSize: 24,
-                                  interval: (_data.length / 4).ceil().toDouble(),
+                                  interval: _data.isEmpty ? 1 : (_data.length / 4).ceil().toDouble(),
                                   getTitlesWidget: (v, _) {
+                                    if (_data.isEmpty) {
+                                      return const SizedBox();
+                                    }
                                     final idx = v.toInt().clamp(0, _data.length - 1);
                                     return Padding(
                                       padding: const EdgeInsets.only(top: 6),
@@ -433,7 +467,10 @@ class _HistoryScreenState extends State<HistoryScreen>
 
   Widget _buildDataTable() {
     // Show last 8 data points
-    final recent = _data.reversed.take(8).toList();
+    final recent = [..._data]
+      ..sort((a, b) => b.time.compareTo(a.time));
+
+    final displayed = recent.take(8).toList();
 
     return Container(
       decoration: BoxDecoration(
@@ -482,7 +519,7 @@ class _HistoryScreenState extends State<HistoryScreen>
             ),
           ),
           // Rows
-          ...recent.asMap().entries.map((entry) {
+          ...displayed.asMap().entries.map((entry) {
             final d = entry.value;
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

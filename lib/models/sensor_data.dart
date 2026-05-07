@@ -37,23 +37,37 @@ class SensorReading {
 
 /// Time-series data point for history charts
 class SensorDataPoint {
-  final DateTime time;
   final double nitrogen;
   final double phosphorus;
   final double potassium;
   final double ph;
   final double moisture;
   final double temperature;
+  final DateTime time;
 
   const SensorDataPoint({
-    required this.time,
     required this.nitrogen,
     required this.phosphorus,
     required this.potassium,
     required this.ph,
     required this.moisture,
     required this.temperature,
+    required this.time,
   });
+
+  factory SensorDataPoint.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+
+    return SensorDataPoint(
+      nitrogen: (data['nitrogen'] ?? 0).toDouble(),
+      phosphorus: (data['phosphorus'] ?? 0).toDouble(),
+      potassium: (data['potassium'] ?? 0).toDouble(),
+      ph: (data['ph'] ?? 0).toDouble(),
+      moisture: (data['moisture'] ?? 0).toDouble(),
+      temperature: (data['temperature'] ?? 0).toDouble(),
+      time: (data['timestamp'] as Timestamp).toDate(),
+    );
+  }
 }
 
 /// AI Insight recommendation model
