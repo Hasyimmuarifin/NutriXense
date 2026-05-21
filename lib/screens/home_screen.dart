@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen>
     "phosphorus",
     "potassium",
     "ph",
-    "humidity",
+    "moisture",
     "temperature",
     "ec"
   ];
@@ -118,6 +118,88 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  void initializeDefaultReadings() {
+    _readings = [
+      SensorReading(
+        value: 0,
+        label: "Nitrogen",
+        unit: "mg/kg",
+        minValue: 0,
+        maxValue: 150,
+        minNormal: 20,
+        maxNormal: 80,
+        icon: "assets/icons/leaf.png",
+        colorHex: 0xFF4CAF50,
+      ),
+      SensorReading(
+        value: 0,
+        label: "Phosphorus",
+        unit: "mg/kg",
+        minValue: 0,
+        maxValue: 100,
+        minNormal: 15,
+        maxNormal: 60,
+        icon: "assets/icons/root.png",
+        colorHex: 0xFF2196F3,
+      ),
+      SensorReading(
+        value: 0,
+        label: "Potassium",
+        unit: "mg/kg",
+        minValue: 0,
+        maxValue: 150,
+        minNormal: 20,
+        maxNormal: 100,
+        icon: "assets/icons/crop.png",
+        colorHex: 0xFFFF9800,
+      ),
+      SensorReading(
+        value: 0,
+        label: "pH Level",
+        unit: "pH",
+        minValue: 3,
+        maxValue: 10,
+        minNormal: 6.0,
+        maxNormal: 7.5,
+        icon: "assets/icons/ph.png",
+        colorHex: 0xFF9E9E9E,
+      ),
+      SensorReading(
+        value: 0,
+        label: "Soil Moisture",
+        unit: "%",
+        minValue: 0,
+        maxValue: 100,
+        minNormal: 40,
+        maxNormal: 80,
+        icon: "assets/icons/water.png",
+        colorHex: 0xFF2196F3,
+      ),
+      SensorReading(
+        value: 0,
+        label: "Temperature",
+        unit: "°C",
+        minValue: 0,
+        maxValue: 50,
+        minNormal: 15,
+        maxNormal: 30,
+        icon: "assets/icons/temp.png",
+        colorHex: 0xFFF44336,
+      ),
+      SensorReading(
+        value: 0,
+        label: "Electrical Conductivity",
+        unit: "mS/cm",
+        minValue: 0,
+        maxValue: 5,
+        minNormal: 1.0,
+        maxNormal: 3.0,
+        icon: "assets/icons/ec.png",
+        colorHex: 0xFF7C4DFF,
+      ),
+    ];
+  }
+
   void updateSensorData(Map<String, dynamic> data) {
     if (!mounted) return;
 
@@ -129,6 +211,8 @@ class _HomeScreenState extends State<HomeScreen>
             value: (data["nitrogen"] ?? 0).toDouble(),
             label: "Nitrogen",
             unit: "mg/kg",
+            minValue: 0,
+            maxValue: 150,
             minNormal: 20,
             maxNormal: 80,
             icon: "assets/icons/leaf.png",
@@ -137,6 +221,8 @@ class _HomeScreenState extends State<HomeScreen>
             value: (data["phosphorus"] ?? 0).toDouble(),
             label: "Phosporus",
             unit: "mg/kg",
+            minValue: 0,
+            maxValue: 100,
             minNormal: 15,
             maxNormal: 60,
             icon: "assets/icons/root.png",
@@ -145,6 +231,8 @@ class _HomeScreenState extends State<HomeScreen>
             value: (data["potassium"] ?? 0).toDouble(),
             label: "Potassium",
             unit: "mg/kg",
+            minValue: 0,
+            maxValue: 150,
             minNormal: 20,
             maxNormal: 100,
             icon: "assets/icons/crop.png",
@@ -153,14 +241,18 @@ class _HomeScreenState extends State<HomeScreen>
             value: (data["ph"] ?? 0).toDouble(),
             label: "pH Level",
             unit: "pH",
+            minValue: 3,
+            maxValue: 10,
             minNormal: 6.0,
             maxNormal: 7.5,
             icon: "assets/icons/ph.png",
             colorHex: 0xFF9E9E9E),
         SensorReading(
-            value: (data["humidity"] ?? 0).toDouble(),
+            value: (data["moisture"] ?? 0).toDouble(),
             label: "Soil Moisture",
             unit: "%",
+            minValue: 0,
+            maxValue: 100,
             minNormal: 40,
             maxNormal: 80,
             icon: "assets/icons/water.png",
@@ -169,6 +261,8 @@ class _HomeScreenState extends State<HomeScreen>
             value: (data["temperature"] ?? 0).toDouble(),
             label: "Temperature",
             unit: "°C",
+            minValue: 0,
+            maxValue: 50,
             minNormal: 15,
             maxNormal: 30,
             icon: "assets/icons/temp.png",
@@ -177,6 +271,8 @@ class _HomeScreenState extends State<HomeScreen>
             value: (data["ec"] ?? 0).toDouble(),
             label: "Electrical Conductivity",
             unit: "mS/cm",
+            minValue: 0,
+            maxValue: 5,
             minNormal: 1.0,
             maxNormal: 3.0,
             icon: "assets/icons/ec.png",
@@ -197,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
-    _readings = [];
+    initializeDefaultReadings();
 
     initConnectivity();
     initMQTT();
@@ -297,20 +393,69 @@ class _HomeScreenState extends State<HomeScreen>
                                     ],
                                   ),
 
-                                  // WiFi Status Icon
-                                  AnimatedSwitcher(
-                                    duration: Duration(milliseconds: 300),
-                                    transitionBuilder: (child, animation) =>
-                                        ScaleTransition(
-                                            scale: animation, child: child),
-                                    child: Icon(
-                                      isFullyConnected
-                                          ? Icons.wifi
-                                          : Icons.wifi_off,
-                                      key: ValueKey(isFullyConnected),
-                                      color: Colors.white,
-                                      size: 26,
-                                    ),
+                                  // ─── MQTT Badge + WiFi Icon ───────────────────────
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Small MQTT Badge
+                                      AnimatedContainer(
+                                        duration: const Duration(milliseconds: 300),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isMqttConnected
+                                              ? Colors.green
+                                              : Colors.orange,
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isMqttConnected
+                                                  ? Icons.check_circle
+                                                  : Icons.access_time_rounded,
+                                              color: Colors.white,
+                                              size: 10,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              isMqttConnected
+                                                  ? "LIVE"
+                                                  : "WAIT",
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 0.3,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+
+                                      const SizedBox(width: 8),
+
+                                      // WiFi Icon
+                                      AnimatedSwitcher(
+                                        duration: const Duration(milliseconds: 300),
+                                        transitionBuilder: (child, animation) =>
+                                            ScaleTransition(
+                                          scale: animation,
+                                          child: child,
+                                        ),
+                                        child: Icon(
+                                          isFullyConnected
+                                              ? Icons.wifi
+                                              : Icons.wifi_off,
+                                          key: ValueKey(isFullyConnected),
+                                          color: Colors.white,
+                                          size: 24,
+                                        ),
+                                      ),
+                                    ],
                                   )
                                 ],
                               ),
@@ -394,7 +539,9 @@ class _HomeScreenState extends State<HomeScreen>
 
                   // ─── Sensor grid ──────────────────────────────────────────
                   const SectionHeader(title: 'Sensor Readings'),
+                  const SizedBox(height: 20),
                   GridView.builder(
+                    padding: EdgeInsets.zero,
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     gridDelegate:
@@ -488,13 +635,22 @@ class _HomeScreenState extends State<HomeScreen>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+
+        // Border tipis modern
+        border: Border.all(
+          color: Colors.black.withOpacity(0.05),
+          width: 1,
+        ),
+
+        // Shadow lebih realistis
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primaryGreen.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 18,
+            spreadRadius: 2,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -590,49 +746,71 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildECCard(SensorReading reading) {
-    final color = Color(reading.colorHex);
+    final sensorColor = Color(reading.colorHex);
 
+    // ─── Dynamic UI based on status (SAMA seperti SensorCard) ───
+    Color borderColor;
     Color statusColor;
     IconData statusIcon;
+    Color backgroundTint;
+
     switch (reading.status) {
       case 'Low':
+        borderColor = AppTheme.statusLow;
         statusColor = AppTheme.statusLow;
         statusIcon = Icons.arrow_downward_rounded;
+        backgroundTint = AppTheme.statusLow.withOpacity(0.005);
         break;
+
       case 'High':
+        borderColor = AppTheme.statusHigh;
         statusColor = AppTheme.statusHigh;
         statusIcon = Icons.arrow_upward_rounded;
+        backgroundTint = AppTheme.statusHigh.withOpacity(0.005);
         break;
+
       default:
+        borderColor = AppTheme.statusNormal;
         statusColor = AppTheme.statusNormal;
         statusIcon = Icons.check_circle_rounded;
+        backgroundTint = AppTheme.statusNormal.withOpacity(0.005);
     }
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: AppTheme.bgCard,
+        color: backgroundTint,
+
         borderRadius: BorderRadius.circular(20),
+
+        // ─── BORDER mengikuti status ───
+        border: Border.all(
+          color: borderColor.withOpacity(0.25),
+          width: 1.2,
+        ),
+
+        // ─── shadow dibuat lebih soft (tidak “glow berlebihan”) ───
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.12),
-            blurRadius: 16,
+            color: borderColor.withOpacity(0.06),
+            blurRadius: 10,
             offset: const Offset(0, 4),
           ),
         ],
       ),
+
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─── Header: icon + label + status badge ───────────────────
+          // HEADER
           Row(
             children: [
               Container(
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: sensorColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
@@ -644,34 +822,38 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
               ),
+
               const SizedBox(width: 12),
+
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       reading.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textSecondary,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.black87,
+                        letterSpacing: 0.2,
                       ),
                     ),
                     Text(
                       reading.unit,
                       style: const TextStyle(
                         fontSize: 11,
-                        color: AppTheme.textLight,
+                        color: Colors.black54,
                       ),
                     ),
                   ],
                 ),
               ),
 
-              // Status badge
+              // STATUS BADGE (tetap konsisten)
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -698,43 +880,35 @@ class _HomeScreenState extends State<HomeScreen>
 
           const SizedBox(height: 14),
 
-          // ─── Value + progress bar ───────────────────────────────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${reading.value}',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                  color: color,
-                  height: 1.0,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  reading.unit,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.textLight,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
+          // VALUE
+          Text(
+            '${reading.value}',
+            style: TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              color: sensorColor,
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          Text(
+            reading.unit,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.black54,
+            ),
           ),
 
           const SizedBox(height: 10),
 
-          // ─── Progress bar (full width) ──────────────────────────────
+          // PROGRESS
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: reading.normalizedValue,
-              backgroundColor: color.withOpacity(0.1),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
+              backgroundColor: sensorColor.withOpacity(0.10),
+              valueColor: AlwaysStoppedAnimation<Color>(sensorColor),
               minHeight: 6,
             ),
           ),

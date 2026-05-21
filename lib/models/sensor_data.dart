@@ -7,6 +7,8 @@ class SensorReading {
   final String label;
   final String unit;
   final double value;
+  final double minValue;
+  final double maxValue;
   final double minNormal;
   final double maxNormal;
   final String icon;
@@ -16,6 +18,8 @@ class SensorReading {
     required this.label,
     required this.unit,
     required this.value,
+    required this.minValue,
+    required this.maxValue,
     required this.minNormal,
     required this.maxNormal,
     required this.icon,
@@ -30,9 +34,9 @@ class SensorReading {
   }
 
   double get normalizedValue {
-    final range = maxNormal - minNormal;
+    final range = maxValue - minValue;
     if (range == 0) return 0;
-    return ((value - minNormal) / range).clamp(0, 1);
+    return ((value - minValue) / range).clamp(0.0, 1.0);
   }
 }
 
