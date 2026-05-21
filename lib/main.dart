@@ -9,7 +9,6 @@ import 'theme/app_theme.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
-import 'screens/scan_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/control_screen.dart';
 
@@ -60,7 +59,6 @@ class _MainNavigationState extends State<MainNavigation> with SingleTickerProvid
   final List<Widget> _screens = const [
     HomeScreen(),
     HistoryScreen(),
-    ScanScreen(),
     InsightsScreen(),
     ControlScreen(),
   ];
@@ -73,11 +71,6 @@ class _MainNavigationState extends State<MainNavigation> with SingleTickerProvid
     NavigationDestination(
       icon: Icon(Icons.bar_chart_outlined),
       label: 'History'
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.document_scanner_outlined),
-      selectedIcon: Icon(Icons.document_scanner_rounded),
-      label: 'Scan'
     ),
     NavigationDestination(
       icon: Icon(Icons.lightbulb_outlined),
@@ -109,57 +102,7 @@ class _MainNavigationState extends State<MainNavigation> with SingleTickerProvid
           setState(() => _currentIndex = index);
         },
         animationDuration: const Duration(milliseconds: 400),
-        destinations: _destinations.asMap().entries.map((entry) {
-          final i = entry.key;
-          final dest = entry.value;
-
-          // Highlight the center Scan button differently
-          if (i == 2) {
-            return NavigationDestination(
-              icon: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  gradient: AppTheme.cardGradient,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryGreen.withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.document_scanner_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              selectedIcon: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  gradient: AppTheme.cardGradient,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryGreen.withOpacity(0.45),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.document_scanner_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              label: 'Scan',
-            );
-          }
-
-          return dest;
-        }).toList(),
+        destinations: _destinations,
       ),
     );
   }

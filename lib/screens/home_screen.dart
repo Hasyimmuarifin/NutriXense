@@ -235,8 +235,8 @@ class _HomeScreenState extends State<HomeScreen>
             // ─── Gradient App Bar ────────────────────────────────────────────
             SliverAppBar(
               expandedHeight: 220,
-              pinned: true,
-              backgroundColor: AppTheme.primaryGreen,
+              pinned: false,
+              backgroundColor: AppTheme.bgPrimary,
               flexibleSpace: FlexibleSpaceBar(
                 background: Container(
                   decoration: const BoxDecoration(
