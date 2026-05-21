@@ -20,6 +20,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
   int _selectedFilter = 0; // 0=Today, 1=7 Days, 2=30 Days
   int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp
   late List<SensorDataPoint> _data;
+  int _pageIndex = 0;
+  static const int _pageSize = 100;
+  static const int _maxPages = 100;
+
+  DocumentSnapshot? _lastDoc;
+  List<SensorDataPoint> _pageData = [];
+  final List<DocumentSnapshot> _pageCursors = [];
 
   final List<String> _filters = ['Today', '7 Days', '30 Days'];
   final List<int> _filterDays = [1, 7, 30];
@@ -46,6 +53,36 @@ class _HistoryScreenState extends State<HistoryScreen> {
         );
   }
 
+  Future<void> _loadPage() async {
+    final now = DateTime.now();
+    final startDate = now.subtract(Duration(days: _filterDays[_selectedFilter]));
+
+    Query query = FirebaseFirestore.instance
+        .collection('sensor_data')
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+        .orderBy('timestamp', descending: true)
+        .limit(_pageSize);
+
+    // pagination
+    if (_pageIndex > 0 && _pageCursors.length >= _pageIndex) {
+      query = query.startAfterDocument(_pageCursors[_pageIndex - 1]);
+    }
+
+    final snapshot = await query.get();
+    setState(() {
+      _pageData = snapshot.docs
+          .map((d) => SensorDataPoint.fromFirestore(d))
+          .toList();
+      if (snapshot.docs.isNotEmpty) {
+        if (_pageCursors.length <= _pageIndex) {
+          _pageCursors.add(snapshot.docs.last);
+        } else {
+          _pageCursors[_pageIndex] = snapshot.docs.last;
+        }
+      }
+    });
+  }
+
   final List<Map<String, dynamic>> _sensors = [
     {'label': 'NPK', 'icon': Icons.eco_rounded},
     {'label': 'pH', 'icon': Icons.science_rounded},
@@ -57,36 +94,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<LineChartBarData> get _chartLines {
     if (_data.isEmpty) return [];
 
-    List<FlSpot> toSpots(List<double> vals) {
+    double _xValueFromTime(DateTime time) {
+      if (_selectedFilter == 0) {
+        // Today → jam desimal (0–24)
+        return time.hour + (time.minute / 60.0);
+      }
+      return _data.indexOf(_data.firstWhere((d) => d.time == time)).toDouble();
+    }
+
+    List<FlSpot> toSpots(List<double> vals, List<DateTime> times) {
       return List.generate(
         vals.length,
-        (i) => FlSpot(i.toDouble(), vals[i]),
+        (i) => FlSpot(_xValueFromTime(times[i]), vals[i]),
       );
     }
 
     switch (_selectedSensor) {
       case 0: // NPK
         return [
-          _bar(toSpots(_data.map((d) => d.nitrogen).toList()),
+          _bar(toSpots(_data.map((d) => d.nitrogen).toList(), _data.map((d) => d.time).toList()),
               AppTheme.primaryGreen, 'N'),
-          _bar(toSpots(_data.map((d) => d.phosphorus).toList()),
+          _bar(toSpots(_data.map((d) => d.phosphorus).toList(), _data.map((d) => d.time).toList()),
               AppTheme.primaryBlue, 'P'),
-          _bar(toSpots(_data.map((d) => d.potassium).toList()),
+          _bar(toSpots(_data.map((d) => d.potassium).toList(), _data.map((d) => d.time).toList()),
               AppTheme.statusHigh, 'K'),
         ];
       case 1: // pH
         return [
-          _bar(toSpots(_data.map((d) => d.ph).toList()),
+          _bar(toSpots(_data.map((d) => d.ph).toList(), _data.map((d) => d.time).toList()),
               const Color(0xFF7B1FA2), 'pH'),
         ];
       case 2: // Moisture
         return [
-          _bar(toSpots(_data.map((d) => d.moisture).toList()),
+          _bar(toSpots(_data.map((d) => d.moisture).toList(), _data.map((d) => d.time).toList()),
               AppTheme.lightBlue, 'Moisture'),
         ];
       case 3: // Temperature
         return [
-          _bar(toSpots(_data.map((d) => d.temperature).toList()),
+          _bar(toSpots(_data.map((d) => d.temperature).toList(), _data.map((d) => d.time).toList()),
               AppTheme.statusLow, 'Temp'),
         ];
       default:
@@ -180,7 +225,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         onTap: () {
                           setState(() {
                             _selectedFilter = i;
+                            _pageIndex = 0;
+                            _lastDoc = null;
                           });
+                          _loadPage();
                         },
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
@@ -402,21 +450,26 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     sideTitles: SideTitles(
                                       showTitles: true,
                                       reservedSize: 24,
-                                      interval: _data.isEmpty ? 1 : (_data.length / 4).ceil().toDouble(),
+                                      interval: _selectedFilter == 0 ? 3 : (_data.length / 4).ceilToDouble(),
                                       getTitlesWidget: (v, _) {
-                                        if (_data.isEmpty) {
-                                          return const SizedBox();
+                                        if (_data.isEmpty) return const SizedBox();
+
+                                        if (_selectedFilter == 0) {
+                                          // TODAY → tampilkan jam
+                                          final hour = v.toInt();
+                                          if (hour < 0 || hour > 24) return const SizedBox();
+
+                                          return Text(
+                                            '${hour.toString().padLeft(2, '0')}:00',
+                                            style: const TextStyle(fontSize: 9, color: AppTheme.textLight),
+                                          );
                                         }
+
+                                        // 7 & 30 days → tetap tanggal
                                         final idx = v.toInt().clamp(0, _data.length - 1);
-                                        return Padding(
-                                          padding: const EdgeInsets.only(top: 6),
-                                          child: Text(
-                                            DateFormat('d/M').format(_data[idx].time),
-                                            style: const TextStyle(
-                                              fontSize: 9,
-                                              color: AppTheme.textLight,
-                                            ),
-                                          ),
+                                        return Text(
+                                          DateFormat('d/M').format(_data[idx].time),
+                                          style: const TextStyle(fontSize: 9, color: AppTheme.textLight),
                                         );
                                       },
                                     ),
@@ -492,10 +545,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildDataTable() {
     // Show last 8 data points
-    final recent = [..._data]
+    final recent = [..._pageData]
       ..sort((a, b) => b.time.compareTo(a.time));
 
-    final displayed = recent.take(8).toList();
+    final displayed = recent.take(_pageSize).toList();
 
     return Container(
       decoration: BoxDecoration(
@@ -560,7 +613,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      DateFormat('HH:mm').format(d.time),
+                      DateFormat('dd/MM HH:mm').format(d.time),
                       style: const TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
@@ -585,6 +638,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
             );
           }),
           const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                onPressed: _pageIndex > 0
+                    ? () {
+                        setState(() {
+                          _pageIndex--;
+                          _lastDoc = null;
+                        });
+                        _loadPage();
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              Text('Page ${_pageIndex + 1} / $_maxPages'),
+              IconButton(
+                onPressed: _pageIndex < _maxPages - 1
+                    ? () {
+                        setState(() {
+                          _pageIndex++;
+                        });
+                        _loadPage();
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
         ],
       ),
     );
