@@ -1,5 +1,6 @@
 // lib/models/sensor_data.dart
 // Data models for all sensor readings in NutriXense
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Represents a single nutrient/sensor reading
 class SensorReading {
@@ -94,7 +95,7 @@ class PumpController {
   final String id;
   final String name;
   final String nutrient;
-  final String icon;
+  final String iconPath;
   bool isOn;
   bool isLoading;
 
@@ -102,7 +103,7 @@ class PumpController {
     required this.id,
     required this.name,
     required this.nutrient,
-    required this.icon,
+    required this.iconPath,
     this.isOn = false,
     this.isLoading = false,
   });

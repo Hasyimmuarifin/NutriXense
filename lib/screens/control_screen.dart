@@ -6,6 +6,7 @@ import '../models/dummy_data.dart';
 import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pump_card.dart';
+import '../services/mqtt_service.dart';
 
 class ControlScreen extends StatefulWidget {
   const ControlScreen({super.key});
@@ -16,19 +17,88 @@ class ControlScreen extends StatefulWidget {
 
 class _ControlScreenState extends State<ControlScreen> {
   late List<PumpController> _pumps;
+  final MQTTService mqttService = MQTTService();
 
   @override
   void initState() {
     super.initState();
     _pumps = DummyData.getPumps();
+    mqttService.init();
+  }
+
+  Future<void> _wateringPump() async {
+    try {
+      // Relay 4 = Pompa Air
+      const waterRelay = 4;
+
+      // ON pompa air
+      mqttService.publishRelay(waterRelay, false);
+
+      _showWaterSnackBar(true);
+
+      // Durasi penyiraman
+      await Future.delayed(const Duration(seconds: 5));
+
+      // OFF pompa air
+      mqttService.publishRelay(waterRelay, true);
+
+      _showWaterSnackBar(false);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Water irrigation failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showWaterSnackBar(bool started) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              started
+                  ? Icons.water_drop_rounded
+                  : Icons.water_damage_outlined,
+              color: Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              started
+                  ? 'Water irrigation started'
+                  : 'Water irrigation completed',
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: AppTheme.primaryBlue,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   // Toggle pump with simulated network delay
   Future<void> _togglePump(int index, bool value) async {
-    setState(() => _pumps[index].isLoading = true);
+    setState(() {
+      _pumps[index].isLoading = true;
+    });
 
-    // Simulate IoT command delay (e.g. MQTT publish)
-    await Future.delayed(const Duration(milliseconds: 1800));
+    // Relay 1-4
+    final relayNumber = index + 1;
+    // Publish MQTT Command
+    mqttService.setRelay(relayNumber, value);
+    // Small delay for animation
+    await Future.delayed(const Duration(milliseconds: 500));
 
     if (mounted) {
       setState(() {
@@ -60,7 +130,7 @@ class _ControlScreenState extends State<ControlScreen> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 0, milliseconds: 500),
       ),
     );
   }
@@ -131,10 +201,6 @@ class _ControlScreenState extends State<ControlScreen> {
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // ─── System status card ───────────────────────────────────────
-                _buildSystemStatus(),
-                const SizedBox(height: 20),
-
                 // ─── Pump cards ───────────────────────────────────────────────
                 const Text(
                   'Nutrient Pumps',
@@ -158,12 +224,12 @@ class _ControlScreenState extends State<ControlScreen> {
                 }),
                 const SizedBox(height: 8),
 
+                // ─── Water Irrigation Button ──────────────────────────────────
+                _buildWateringButton(),
+                const SizedBox(height: 14),
+
                 // ─── Emergency stop button ────────────────────────────────────
                 _buildEmergencyStop(),
-                const SizedBox(height: 20),
-
-                // ─── Schedule card ────────────────────────────────────────────
-                _buildScheduleCard(),
               ]),
             ),
           ),
@@ -172,102 +238,47 @@ class _ControlScreenState extends State<ControlScreen> {
     );
   }
 
-  Widget _buildSystemStatus() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryBlue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.router_rounded,
-                  size: 18,
-                  color: AppTheme.primaryBlue,
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'IoT Gateway',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  Text(
-                    'NutriXense Hub v1.0',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textLight,
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppTheme.statusNormal.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.statusNormal,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    const Text(
-                      'Connected',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.statusNormal,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+  Widget _buildWateringButton() {
+    return GestureDetector(
+      onTap: _wateringPump,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppTheme.primaryBlue,
+              AppTheme.primaryBlue.withOpacity(0.85),
             ],
           ),
-          const SizedBox(height: 14),
-          const Divider(height: 1),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              _statusItem('Signal', '98%', Icons.wifi_rounded, AppTheme.primaryGreen),
-              _statusItem('Latency', '12ms', Icons.speed_rounded, AppTheme.primaryBlue),
-              _statusItem('Uptime', '99.9%', Icons.timer_rounded, AppTheme.statusHigh),
-            ],
-          ),
-        ],
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryBlue.withOpacity(0.25),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.water_drop_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+            SizedBox(width: 10),
+            Text(
+              'Start Water Irrigation',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -343,78 +354,6 @@ class _ControlScreenState extends State<ControlScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildScheduleCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.schedule_rounded,
-                  size: 18, color: AppTheme.primaryGreen),
-              const SizedBox(width: 8),
-              const Text(
-                'Auto Schedule',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              Switch(
-                value: true,
-                onChanged: (_) {},
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...['Pump A — 06:00 AM, 5 min',
-              'Pump B — 08:00 AM, 3 min',
-              'Pump C — Paused (High K)']
-              .asMap()
-              .entries
-              .map((entry) {
-            final isLast = entry.key == 2;
-            return Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
-              child: Row(
-                children: [
-                  Icon(
-                    isLast ? Icons.pause_circle_outline_rounded : Icons.check_circle_outline_rounded,
-                    size: 14,
-                    color: isLast ? AppTheme.statusHigh : AppTheme.primaryGreen,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    entry.value,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isLast ? AppTheme.statusHigh : AppTheme.textSecondary,
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
       ),
     );
   }

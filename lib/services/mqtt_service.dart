@@ -87,6 +87,21 @@ class MQTTService {
     client.publishMessage(topic, MqttQos.exactlyOnce, builder.payload!);
   }
 
+  void setRelay(int relay, bool isOn) {
+    publishRelay(relay, !isOn);
+  }
+
+  void publishRelay(int relay, bool state) {
+
+    final payload = jsonEncode({
+      "relay$relay": state ? 1 : 0
+    });
+
+    publish("nutrixense/control", payload);
+
+    print("Relay Command Sent: $payload");
+  }
+
   void onConnected() {
     onConnectionChanged?.call(true);
     print('MQTT Connected Callback');

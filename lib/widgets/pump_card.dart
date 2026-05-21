@@ -28,9 +28,9 @@ class PumpCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isOn
-              ? AppTheme.primaryGreen.withOpacity(0.4)
+              ? AppTheme.primaryGreen.withOpacity(0.5)
               : Colors.transparent,
-          width: 1.5,
+          width: 3.5,
         ),
         boxShadow: [
           BoxShadow(
@@ -58,7 +58,12 @@ class PumpCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Center(
-                child: Text(pump.icon, style: const TextStyle(fontSize: 26)),
+                child: Image.asset(
+                  pump.iconPath,
+                  width: 30,
+                  height: 30,
+                  fit: BoxFit.contain,
+                ),
               ),
             ),
             const SizedBox(width: 16),

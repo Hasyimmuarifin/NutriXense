@@ -28,6 +28,20 @@ class _HomeScreenState extends State<HomeScreen>
   late final Animation<double> _fadeAnim;
   late StreamSubscription connectivitySub;
 
+  final sensorKeys = [
+    "nitrogen",
+    "phosphorus",
+    "potassium",
+    "ph",
+    "humidity",
+    "temperature",
+    "ec"
+  ];
+
+  int totalSensors = 0;
+  int totalAlerts = 0;
+  int totalPumps = 4;
+
   bool isInternetConnected = true;
   bool isMqttConnected = false;
   bool get isFullyConnected {
@@ -72,9 +86,9 @@ class _HomeScreenState extends State<HomeScreen>
     connectivitySub = Connectivity()
         .onConnectivityChanged
         .listen((List<ConnectivityResult> results) {
-        final hasInternet = results.any(
-          (r) => r != ConnectivityResult.none,
-        );
+      final hasInternet = results.any(
+        (r) => r != ConnectivityResult.none,
+      );
 
       setState(() {
         isInternetConnected = hasInternet;
@@ -108,6 +122,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (!mounted) return;
 
     setState(() {
+      totalSensors = sensorKeys.where((key) => data.containsKey(key)).length;
       // update cards
       _readings = [
         SensorReading(
@@ -286,9 +301,12 @@ class _HomeScreenState extends State<HomeScreen>
                                   AnimatedSwitcher(
                                     duration: Duration(milliseconds: 300),
                                     transitionBuilder: (child, animation) =>
-                                        ScaleTransition(scale: animation, child: child),
+                                        ScaleTransition(
+                                            scale: animation, child: child),
                                     child: Icon(
-                                      isFullyConnected ? Icons.wifi : Icons.wifi_off,
+                                      isFullyConnected
+                                          ? Icons.wifi
+                                          : Icons.wifi_off,
                                       key: ValueKey(isFullyConnected),
                                       color: Colors.white,
                                       size: 26,
@@ -327,11 +345,11 @@ class _HomeScreenState extends State<HomeScreen>
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceEvenly,
                                   children: [
-                                    _statItem('6', 'Sensors'),
+                                    _statItem('7', 'Sensors'),
                                     _divider(),
                                     _statItem('4', 'Alerts'),
                                     _divider(),
-                                    _statItem('3', 'Pumps'),
+                                    _statItem('4', 'Pumps'),
                                   ],
                                 ),
                               ),
@@ -652,7 +670,8 @@ class _HomeScreenState extends State<HomeScreen>
 
               // Status badge
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),

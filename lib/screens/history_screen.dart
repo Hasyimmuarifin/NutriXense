@@ -23,7 +23,28 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   final List<String> _filters = ['Today', '7 Days', '30 Days'];
   final List<int> _filterDays = [1, 7, 30];
-  bool _isLoading = false;
+
+  Stream<List<SensorDataPoint>> get _historyStream {
+    final now = DateTime.now();
+
+    final startDate = now.subtract(
+      Duration(days: _filterDays[_selectedFilter]),
+    );
+
+    return FirebaseFirestore.instance
+        .collection('sensor_data')
+        .where(
+          'timestamp',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
+        )
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => SensorDataPoint.fromFirestore(doc))
+              .toList(),
+        );
+  }
 
   final List<Map<String, dynamic>> _sensors = [
     {'label': 'NPK', 'icon': Icons.eco_rounded},
@@ -31,43 +52,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     {'label': 'Moisture', 'icon': Icons.water_drop_rounded},
     {'label': 'Temp', 'icon': Icons.thermostat_rounded},
   ];
-
-  @override
-  void initState() {
-    super.initState();
-    _data = [];
-    _loadData();
-  }
-
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
-    try {
-      final now = DateTime.now();
-
-      final startDate = now.subtract(
-        Duration(days: _filterDays[_selectedFilter]),
-      );
-
-      final snapshot = await FirebaseFirestore.instance
-          .collection('sensor_history')
-          .where(
-            'timestamp',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
-          )
-          .orderBy('timestamp', descending: false)
-          .get();
-
-      setState(() {
-        _data = snapshot.docs
-            .map((doc) => SensorDataPoint.fromFirestore(doc))
-            .toList();
-      });
-    } catch (e) {
-      debugPrint('Firestore Error: $e');
-    }
-
-    setState(() => _isLoading = false);
-  }
 
   // Build chart lines based on selected sensor
   List<LineChartBarData> get _chartLines {
@@ -193,12 +177,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     _filters.length,
                     (i) => Expanded(
                       child: GestureDetector(
-                        onTap: () async {
+                        onTap: () {
                           setState(() {
                             _selectedFilter = i;
                           });
-
-                          await _loadData();
                         },
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
@@ -232,207 +214,250 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                // ─── Sensor type selector ────────────────────────────────────
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: List.generate(
-                      _sensors.length,
-                      (i) => GestureDetector(
-                        onTap: () => setState(() => _selectedSensor = i),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          margin: const EdgeInsets.only(right: 10),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _selectedSensor == i
-                                ? AppTheme.primaryGreen.withOpacity(0.12)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _selectedSensor == i
-                                  ? AppTheme.primaryGreen
-                                  : Colors.grey.shade300,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _sensors[i]['icon'] as IconData,
-                                size: 15,
-                                color: _selectedSensor == i
-                                    ? AppTheme.primaryGreen
-                                    : AppTheme.textSecondary,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _sensors[i]['label'] as String,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: _selectedSensor == i
-                                      ? AppTheme.primaryGreen
-                                      : AppTheme.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
+            sliver: StreamBuilder<List<SensorDataPoint>>(
+              stream: _historyStream,
+              builder: (context, snapshot) {
+
+                // Loading
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const SliverFillRemaining(
+                    child: Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                // Error
+                if (snapshot.hasError) {
+                  return SliverFillRemaining(
+                    child: Center(
+                      child: Text(
+                        'Error: ${snapshot.error}',
+                      ),
+                    ),
+                  );
+                }
+
+                // Empty data
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const SliverFillRemaining(
+                    child: Center(
+                      child: Text(
+                        'No history data',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
                         ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 16),
+                  );
+                }
 
-                // ─── Stats row ───────────────────────────────────────────────
-                Row(
-                  children: _stats
-                      .map((s) => Expanded(
-                            child: Container(
-                              margin: EdgeInsets.only(
-                                  right: s != _stats.last ? 10 : 0),
-                              padding: const EdgeInsets.all(12),
+                // Update realtime data
+                _data = snapshot.data!;
+
+                return SliverList(
+                  delegate: SliverChildListDelegate([
+                    // ─── Sensor type selector ────────────────────────────────────
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: List.generate(
+                          _sensors.length,
+                          (i) => GestureDetector(
+                            onTap: () => setState(() => _selectedSensor = i),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              margin: const EdgeInsets.only(right: 10),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
-                                color: s.color.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(12),
+                                color: _selectedSensor == i
+                                    ? AppTheme.primaryGreen.withOpacity(0.12)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: _selectedSensor == i
+                                      ? AppTheme.primaryGreen
+                                      : Colors.grey.shade300,
+                                ),
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    s.label,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppTheme.textLight,
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                                  Icon(
+                                    _sensors[i]['icon'] as IconData,
+                                    size: 15,
+                                    color: _selectedSensor == i
+                                        ? AppTheme.primaryGreen
+                                        : AppTheme.textSecondary,
                                   ),
-                                  const SizedBox(height: 4),
+                                  const SizedBox(width: 6),
                                   Text(
-                                    s.value,
+                                    _sensors[i]['label'] as String,
                                     style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
-                                      color: s.color,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: _selectedSensor == i
+                                          ? AppTheme.primaryGreen
+                                          : AppTheme.textSecondary,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          ))
-                      .toList(),
-                ),
-                const SizedBox(height: 16),
-
-                // ─── Main chart ──────────────────────────────────────────────
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.bgCard,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 220,
-                        child: _isLoading ? const Center(child: CircularProgressIndicator(),) : _data.isEmpty ? const Center(child: Text('No history data', style: TextStyle( color: AppTheme.textSecondary,),),) : LineChart(
-                          LineChartData(
-                            gridData: FlGridData(
-                              show: true,
-                              drawVerticalLine: false,
-                              horizontalInterval: _selectedSensor == 1 ? 1 : 20,
-                              getDrawingHorizontalLine: (_) => FlLine(
-                                color: Colors.grey.withOpacity(0.1),
-                                strokeWidth: 1,
-                              ),
-                            ),
-                            titlesData: FlTitlesData(
-                              leftTitles: AxisTitles(
-                                sideTitles: SideTitles(
-                                  showTitles: true,
-                                  reservedSize: 36,
-                                  getTitlesWidget: (v, _) => Text(
-                                    v.toInt().toString(),
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      color: AppTheme.textLight,
-                                    ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // ─── Stats row ───────────────────────────────────────────────
+                    Row(
+                      children: _stats
+                          .map((s) => Expanded(
+                                child: Container(
+                                  margin: EdgeInsets.only(
+                                      right: s != _stats.last ? 10 : 0),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: s.color.withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        s.label,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppTheme.textLight,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        s.value,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: s.color,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ),
-                              rightTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false)),
-                              topTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false)),
-                              bottomTitles: AxisTitles(
-                                sideTitles: SideTitles(
-                                  showTitles: true,
-                                  reservedSize: 24,
-                                  interval: _data.isEmpty ? 1 : (_data.length / 4).ceil().toDouble(),
-                                  getTitlesWidget: (v, _) {
-                                    if (_data.isEmpty) {
-                                      return const SizedBox();
-                                    }
-                                    final idx = v.toInt().clamp(0, _data.length - 1);
-                                    return Padding(
-                                      padding: const EdgeInsets.only(top: 6),
-                                      child: Text(
-                                        DateFormat('d/M').format(_data[idx].time),
+                              ))
+                          .toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // ─── Main chart ──────────────────────────────────────────────
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.bgCard,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: 220,
+                            child: LineChart(
+                              LineChartData(
+                                gridData: FlGridData(
+                                  show: true,
+                                  drawVerticalLine: false,
+                                  horizontalInterval: _selectedSensor == 1 ? 1 : 20,
+                                  getDrawingHorizontalLine: (_) => FlLine(
+                                    color: Colors.grey.withOpacity(0.1),
+                                    strokeWidth: 1,
+                                  ),
+                                ),
+                                titlesData: FlTitlesData(
+                                  leftTitles: AxisTitles(
+                                    sideTitles: SideTitles(
+                                      showTitles: true,
+                                      reservedSize: 36,
+                                      getTitlesWidget: (v, _) => Text(
+                                        v.toInt().toString(),
                                         style: const TextStyle(
                                           fontSize: 9,
                                           color: AppTheme.textLight,
                                         ),
                                       ),
-                                    );
-                                  },
+                                    ),
+                                  ),
+                                  rightTitles: const AxisTitles(
+                                      sideTitles: SideTitles(showTitles: false)),
+                                  topTitles: const AxisTitles(
+                                      sideTitles: SideTitles(showTitles: false)),
+                                  bottomTitles: AxisTitles(
+                                    sideTitles: SideTitles(
+                                      showTitles: true,
+                                      reservedSize: 24,
+                                      interval: _data.isEmpty ? 1 : (_data.length / 4).ceil().toDouble(),
+                                      getTitlesWidget: (v, _) {
+                                        if (_data.isEmpty) {
+                                          return const SizedBox();
+                                        }
+                                        final idx = v.toInt().clamp(0, _data.length - 1);
+                                        return Padding(
+                                          padding: const EdgeInsets.only(top: 6),
+                                          child: Text(
+                                            DateFormat('d/M').format(_data[idx].time),
+                                            style: const TextStyle(
+                                              fontSize: 9,
+                                              color: AppTheme.textLight,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
                                 ),
+                                borderData: FlBorderData(show: false),
+                                lineTouchData: LineTouchData(
+                                  touchTooltipData: LineTouchTooltipData(
+                                    getTooltipColor: (_) => AppTheme.bgDark,
+                                    tooltipRoundedRadius: 8,
+                                  ),
+                                ),
+                                lineBarsData: _chartLines,
                               ),
                             ),
-                            borderData: FlBorderData(show: false),
-                            lineTouchData: LineTouchData(
-                              touchTooltipData: LineTouchTooltipData(
-                                getTooltipColor: (_) => AppTheme.bgDark,
-                                tooltipRoundedRadius: 8,
-                              ),
-                            ),
-                            lineBarsData: _chartLines,
                           ),
-                        ),
-                      ),
 
-                      // Legend
-                      if (_selectedSensor == 0) ...[
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _legend('Nitrogen', AppTheme.primaryGreen),
-                            const SizedBox(width: 16),
-                            _legend('Phosphorus', AppTheme.primaryBlue),
-                            const SizedBox(width: 16),
-                            _legend('Potassium', AppTheme.statusHigh),
+                          // Legend
+                          if (_selectedSensor == 0) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _legend('Nitrogen', AppTheme.primaryGreen),
+                                const SizedBox(width: 16),
+                                _legend('Phosphorus', AppTheme.primaryBlue),
+                                const SizedBox(width: 16),
+                                _legend('Potassium', AppTheme.statusHigh),
+                              ],
+                            ),
                           ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
-                // ─── Data table ──────────────────────────────────────────────
-                _buildDataTable(),
-              ]),
+                    // ─── Data table ──────────────────────────────────────────────
+                    _buildDataTable(),
+                  ]),
+                );
+              },
             ),
           ),
         ],
