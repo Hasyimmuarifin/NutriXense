@@ -44,7 +44,7 @@ class MQTTService {
   Future<void> connect() async {
     try {
       print('MQTT Connecting...');
-      await client.connect('hasyim', 'hasyimHiveMQTT#22');
+      await client.connect('hasyim', 'hasyimHiveMQTT@22');
     } catch (e) {
       print('MQTT Error: $e');
       client.disconnect();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_options.dart';
 
@@ -19,6 +20,10 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+  );
+
   runApp(const MyApp());
 }
 
@@ -29,19 +34,18 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NutriXense',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      home: FutureBuilder(
-        future: Future.delayed(Duration(seconds: 3)),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
-            return MainNavigation(); // halaman utama
-          }
-          return SplashScreen();
-        },
-      )
-    );
+        title: 'NutriXense',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        home: FutureBuilder(
+          future: Future.delayed(Duration(seconds: 3)),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.done) {
+              return MainNavigation(); // halaman utama
+            }
+            return SplashScreen();
+          },
+        ));
   }
 }
 
@@ -52,7 +56,8 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> with SingleTickerProviderStateMixin {
+class _MainNavigationState extends State<MainNavigation>
+    with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
 
   // Keep screens alive when switching tabs using IndexedStack
@@ -64,24 +69,17 @@ class _MainNavigationState extends State<MainNavigation> with SingleTickerProvid
   ];
 
   final List<NavigationDestination> _destinations = const [
+    NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
     NavigationDestination(
-      icon: Icon(Icons.home_rounded),
-      label: 'Home'
-    ),
+        icon: Icon(Icons.bar_chart_outlined), label: 'History'),
     NavigationDestination(
-      icon: Icon(Icons.bar_chart_outlined),
-      label: 'History'
-    ),
+        icon: Icon(Icons.lightbulb_outlined),
+        selectedIcon: Icon(Icons.lightbulb_rounded),
+        label: 'Insights'),
     NavigationDestination(
-      icon: Icon(Icons.lightbulb_outlined),
-      selectedIcon: Icon(Icons.lightbulb_rounded),
-      label: 'Insights'
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.toggle_off_outlined),
-      selectedIcon: Icon(Icons.toggle_on_rounded),
-      label: 'Control'
-    ),
+        icon: Icon(Icons.toggle_off_outlined),
+        selectedIcon: Icon(Icons.toggle_on_rounded),
+        label: 'Control'),
   ];
 
   @override

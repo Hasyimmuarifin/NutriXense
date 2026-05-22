@@ -1,6 +1,8 @@
 // lib/screens/history_screen.dart
 // Time-series chart screen – shows historical sensor data with filter tabs
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -19,48 +21,160 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   int _selectedFilter = 0; // 0=Today, 1=7 Days, 2=30 Days
   int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp
-  late List<SensorDataPoint> _data;
+  List<SensorDataPoint> _data = [];
   int _pageIndex = 0;
+  int _totalRows = 0;
   static const int _pageSize = 100;
-  static const int _maxPages = 100;
+  static const int _historyLimit = 300;
 
-  DocumentSnapshot? _lastDoc;
   List<SensorDataPoint> _pageData = [];
   final List<DocumentSnapshot> _pageCursors = [];
+  StreamSubscription<QuerySnapshot>? _latestSubscription;
+  bool _isLoadingHistory = true;
+  Object? _historyError;
 
   final List<String> _filters = ['Today', '7 Days', '30 Days'];
   final List<int> _filterDays = [1, 7, 30];
 
-  Stream<List<SensorDataPoint>> get _historyStream {
-    final now = DateTime.now();
+  int get _totalPages =>
+      _totalRows == 0 ? 1 : ((_totalRows - 1) ~/ _pageSize) + 1;
 
-    final startDate = now.subtract(
+  @override
+  void initState() {
+    super.initState();
+    _refreshHistory();
+  }
+
+  @override
+  void dispose() {
+    _latestSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshHistory() async {
+    await _latestSubscription?.cancel();
+    _latestSubscription = null;
+
+    setState(() {
+      _isLoadingHistory = true;
+      _historyError = null;
+      _data = [];
+      _pageData = [];
+      _pageIndex = 0;
+      _totalRows = 0;
+      _pageCursors.clear();
+    });
+
+    try {
+      await _loadInitialHistory();
+      await _loadTotalRows();
+      await _loadPage();
+      _listenForLatestHistory();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _historyError = e);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingHistory = false);
+      }
+    }
+  }
+
+  Query _historyBaseQuery() {
+    final startDate = DateTime.now().subtract(
       Duration(days: _filterDays[_selectedFilter]),
     );
 
-    return FirebaseFirestore.instance
-        .collection('sensor_data')
-        .where(
+    return FirebaseFirestore.instance.collection('sensor_data').where(
           'timestamp',
           isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
-        )
-        .orderBy('timestamp', descending: false)
-        .snapshots()
-        .map(
-          (snapshot) => snapshot.docs
-              .map((doc) => SensorDataPoint.fromFirestore(doc))
-              .toList(),
         );
   }
 
-  Future<void> _loadPage() async {
-    final now = DateTime.now();
-    final startDate = now.subtract(Duration(days: _filterDays[_selectedFilter]));
-
-    Query query = FirebaseFirestore.instance
-        .collection('sensor_data')
-        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+  Future<void> _loadInitialHistory() async {
+    final query = _historyBaseQuery()
         .orderBy('timestamp', descending: true)
+        .orderBy(FieldPath.documentId, descending: true)
+        .limit(_historyLimit)
+        .withConverter<SensorDataPoint>(
+          fromFirestore: (doc, _) => SensorDataPoint.fromFirestore(doc),
+          toFirestore: (_, __) => throw UnsupportedError(
+            'History screen does not write sensor data.',
+          ),
+        );
+
+    QuerySnapshot<SensorDataPoint>? snapshot;
+
+    try {
+      snapshot = await query.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      snapshot = null;
+    }
+
+    if (snapshot == null || snapshot.docs.isEmpty) {
+      snapshot = await query.get(const GetOptions(source: Source.server));
+    }
+
+    final points = snapshot.docs.map((doc) => doc.data()).toList()
+      ..sort((a, b) => a.time.compareTo(b.time));
+
+    if (!mounted) return;
+    setState(() => _data = points);
+  }
+
+  Future<void> _loadTotalRows() async {
+    final snapshot = await _historyBaseQuery().count().get();
+
+    if (!mounted) return;
+    setState(() => _totalRows = snapshot.count ?? 0);
+  }
+
+  void _listenForLatestHistory() {
+    final startAfter = _data.isNotEmpty
+        ? _data.last.time
+        : DateTime.now().subtract(Duration(days: _filterDays[_selectedFilter]));
+
+    _latestSubscription = FirebaseFirestore.instance
+        .collection('sensor_data')
+        .where(
+          'timestamp',
+          isGreaterThan: Timestamp.fromDate(startAfter),
+        )
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.docs.isEmpty || !mounted) return;
+
+      final latestPoints = snapshot.docs
+          .map((doc) => SensorDataPoint.fromFirestore(doc))
+          .toList();
+
+      setState(() {
+        _data = [..._data, ...latestPoints]
+          ..sort((a, b) => a.time.compareTo(b.time));
+        if (_data.length > _historyLimit) {
+          _data = _data.sublist(_data.length - _historyLimit);
+        }
+
+        _totalRows += latestPoints.length;
+        if (_pageIndex == 0) {
+          _pageData = [..._pageData, ...latestPoints]
+            ..sort((a, b) => b.time.compareTo(a.time));
+          if (_pageData.length > _pageSize) {
+            _pageData = _pageData.take(_pageSize).toList();
+          }
+        }
+      });
+    }, onError: (Object e) {
+      if (!mounted) return;
+      setState(() => _historyError = e);
+    });
+  }
+
+  Future<void> _loadPage() async {
+    Query query = _historyBaseQuery()
+        .orderBy('timestamp', descending: true)
+        .orderBy(FieldPath.documentId, descending: true)
         .limit(_pageSize);
 
     // pagination
@@ -69,10 +183,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     final snapshot = await query.get();
+    if (!mounted) return;
+
     setState(() {
-      _pageData = snapshot.docs
-          .map((d) => SensorDataPoint.fromFirestore(d))
-          .toList();
+      _pageData =
+          snapshot.docs.map((d) => SensorDataPoint.fromFirestore(d)).toList();
       if (snapshot.docs.isNotEmpty) {
         if (_pageCursors.length <= _pageIndex) {
           _pageCursors.add(snapshot.docs.last);
@@ -94,7 +209,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<LineChartBarData> get _chartLines {
     if (_data.isEmpty) return [];
 
-    double _xValueFromTime(DateTime time) {
+    double xValueFromTime(DateTime time) {
       if (_selectedFilter == 0) {
         // Today → jam desimal (0–24)
         return time.hour + (time.minute / 60.0);
@@ -105,34 +220,52 @@ class _HistoryScreenState extends State<HistoryScreen> {
     List<FlSpot> toSpots(List<double> vals, List<DateTime> times) {
       return List.generate(
         vals.length,
-        (i) => FlSpot(_xValueFromTime(times[i]), vals[i]),
+        (i) => FlSpot(xValueFromTime(times[i]), vals[i]),
       );
     }
 
     switch (_selectedSensor) {
       case 0: // NPK
         return [
-          _bar(toSpots(_data.map((d) => d.nitrogen).toList(), _data.map((d) => d.time).toList()),
-              AppTheme.primaryGreen, 'N'),
-          _bar(toSpots(_data.map((d) => d.phosphorus).toList(), _data.map((d) => d.time).toList()),
-              AppTheme.primaryBlue, 'P'),
-          _bar(toSpots(_data.map((d) => d.potassium).toList(), _data.map((d) => d.time).toList()),
-              AppTheme.statusHigh, 'K'),
+          _bar(
+              toSpots(_data.map((d) => d.nitrogen).toList(),
+                  _data.map((d) => d.time).toList()),
+              AppTheme.primaryGreen,
+              'N'),
+          _bar(
+              toSpots(_data.map((d) => d.phosphorus).toList(),
+                  _data.map((d) => d.time).toList()),
+              AppTheme.primaryBlue,
+              'P'),
+          _bar(
+              toSpots(_data.map((d) => d.potassium).toList(),
+                  _data.map((d) => d.time).toList()),
+              AppTheme.statusHigh,
+              'K'),
         ];
       case 1: // pH
         return [
-          _bar(toSpots(_data.map((d) => d.ph).toList(), _data.map((d) => d.time).toList()),
-              const Color(0xFF7B1FA2), 'pH'),
+          _bar(
+              toSpots(_data.map((d) => d.ph).toList(),
+                  _data.map((d) => d.time).toList()),
+              const Color(0xFF7B1FA2),
+              'pH'),
         ];
       case 2: // Moisture
         return [
-          _bar(toSpots(_data.map((d) => d.moisture).toList(), _data.map((d) => d.time).toList()),
-              AppTheme.lightBlue, 'Moisture'),
+          _bar(
+              toSpots(_data.map((d) => d.moisture).toList(),
+                  _data.map((d) => d.time).toList()),
+              AppTheme.lightBlue,
+              'Moisture'),
         ];
       case 3: // Temperature
         return [
-          _bar(toSpots(_data.map((d) => d.temperature).toList(), _data.map((d) => d.time).toList()),
-              AppTheme.statusLow, 'Temp'),
+          _bar(
+              toSpots(_data.map((d) => d.temperature).toList(),
+                  _data.map((d) => d.time).toList()),
+              AppTheme.statusLow,
+              'Temp'),
         ];
       default:
         return [];
@@ -188,7 +321,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final max = vals.reduce((a, b) => a > b ? a : b);
 
     return [
-      _StatItem('Avg', '${avg.toStringAsFixed(1)} $unit', AppTheme.primaryGreen),
+      _StatItem(
+          'Avg', '${avg.toStringAsFixed(1)} $unit', AppTheme.primaryGreen),
       _StatItem('Min', '${min.toStringAsFixed(1)} $unit', AppTheme.primaryBlue),
       _StatItem('Max', '${max.toStringAsFixed(1)} $unit', AppTheme.statusHigh),
     ];
@@ -223,16 +357,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     (i) => Expanded(
                       child: GestureDetector(
                         onTap: () {
-                          setState(() {
-                            _selectedFilter = i;
-                            _pageIndex = 0;
-                            _lastDoc = null;
-                          });
-                          _loadPage();
+                          if (_selectedFilter == i) return;
+                          setState(() => _selectedFilter = i);
+                          _refreshHistory();
                         },
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
-                          margin: EdgeInsets.only(right: i < _filters.length - 1 ? 8 : 0),
+                          margin: EdgeInsets.only(
+                              right: i < _filters.length - 1 ? 8 : 0),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           decoration: BoxDecoration(
                             color: _selectedFilter == i
@@ -262,256 +394,270 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-            sliver: StreamBuilder<List<SensorDataPoint>>(
-              stream: _historyStream,
-              builder: (context, snapshot) {
-
-                // Loading
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const SliverFillRemaining(
+            sliver: _isLoadingHistory
+                ? const SliverFillRemaining(
                     child: Center(
                       child: CircularProgressIndicator(),
                     ),
-                  );
-                }
-
-                // Error
-                if (snapshot.hasError) {
-                  return SliverFillRemaining(
-                    child: Center(
-                      child: Text(
-                        'Error: ${snapshot.error}',
-                      ),
-                    ),
-                  );
-                }
-
-                // Empty data
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const SliverFillRemaining(
-                    child: Center(
-                      child: Text(
-                        'No history data',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
+                  )
+                : _historyError != null
+                    ? SliverFillRemaining(
+                        child: Center(
+                          child: Text('Error: $_historyError'),
                         ),
-                      ),
-                    ),
-                  );
-                }
-
-                // Update realtime data
-                _data = snapshot.data!;
-
-                return SliverList(
-                  delegate: SliverChildListDelegate([
-                    // ─── Sensor type selector ────────────────────────────────────
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: List.generate(
-                          _sensors.length,
-                          (i) => GestureDetector(
-                            onTap: () => setState(() => _selectedSensor = i),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              margin: const EdgeInsets.only(right: 10),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: _selectedSensor == i
-                                    ? AppTheme.primaryGreen.withOpacity(0.12)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: _selectedSensor == i
-                                      ? AppTheme.primaryGreen
-                                      : Colors.grey.shade300,
+                      )
+                    : _data.isEmpty
+                        ? const SliverFillRemaining(
+                            child: Center(
+                              child: Text(
+                                'No history data',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
                                 ),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _sensors[i]['icon'] as IconData,
-                                    size: 15,
-                                    color: _selectedSensor == i
-                                        ? AppTheme.primaryGreen
-                                        : AppTheme.textSecondary,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    _sensors[i]['label'] as String,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: _selectedSensor == i
-                                          ? AppTheme.primaryGreen
-                                          : AppTheme.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ─── Stats row ───────────────────────────────────────────────
-                    Row(
-                      children: _stats
-                          .map((s) => Expanded(
-                                child: Container(
-                                  margin: EdgeInsets.only(
-                                      right: s != _stats.last ? 10 : 0),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: s.color.withOpacity(0.08),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        s.label,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: AppTheme.textLight,
-                                          fontWeight: FontWeight.w500,
+                          )
+                        : SliverList(
+                            delegate: SliverChildListDelegate([
+                              // ─── Sensor type selector ────────────────────────────────────
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: List.generate(
+                                    _sensors.length,
+                                    (i) => GestureDetector(
+                                      onTap: () =>
+                                          setState(() => _selectedSensor = i),
+                                      child: AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 250),
+                                        margin:
+                                            const EdgeInsets.only(right: 10),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: _selectedSensor == i
+                                              ? AppTheme.primaryGreen
+                                                  .withOpacity(0.12)
+                                              : Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          border: Border.all(
+                                            color: _selectedSensor == i
+                                                ? AppTheme.primaryGreen
+                                                : Colors.grey.shade300,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              _sensors[i]['icon'] as IconData,
+                                              size: 15,
+                                              color: _selectedSensor == i
+                                                  ? AppTheme.primaryGreen
+                                                  : AppTheme.textSecondary,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              _sensors[i]['label'] as String,
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                                color: _selectedSensor == i
+                                                    ? AppTheme.primaryGreen
+                                                    : AppTheme.textSecondary,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        s.value,
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w800,
-                                          color: s.color,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // ─── Stats row ───────────────────────────────────────────────
+                              Row(
+                                children: _stats
+                                    .map((s) => Expanded(
+                                          child: Container(
+                                            margin: EdgeInsets.only(
+                                                right:
+                                                    s != _stats.last ? 10 : 0),
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: s.color.withOpacity(0.08),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  s.label,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: AppTheme.textLight,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  s.value,
+                                                  style: TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: s.color,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ))
+                                    .toList(),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // ─── Main chart ──────────────────────────────────────────────
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bgCard,
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  children: [
+                                    SizedBox(
+                                      height: 220,
+                                      child: LineChart(
+                                        LineChartData(
+                                          gridData: FlGridData(
+                                            show: true,
+                                            drawVerticalLine: false,
+                                            horizontalInterval:
+                                                _selectedSensor == 1 ? 1 : 20,
+                                            getDrawingHorizontalLine: (_) =>
+                                                FlLine(
+                                              color:
+                                                  Colors.grey.withOpacity(0.1),
+                                              strokeWidth: 1,
+                                            ),
+                                          ),
+                                          titlesData: FlTitlesData(
+                                            leftTitles: AxisTitles(
+                                              sideTitles: SideTitles(
+                                                showTitles: true,
+                                                reservedSize: 36,
+                                                getTitlesWidget: (v, _) => Text(
+                                                  v.toInt().toString(),
+                                                  style: const TextStyle(
+                                                    fontSize: 9,
+                                                    color: AppTheme.textLight,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            rightTitles: const AxisTitles(
+                                                sideTitles: SideTitles(
+                                                    showTitles: false)),
+                                            topTitles: const AxisTitles(
+                                                sideTitles: SideTitles(
+                                                    showTitles: false)),
+                                            bottomTitles: AxisTitles(
+                                              sideTitles: SideTitles(
+                                                showTitles: true,
+                                                reservedSize: 24,
+                                                interval: _selectedFilter == 0
+                                                    ? 3
+                                                    : (_data.length / 4)
+                                                        .ceilToDouble(),
+                                                getTitlesWidget: (v, _) {
+                                                  if (_data.isEmpty) {
+                                                    return const SizedBox();
+                                                  }
+
+                                                  if (_selectedFilter == 0) {
+                                                    // TODAY → tampilkan jam
+                                                    final hour = v.toInt();
+                                                    if (hour < 0 || hour > 24) {
+                                                      return const SizedBox();
+                                                    }
+
+                                                    return Text(
+                                                      '${hour.toString().padLeft(2, '0')}:00',
+                                                      style: const TextStyle(
+                                                          fontSize: 9,
+                                                          color: AppTheme
+                                                              .textLight),
+                                                    );
+                                                  }
+
+                                                  // 7 & 30 days → tetap tanggal
+                                                  final idx = v.toInt().clamp(
+                                                      0, _data.length - 1);
+                                                  return Text(
+                                                    DateFormat('d/M').format(
+                                                        _data[idx].time),
+                                                    style: const TextStyle(
+                                                        fontSize: 9,
+                                                        color:
+                                                            AppTheme.textLight),
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                          ),
+                                          borderData: FlBorderData(show: false),
+                                          lineTouchData: LineTouchData(
+                                            touchTooltipData:
+                                                LineTouchTooltipData(
+                                              getTooltipColor: (_) =>
+                                                  AppTheme.bgDark,
+                                              tooltipRoundedRadius: 8,
+                                            ),
+                                          ),
+                                          lineBarsData: _chartLines,
                                         ),
+                                      ),
+                                    ),
+
+                                    // Legend
+                                    if (_selectedSensor == 0) ...[
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          _legend('Nitrogen',
+                                              AppTheme.primaryGreen),
+                                          const SizedBox(width: 16),
+                                          _legend('Phosphorus',
+                                              AppTheme.primaryBlue),
+                                          const SizedBox(width: 16),
+                                          _legend(
+                                              'Potassium', AppTheme.statusHigh),
+                                        ],
                                       ),
                                     ],
-                                  ),
+                                  ],
                                 ),
-                              ))
-                          .toList(),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ─── Main chart ──────────────────────────────────────────────
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bgCard,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            height: 220,
-                            child: LineChart(
-                              LineChartData(
-                                gridData: FlGridData(
-                                  show: true,
-                                  drawVerticalLine: false,
-                                  horizontalInterval: _selectedSensor == 1 ? 1 : 20,
-                                  getDrawingHorizontalLine: (_) => FlLine(
-                                    color: Colors.grey.withOpacity(0.1),
-                                    strokeWidth: 1,
-                                  ),
-                                ),
-                                titlesData: FlTitlesData(
-                                  leftTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      reservedSize: 36,
-                                      getTitlesWidget: (v, _) => Text(
-                                        v.toInt().toString(),
-                                        style: const TextStyle(
-                                          fontSize: 9,
-                                          color: AppTheme.textLight,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  rightTitles: const AxisTitles(
-                                      sideTitles: SideTitles(showTitles: false)),
-                                  topTitles: const AxisTitles(
-                                      sideTitles: SideTitles(showTitles: false)),
-                                  bottomTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      reservedSize: 24,
-                                      interval: _selectedFilter == 0 ? 3 : (_data.length / 4).ceilToDouble(),
-                                      getTitlesWidget: (v, _) {
-                                        if (_data.isEmpty) return const SizedBox();
-
-                                        if (_selectedFilter == 0) {
-                                          // TODAY → tampilkan jam
-                                          final hour = v.toInt();
-                                          if (hour < 0 || hour > 24) return const SizedBox();
-
-                                          return Text(
-                                            '${hour.toString().padLeft(2, '0')}:00',
-                                            style: const TextStyle(fontSize: 9, color: AppTheme.textLight),
-                                          );
-                                        }
-
-                                        // 7 & 30 days → tetap tanggal
-                                        final idx = v.toInt().clamp(0, _data.length - 1);
-                                        return Text(
-                                          DateFormat('d/M').format(_data[idx].time),
-                                          style: const TextStyle(fontSize: 9, color: AppTheme.textLight),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                borderData: FlBorderData(show: false),
-                                lineTouchData: LineTouchData(
-                                  touchTooltipData: LineTouchTooltipData(
-                                    getTooltipColor: (_) => AppTheme.bgDark,
-                                    tooltipRoundedRadius: 8,
-                                  ),
-                                ),
-                                lineBarsData: _chartLines,
                               ),
-                            ),
+                              const SizedBox(height: 16),
+
+                              // ─── Data table ──────────────────────────────────────────────
+                              _buildDataTable(),
+                            ]),
                           ),
-
-                          // Legend
-                          if (_selectedSensor == 0) ...[
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _legend('Nitrogen', AppTheme.primaryGreen),
-                                const SizedBox(width: 16),
-                                _legend('Phosphorus', AppTheme.primaryBlue),
-                                const SizedBox(width: 16),
-                                _legend('Potassium', AppTheme.statusHigh),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ─── Data table ──────────────────────────────────────────────
-                    _buildDataTable(),
-                  ]),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -545,8 +691,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildDataTable() {
     // Show last 8 data points
-    final recent = [..._pageData]
-      ..sort((a, b) => b.time.compareTo(a.time));
+    final recent = [..._pageData]..sort((a, b) => b.time.compareTo(a.time));
 
     final displayed = recent.take(_pageSize).toList();
 
@@ -590,7 +735,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             fontWeight: FontWeight.w700,
                             color: AppTheme.textLight,
                           ),
-                          textAlign: h == 'Time' ? TextAlign.left : TextAlign.center,
+                          textAlign:
+                              h == 'Time' ? TextAlign.left : TextAlign.center,
                         ),
                       ))
                   .toList(),
@@ -646,16 +792,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ? () {
                         setState(() {
                           _pageIndex--;
-                          _lastDoc = null;
                         });
                         _loadPage();
                       }
                     : null,
                 icon: const Icon(Icons.chevron_left),
               ),
-              Text('Page ${_pageIndex + 1} / $_maxPages'),
+              Text('Page ${_pageIndex + 1} / $_totalPages'),
               IconButton(
-                onPressed: _pageIndex < _maxPages - 1
+                onPressed: _pageIndex < _totalPages - 1
                     ? () {
                         setState(() {
                           _pageIndex++;
