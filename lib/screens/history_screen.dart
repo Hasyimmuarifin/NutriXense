@@ -39,6 +39,38 @@ class _HistoryScreenState extends State<HistoryScreen> {
   int get _totalPages =>
       _totalRows == 0 ? 1 : ((_totalRows - 1) ~/ _pageSize) + 1;
 
+  double get _chartMinY => 0;
+
+  double get _chartMaxY {
+    switch (_selectedSensor) {
+      case 0:
+        return 150; // NPK
+      case 1:
+        return 14; // pH
+      case 2:
+        return 100; // Moisture
+      case 3:
+        return 50; // Temperature
+      default:
+        return 100;
+    }
+  }
+
+  double get _chartHorizontalInterval {
+    switch (_selectedSensor) {
+      case 0:
+        return 30;
+      case 1:
+        return 2;
+      case 2:
+        return 20;
+      case 3:
+        return 10;
+      default:
+        return 20;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -541,11 +573,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       height: 220,
                                       child: LineChart(
                                         LineChartData(
+                                          minY: _chartMinY,
+                                          maxY: _chartMaxY,
                                           gridData: FlGridData(
                                             show: true,
                                             drawVerticalLine: false,
                                             horizontalInterval:
-                                                _selectedSensor == 1 ? 1 : 20,
+                                                _chartHorizontalInterval,
                                             getDrawingHorizontalLine: (_) =>
                                                 FlLine(
                                               color:
