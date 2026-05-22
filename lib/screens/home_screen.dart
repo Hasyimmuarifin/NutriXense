@@ -59,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen>
   List<double> nitrogenHistory = [];
   List<double> phosphorusHistory = [];
   List<double> potassiumHistory = [];
+  List<DateTime> chartTimes = [];
 
   void initMQTT() async {
     await mqttService.init();
@@ -283,10 +284,12 @@ class _HomeScreenState extends State<HomeScreen>
       nitrogenHistory.add((data["nitrogen"] ?? 0).toDouble());
       phosphorusHistory.add((data["phosphorus"] ?? 0).toDouble());
       potassiumHistory.add((data["potassium"] ?? 0).toDouble());
+      chartTimes.add(DateTime.now());
 
-      if (nitrogenHistory.length > 20) nitrogenHistory.removeAt(0);
-      if (phosphorusHistory.length > 20) phosphorusHistory.removeAt(0);
-      if (potassiumHistory.length > 20) potassiumHistory.removeAt(0);
+      if (nitrogenHistory.length > 1800) nitrogenHistory.removeAt(0);
+      if (phosphorusHistory.length > 1800) phosphorusHistory.removeAt(0);
+      if (potassiumHistory.length > 1800) potassiumHistory.removeAt(0);
+      if (chartTimes.length > 1800) chartTimes.removeAt(0);
     });
   }
 
@@ -399,7 +402,8 @@ class _HomeScreenState extends State<HomeScreen>
                                     children: [
                                       // Small MQTT Badge
                                       AnimatedContainer(
-                                        duration: const Duration(milliseconds: 300),
+                                        duration:
+                                            const Duration(milliseconds: 300),
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 8,
                                           vertical: 4,
@@ -408,7 +412,8 @@ class _HomeScreenState extends State<HomeScreen>
                                           color: isMqttConnected
                                               ? Colors.green
                                               : Colors.orange,
-                                          borderRadius: BorderRadius.circular(20),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -422,9 +427,7 @@ class _HomeScreenState extends State<HomeScreen>
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              isMqttConnected
-                                                  ? "LIVE"
-                                                  : "WAIT",
+                                              isMqttConnected ? "LIVE" : "WAIT",
                                               style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 9,
@@ -440,7 +443,8 @@ class _HomeScreenState extends State<HomeScreen>
 
                                       // WiFi Icon
                                       AnimatedSwitcher(
-                                        duration: const Duration(milliseconds: 300),
+                                        duration:
+                                            const Duration(milliseconds: 300),
                                         transitionBuilder: (child, animation) =>
                                             ScaleTransition(
                                           scale: animation,
@@ -625,6 +629,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ─── Real-time trend chart (NPK) ─────────────────────────────────────────────
   Widget _buildRealTimeChart() {
+    String formatChartTime(DateTime time) {
+      final hour = time.hour.toString().padLeft(2, '0');
+      final minute = time.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    }
+
     List<FlSpot> toSpots(List<double> vals) {
       return List.generate(
         vals.length,
@@ -660,7 +670,7 @@ class _HomeScreenState extends State<HomeScreen>
           const SectionHeader(title: 'Real-Time Trends'),
           const SizedBox(height: 6),
           Text(
-            'NPK levels over the last few hours',
+            'NPK levels over the last few minutes',
             style: TextStyle(
               fontSize: 12,
               color: AppTheme.textLight,
@@ -674,10 +684,12 @@ class _HomeScreenState extends State<HomeScreen>
             height: 160,
             child: LineChart(
               LineChartData(
+                minY: 0,
+                maxY: 150,
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  horizontalInterval: 20,
+                  horizontalInterval: 30,
                   getDrawingHorizontalLine: (_) => FlLine(
                     color: Colors.grey.withOpacity(0.12),
                     strokeWidth: 1,
@@ -702,8 +714,29 @@ class _HomeScreenState extends State<HomeScreen>
                       sideTitles: SideTitles(showTitles: false)),
                   topTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 24,
+                      interval: chartTimes.length <= 4
+                          ? 1
+                          : (chartTimes.length / 4).ceilToDouble(),
+                      getTitlesWidget: (v, _) {
+                        final index = v.toInt();
+                        if (index < 0 || index >= chartTimes.length) {
+                          return const SizedBox();
+                        }
+
+                        return Text(
+                          formatChartTime(chartTimes[index]),
+                          style: const TextStyle(
+                            fontSize: 9,
+                            color: AppTheme.textLight,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ),
                 borderData: FlBorderData(show: false),
                 lineTouchData: LineTouchData(
@@ -799,7 +832,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -853,7 +885,8 @@ class _HomeScreenState extends State<HomeScreen>
 
               // STATUS BADGE (tetap konsisten)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),

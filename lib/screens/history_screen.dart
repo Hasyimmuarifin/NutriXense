@@ -29,6 +29,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   List<SensorDataPoint> _pageData = [];
   final List<DocumentSnapshot> _pageCursors = [];
+  final Set<String> _knownHistoryDocIds = {};
+  final Set<String> _pageDocIds = {};
   StreamSubscription<QuerySnapshot>? _latestSubscription;
   bool _isLoadingHistory = true;
   Object? _historyError;
@@ -95,6 +97,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _pageIndex = 0;
       _totalRows = 0;
       _pageCursors.clear();
+      _knownHistoryDocIds.clear();
+      _pageDocIds.clear();
     });
 
     try {
@@ -147,6 +151,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       snapshot = await query.get(const GetOptions(source: Source.server));
     }
 
+    _knownHistoryDocIds.addAll(snapshot.docs.map((doc) => doc.id));
+
     final points = snapshot.docs.map((doc) => doc.data()).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
 
@@ -177,11 +183,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
         .listen((snapshot) {
       if (snapshot.docs.isEmpty || !mounted) return;
 
-      final latestPoints = snapshot.docs
-          .map((doc) => SensorDataPoint.fromFirestore(doc))
+      final newDocs = snapshot.docs
+          .where((doc) => !_knownHistoryDocIds.contains(doc.id))
           .toList();
 
+      if (newDocs.isEmpty) return;
+
+      final latestPoints =
+          newDocs.map((doc) => SensorDataPoint.fromFirestore(doc)).toList();
+      final latestDocIds = newDocs.map((doc) => doc.id).toList();
+
       setState(() {
+        _knownHistoryDocIds.addAll(latestDocIds);
+
         _data = [..._data, ...latestPoints]
           ..sort((a, b) => a.time.compareTo(b.time));
         if (_data.length > _historyLimit) {
@@ -190,7 +204,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
         _totalRows += latestPoints.length;
         if (_pageIndex == 0) {
-          _pageData = [..._pageData, ...latestPoints]
+          final newPagePoints = <SensorDataPoint>[];
+
+          for (int i = 0; i < latestPoints.length; i++) {
+            final docId = latestDocIds[i];
+            if (_pageDocIds.add(docId)) {
+              newPagePoints.add(latestPoints[i]);
+            }
+          }
+
+          if (newPagePoints.isEmpty) return;
+
+          _pageData = [..._pageData, ...newPagePoints]
             ..sort((a, b) => b.time.compareTo(a.time));
           if (_pageData.length > _pageSize) {
             _pageData = _pageData.take(_pageSize).toList();
@@ -218,6 +243,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (!mounted) return;
 
     setState(() {
+      _pageDocIds
+        ..clear()
+        ..addAll(snapshot.docs.map((doc) => doc.id));
+      _knownHistoryDocIds.addAll(snapshot.docs.map((doc) => doc.id));
       _pageData =
           snapshot.docs.map((d) => SensorDataPoint.fromFirestore(d)).toList();
       if (snapshot.docs.isNotEmpty) {
