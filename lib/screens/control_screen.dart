@@ -2,8 +2,10 @@
 // Pump controller page – toggle pumps A/B/C with loading animations and status display
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/dummy_data.dart';
 import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
@@ -18,6 +20,8 @@ class ControlScreen extends StatefulWidget {
 }
 
 class _ControlScreenState extends State<ControlScreen> {
+  static const String _scheduleStorageKey = 'nutrixense_watering_schedules';
+
   late List<PumpController> _pumps;
   final MQTTService mqttService = MQTTService();
   final List<_WateringSchedule> _wateringSchedules = [];
@@ -31,6 +35,7 @@ class _ControlScreenState extends State<ControlScreen> {
     super.initState();
     _pumps = DummyData.getPumps();
     mqttService.init();
+    _loadSchedules();
   }
 
   @override
@@ -193,12 +198,14 @@ class _ControlScreenState extends State<ControlScreen> {
     );
 
     setState(() => _wateringSchedules.add(schedule));
+    _saveSchedules();
     _scheduleNextRun(schedule, showSnackBar: true);
   }
 
   void _deleteSchedule(_WateringSchedule schedule) {
     schedule.timer?.cancel();
     setState(() => _wateringSchedules.remove(schedule));
+    _saveSchedules();
   }
 
   void _toggleSchedule(_WateringSchedule schedule, bool enabled) {
@@ -209,7 +216,45 @@ class _ControlScreenState extends State<ControlScreen> {
     } else {
       schedule.timer?.cancel();
       setState(() => schedule.nextRun = null);
+      _saveSchedules();
     }
+  }
+
+  Future<void> _loadSchedules() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawSchedules = prefs.getString(_scheduleStorageKey);
+    if (rawSchedules == null) return;
+
+    final decoded = jsonDecode(rawSchedules);
+    if (decoded is! List) return;
+
+    final restoredSchedules = decoded
+        .whereType<Map<String, dynamic>>()
+        .map(_WateringSchedule.fromJson)
+        .whereType<_WateringSchedule>()
+        .toList();
+
+    if (!mounted || restoredSchedules.isEmpty) return;
+
+    setState(() {
+      _wateringSchedules
+        ..clear()
+        ..addAll(restoredSchedules);
+    });
+
+    for (final schedule in restoredSchedules) {
+      if (schedule.enabled) {
+        _scheduleNextRun(schedule);
+      }
+    }
+  }
+
+  Future<void> _saveSchedules() async {
+    final prefs = await SharedPreferences.getInstance();
+    final schedules = _wateringSchedules
+        .map((schedule) => schedule.toJson())
+        .toList(growable: false);
+    await prefs.setString(_scheduleStorageKey, jsonEncode(schedules));
   }
 
   void _scheduleNextRun(
@@ -237,6 +282,7 @@ class _ControlScreenState extends State<ControlScreen> {
       schedule.enabled = true;
       schedule.nextRun = nextRun;
     });
+    _saveSchedules();
 
     schedule.timer = Timer(delay, () async {
       if (!mounted ||
@@ -265,6 +311,7 @@ class _ControlScreenState extends State<ControlScreen> {
           schedule.enabled = false;
           schedule.nextRun = null;
         });
+        _saveSchedules();
       }
     });
 
@@ -980,5 +1027,54 @@ class _WateringSchedule {
     required this.pumpIndexes,
     required this.durationSeconds,
     required this.repeatsDaily,
+    this.enabled = true,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'hour': time.hour,
+      'minute': time.minute,
+      'pumpIndexes': pumpIndexes.toList()..sort(),
+      'durationSeconds': durationSeconds,
+      'repeatsDaily': repeatsDaily,
+      'enabled': enabled,
+    };
+  }
+
+  static _WateringSchedule? fromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    final hour = json['hour'];
+    final minute = json['minute'];
+    final durationSeconds = json['durationSeconds'];
+    final repeatsDaily = json['repeatsDaily'];
+    final enabled = json['enabled'];
+    final pumpIndexes = json['pumpIndexes'];
+
+    if (id is! int ||
+        hour is! int ||
+        minute is! int ||
+        durationSeconds is! int ||
+        repeatsDaily is! bool ||
+        enabled is! bool ||
+        pumpIndexes is! List ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59) {
+      return null;
+    }
+
+    final parsedPumpIndexes = pumpIndexes.whereType<int>().toSet();
+    if (parsedPumpIndexes.isEmpty) return null;
+
+    return _WateringSchedule(
+      id: id,
+      time: TimeOfDay(hour: hour, minute: minute),
+      pumpIndexes: parsedPumpIndexes,
+      durationSeconds: durationSeconds,
+      repeatsDaily: repeatsDaily,
+      enabled: enabled,
+    );
+  }
 }

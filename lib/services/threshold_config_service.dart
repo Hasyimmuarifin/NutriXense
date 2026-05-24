@@ -1,7 +1,12 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 class ThresholdConfigService {
   ThresholdConfigService._();
 
   static final ThresholdConfigService instance = ThresholdConfigService._();
+  static const String _storageKey = 'nutrixense_threshold_config';
 
   final Map<String, double> _thresholds = {
     'min_nitrogen': 40,
@@ -20,11 +25,39 @@ class ThresholdConfigService {
     'max_ec': 3.0,
   };
 
+  Future<void> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawConfig = prefs.getString(_storageKey);
+    if (rawConfig == null) return;
+
+    final decoded = jsonDecode(rawConfig);
+    if (decoded is! Map<String, dynamic>) return;
+
+    final savedThresholds = <String, double>{};
+    for (final entry in decoded.entries) {
+      final value = entry.value;
+      if (value is num) {
+        savedThresholds[entry.key] = value.toDouble();
+      } else if (value is String) {
+        final parsed = double.tryParse(value);
+        if (parsed != null) savedThresholds[entry.key] = parsed;
+      }
+    }
+
+    _thresholds.addAll(savedThresholds);
+  }
+
   double value(String key, double fallback) {
     return _thresholds[key] ?? fallback;
   }
 
-  void update(Map<String, double> thresholds) {
+  Map<String, double> all() {
+    return Map.unmodifiable(_thresholds);
+  }
+
+  Future<void> update(Map<String, double> thresholds) async {
     _thresholds.addAll(thresholds);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_storageKey, jsonEncode(_thresholds));
   }
 }

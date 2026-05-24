@@ -149,6 +149,16 @@ class _HomeScreenState extends State<HomeScreen>
     _readings = _buildReadingsFromData(const {});
   }
 
+  void _syncThresholdControllersFromStorage() {
+    final thresholds = _thresholdConfigService.all();
+    for (final entry in _thresholdControllers.entries) {
+      final storedValue = thresholds[entry.key];
+      if (storedValue != null) {
+        entry.value.text = storedValue.toString();
+      }
+    }
+  }
+
   List<SensorReading> _buildReadingsFromData(Map<String, dynamic> data) {
     return [
       SensorReading(
@@ -444,20 +454,26 @@ class _HomeScreenState extends State<HomeScreen>
       }
     }
 
-    _thresholdConfigService.update(payload);
+    await _thresholdConfigService.update(payload);
+
     await mqttService.init();
     if (!mqttService.isConnected) {
       if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('MQTT is not connected. Config was not sent.'),
+          content: const Text(
+            'Threshold saved locally. MQTT is not connected, so config was not sent.',
+          ),
           backgroundColor: AppTheme.statusLow,
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
-      return false;
+      setState(() {
+        _readings = _buildReadingsFromData(_latestSensorData);
+      });
+      return true;
     }
 
     mqttService.publish('nutrixense/config', jsonEncode(payload), retain: true);
@@ -481,6 +497,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    _syncThresholdControllersFromStorage();
     initializeDefaultReadings();
 
     totalAlerts = _alertCountService.alertCount.value;

@@ -13,6 +13,7 @@ import 'screens/history_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/control_screen.dart';
 import 'services/rule_based_pump_automation_service.dart';
+import 'services/threshold_config_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,6 +25,8 @@ void main() async {
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
   );
+
+  await ThresholdConfigService.instance.load();
 
   runApp(const MyApp());
 }
