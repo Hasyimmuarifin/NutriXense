@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../models/ai_recommendation.dart';
@@ -11,15 +13,14 @@ class GeminiRecommendationService {
     String? apiKey,
     String? modelName,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _apiKey = apiKey ?? const String.fromEnvironment('GEMINI_API_KEY'),
-        _modelName = modelName ??
-            const String.fromEnvironment(
-              'GEMINI_MODEL',
-              defaultValue: 'gemini-2.5-flash',
-            );
+        _apiKeyOverride = apiKey,
+        _modelNameOverride = modelName;
 
   static const _collection = 'sensor_data';
   static const _historyLimit = 360;
+  static const _configAssetPath = 'assets/config/gemini_config.json';
+  static const _dartDefineApiKey = String.fromEnvironment('GEMINI_API_KEY');
+  static const _dartDefineModelName = String.fromEnvironment('GEMINI_MODEL');
 
   // Tune these to match the crop and calibration used in your TA experiment.
   static const thresholds = {
@@ -36,14 +37,16 @@ class GeminiRecommendationService {
   };
 
   final FirebaseFirestore _firestore;
-  final String _apiKey;
-  final String _modelName;
+  final String? _apiKeyOverride;
+  final String? _modelNameOverride;
 
   Future<AiRecommendationResponse> requestRecommendation() async {
-    if (_apiKey.trim().isEmpty) {
+    final config = await _resolveConfig();
+
+    if (config.apiKey.trim().isEmpty) {
       throw StateError(
-        'GEMINI_API_KEY belum dikonfigurasi. Jalankan Flutter dengan '
-        '--dart-define=GEMINI_API_KEY=YOUR_KEY.',
+        'GEMINI_API_KEY belum dikonfigurasi. Isi $_configAssetPath atau '
+        'jalankan Flutter dengan --dart-define=GEMINI_API_KEY=YOUR_KEY.',
       );
     }
 
@@ -54,8 +57,8 @@ class GeminiRecommendationService {
 
     final summary = _SensorHistorySummary.fromReadings(readings);
     final model = GenerativeModel(
-      model: _modelName,
-      apiKey: _apiKey,
+      model: config.modelName,
+      apiKey: config.apiKey,
       systemInstruction: Content.system(_systemPrompt),
       generationConfig: GenerationConfig(
         temperature: 0.2,
@@ -96,6 +99,47 @@ class GeminiRecommendationService {
       canActivateWaterPump: summary.canActivateWaterPump,
       canActivateFertilizerPump: summary.canActivateFertilizerPump,
     );
+  }
+
+  Future<_GeminiRuntimeConfig> _resolveConfig() async {
+    final localConfig = await _loadLocalConfig();
+
+    return _GeminiRuntimeConfig(
+      apiKey: _firstNonEmpty([
+        _apiKeyOverride,
+        _dartDefineApiKey,
+        localConfig.apiKey,
+      ]),
+      modelName: _firstNonEmpty([
+        _modelNameOverride,
+        _dartDefineModelName,
+        localConfig.modelName,
+      ], fallback: 'gemini-2.5-flash'),
+    );
+  }
+
+  Future<_GeminiRuntimeConfig> _loadLocalConfig() async {
+    try {
+      final text = await rootBundle.loadString(_configAssetPath);
+      final json = jsonDecode(text) as Map<String, dynamic>;
+      return _GeminiRuntimeConfig(
+        apiKey: json['apiKey'] as String? ?? '',
+        modelName: json['modelName'] as String? ?? '',
+      );
+    } on FormatException {
+      return const _GeminiRuntimeConfig();
+    } on TypeError {
+      return const _GeminiRuntimeConfig();
+    } on FlutterError {
+      return const _GeminiRuntimeConfig();
+    }
+  }
+
+  String _firstNonEmpty(List<String?> values, {String fallback = ''}) {
+    for (final value in values) {
+      if (value != null && value.trim().isNotEmpty) return value.trim();
+    }
+    return fallback;
   }
 
   Future<List<_SensorReadingSnapshot>> _fetchRecentReadings() async {
@@ -222,6 +266,16 @@ final _responseSchema = Schema.object(
     'automation_triggers',
   ],
 );
+
+class _GeminiRuntimeConfig {
+  const _GeminiRuntimeConfig({
+    this.apiKey = '',
+    this.modelName = '',
+  });
+
+  final String apiKey;
+  final String modelName;
+}
 
 class _SensorReadingSnapshot {
   const _SensorReadingSnapshot({
