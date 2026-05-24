@@ -25,7 +25,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   int _pageIndex = 0;
   int _totalRows = 0;
   static const int _pageSize = 100;
-  static const int _historyLimit = 300;
 
   List<SensorDataPoint> _pageData = [];
   final List<DocumentSnapshot> _pageCursors = [];
@@ -127,11 +126,39 @@ class _HistoryScreenState extends State<HistoryScreen> {
         );
   }
 
+  List<SensorDataPoint> _applySampling(List<SensorDataPoint> source) {
+    if (source.isEmpty) return [];
+
+    // TODAY → tampilkan semua data
+    if (_selectedFilter == 0) {
+      return source;
+    }
+
+    // 7 DAYS → ambil 1 data tiap 15 menit
+    final Duration interval =
+        _selectedFilter == 1
+            ? const Duration(minutes: 15)
+            : const Duration(hours: 1);
+
+    final List<SensorDataPoint> sampled = [];
+
+    DateTime? lastIncluded;
+
+    for (final item in source) {
+      if (lastIncluded == null ||
+          item.time.difference(lastIncluded).abs() >= interval) {
+        sampled.add(item);
+        lastIncluded = item.time;
+      }
+    }
+
+    return sampled;
+  }
+
   Future<void> _loadInitialHistory() async {
     final query = _historyBaseQuery()
         .orderBy('timestamp', descending: true)
         .orderBy(FieldPath.documentId, descending: true)
-        .limit(_historyLimit)
         .withConverter<SensorDataPoint>(
           fromFirestore: (doc, _) => SensorDataPoint.fromFirestore(doc),
           toFirestore: (_, __) => throw UnsupportedError(
@@ -156,8 +183,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final points = snapshot.docs.map((doc) => doc.data()).toList()
       ..sort((a, b) => a.time.compareTo(b.time));
 
+    // Apply interval sampling for chart
+    final sampledPoints = _applySampling(points);
+
     if (!mounted) return;
-    setState(() => _data = points);
+    setState(() => _data = sampledPoints);
   }
 
   Future<void> _loadTotalRows() async {
@@ -196,11 +226,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       setState(() {
         _knownHistoryDocIds.addAll(latestDocIds);
 
-        _data = [..._data, ...latestPoints]
+        final merged = [..._data, ...latestPoints]
           ..sort((a, b) => a.time.compareTo(b.time));
-        if (_data.length > _historyLimit) {
-          _data = _data.sublist(_data.length - _historyLimit);
-        }
+        // Apply interval sampling again
+        _data = _applySampling(merged);
 
         _totalRows += latestPoints.length;
         if (_pageIndex == 0) {
