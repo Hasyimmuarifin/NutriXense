@@ -92,84 +92,139 @@ class _InsightsScreenState extends State<InsightsScreen> {
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ─── App bar ──────────────────────────────────────────────────────
+          // ─── Gradient App Bar ────────────────────────────────────────────
           SliverAppBar(
-            pinned: true,
-            expandedHeight: 200,
-            backgroundColor: AppTheme.bgCard,
+            pinned: false,
+            expandedHeight: 220,
+            backgroundColor: AppTheme.bgPrimary,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: const BoxDecoration(
-                  gradient: AppTheme.cardGradient,
+                  gradient: AppTheme.headerGradient,
                 ),
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.auto_awesome_rounded,
-                                color: Colors.white70, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              'AI Insights',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.8),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Plant Health Report',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Align(
+                        alignment: const Alignment(0, 1),
+                        child: Opacity(
+                          opacity: 0.06,
+                          child: Image.asset(
+                            'assets/images/w_nutrixense_cropped.png',
+                            width: 280,
+                            fit: BoxFit.contain,
                           ),
                         ),
-                        const Spacer(),
-                        // ─── Health summary row ───────────────────────────
-                        Row(
+                      ),
+                    ),
+                    SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Score
-                            _buildScoreCircle(),
-                            const SizedBox(width: 20),
-                            // Stat breakdown
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildStatRow(
-                                    Icons.error_outline_rounded,
-                                    '$_criticalCount Critical',
-                                    AppTheme.statusLow,
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Row(
+                                  children: [
+                                    Image.asset(
+                                      'assets/images/w_nutrixense.png',
+                                      width: 40,
+                                      height: 40,
+                                      fit: BoxFit.contain,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      'NutriXense',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 8,
                                   ),
-                                  const SizedBox(height: 6),
-                                  _buildStatRow(
-                                    Icons.warning_amber_rounded,
-                                    '$_warningCount Warnings',
-                                    AppTheme.statusHigh,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.18),
+                                    borderRadius: BorderRadius.circular(30),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.25),
+                                    ),
                                   ),
-                                  const SizedBox(height: 6),
-                                  _buildStatRow(
-                                    Icons.check_circle_outline_rounded,
-                                    '$_goodCount Optimal',
-                                    const Color(0xFF69F0AE),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.auto_awesome,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'AI Insights',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            const Text(
+                              'Plant Health Report',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
                               ),
+                            ),
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                _buildScoreCircle(),
+                                const SizedBox(width: 18),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      _buildStatPill(
+                                        Icons.error_outline_rounded,
+                                        '$_criticalCount Critical',
+                                        AppTheme.statusLow,
+                                      ),
+                                      _buildStatPill(
+                                        Icons.warning_amber_rounded,
+                                        '$_warningCount Warnings',
+                                        AppTheme.statusHigh,
+                                      ),
+                                      _buildStatPill(
+                                        Icons.check_circle_outline_rounded,
+                                        '$_goodCount Optimal',
+                                        const Color(0xFF69F0AE),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
@@ -335,20 +390,29 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildStatRow(IconData icon, String label, Color color) {
-    return Row(
-      children: [
-        Icon(icon, size: 13, color: color),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
+  Widget _buildStatPill(IconData icon, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.55)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
