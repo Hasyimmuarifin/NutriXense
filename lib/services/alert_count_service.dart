@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/sensor_data.dart';
+
 class AlertCountService {
   AlertCountService._();
 
@@ -12,5 +14,10 @@ class AlertCountService {
     required int warningCount,
   }) {
     alertCount.value = criticalCount + warningCount;
+  }
+
+  void updateFromSensorReadings(List<SensorReading> readings) {
+    alertCount.value =
+        readings.where((reading) => reading.status != 'Normal').length;
   }
 }

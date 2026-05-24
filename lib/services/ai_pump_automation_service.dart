@@ -67,14 +67,16 @@ class AiPumpAutomationService {
           'MQTT is not connected, so AI pump automation was not applied.');
     }
 
-    for (final command in pumpCommands) {
-      _mqttService.setRelay(command.relay, true);
-    }
+    try {
+      for (final command in pumpCommands) {
+        _mqttService.setRelay(command.relay, true);
+      }
 
-    await Future.delayed(pulseDuration);
-
-    for (final command in pumpCommands) {
-      _mqttService.setRelay(command.relay, false);
+      await Future.delayed(pulseDuration);
+    } finally {
+      for (final command in pumpCommands) {
+        _mqttService.setRelay(command.relay, false);
+      }
     }
 
     return AiPumpAutomationResult(

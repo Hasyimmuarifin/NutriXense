@@ -11,6 +11,7 @@ import '../models/sensor_data.dart';
 
 import '../services/alert_count_service.dart';
 import '../services/mqtt_service.dart';
+import '../services/nutrient_alert_service.dart';
 import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 
@@ -57,18 +58,27 @@ class _HomeScreenState extends State<HomeScreen>
 
   final MQTTService mqttService = MQTTService();
   final AlertCountService _alertCountService = AlertCountService.instance;
+  final NutrientAlertService _nutrientAlertService =
+      NutrientAlertService.instance;
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
 
   StreamSubscription? sensorSub;
   final Map<String, TextEditingController> _thresholdControllers = {
     'min_nitrogen': TextEditingController(text: '40'),
+    'max_nitrogen': TextEditingController(text: '80'),
     'min_phosphorus': TextEditingController(text: '20'),
+    'max_phosphorus': TextEditingController(text: '60'),
     'min_potassium': TextEditingController(text: '40'),
+    'max_potassium': TextEditingController(text: '100'),
     'min_ph': TextEditingController(text: '5.8'),
+    'max_ph': TextEditingController(text: '7.2'),
     'min_moisture': TextEditingController(text: '40'),
+    'max_moisture': TextEditingController(text: '80'),
     'min_temperature': TextEditingController(text: '18'),
+    'max_temperature': TextEditingController(text: '35'),
     'min_ec': TextEditingController(text: '1.0'),
+    'max_ec': TextEditingController(text: '3.0'),
   };
 
   // chart history
@@ -148,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 150,
         minNormal: _thresholdValue('min_nitrogen', 40),
-        maxNormal: 80,
+        maxNormal: _thresholdValue('max_nitrogen', 80),
         icon: "assets/icons/leaf.png",
         colorHex: 0xFF4CAF50,
       ),
@@ -159,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 100,
         minNormal: _thresholdValue('min_phosphorus', 20),
-        maxNormal: 60,
+        maxNormal: _thresholdValue('max_phosphorus', 60),
         icon: "assets/icons/root.png",
         colorHex: 0xFF2196F3,
       ),
@@ -170,7 +180,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 150,
         minNormal: _thresholdValue('min_potassium', 40),
-        maxNormal: 100,
+        maxNormal: _thresholdValue('max_potassium', 100),
         icon: "assets/icons/crop.png",
         colorHex: 0xFFFF9800,
       ),
@@ -181,7 +191,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 14,
         minNormal: _thresholdValue('min_ph', 5.8),
-        maxNormal: 7.2,
+        maxNormal: _thresholdValue('max_ph', 7.2),
         icon: "assets/icons/ph.png",
         colorHex: 0xFF9E9E9E,
       ),
@@ -192,7 +202,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 100,
         minNormal: _thresholdValue('min_moisture', 40),
-        maxNormal: 80,
+        maxNormal: _thresholdValue('max_moisture', 80),
         icon: "assets/icons/water.png",
         colorHex: 0xFF2196F3,
       ),
@@ -203,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 50,
         minNormal: _thresholdValue('min_temperature', 18),
-        maxNormal: 35,
+        maxNormal: _thresholdValue('max_temperature', 35),
         icon: "assets/icons/temp.png",
         colorHex: 0xFFF44336,
       ),
@@ -214,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen>
         minValue: 0,
         maxValue: 5,
         minNormal: _thresholdValue('min_ec', 1.0),
-        maxNormal: 3.0,
+        maxNormal: _thresholdValue('max_ec', 3.0),
         icon: "assets/icons/ec.png",
         colorHex: 0xFF7C4DFF,
       ),
@@ -236,82 +246,12 @@ class _HomeScreenState extends State<HomeScreen>
   void updateSensorData(Map<String, dynamic> data) {
     if (!mounted) return;
 
+    final nextReadings = _buildReadingsFromData(data);
+
     setState(() {
       _latestSensorData = Map<String, dynamic>.from(data);
       totalSensors = sensorKeys.where((key) => data.containsKey(key)).length;
-      // update cards
-      _readings = [
-        SensorReading(
-            value: _readSensorValue(data, "nitrogen"),
-            label: "Nitrogen",
-            unit: "mg/kg",
-            minValue: 0,
-            maxValue: 150,
-            minNormal: _thresholdValue('min_nitrogen', 40),
-            maxNormal: 80,
-            icon: "assets/icons/leaf.png",
-            colorHex: 0xFF4CAF50),
-        SensorReading(
-            value: _readSensorValue(data, "phosphorus"),
-            label: "Phosporus",
-            unit: "mg/kg",
-            minValue: 0,
-            maxValue: 100,
-            minNormal: _thresholdValue('min_phosphorus', 20),
-            maxNormal: 60,
-            icon: "assets/icons/root.png",
-            colorHex: 0xFF2196F3),
-        SensorReading(
-            value: _readSensorValue(data, "potassium"),
-            label: "Potassium",
-            unit: "mg/kg",
-            minValue: 0,
-            maxValue: 150,
-            minNormal: _thresholdValue('min_potassium', 40),
-            maxNormal: 100,
-            icon: "assets/icons/crop.png",
-            colorHex: 0xFFFF9800),
-        SensorReading(
-            value: _readSensorValue(data, "ph"),
-            label: "pH Level",
-            unit: "pH",
-            minValue: 0,
-            maxValue: 14,
-            minNormal: _thresholdValue('min_ph', 5.8),
-            maxNormal: 7.2,
-            icon: "assets/icons/ph.png",
-            colorHex: 0xFF9E9E9E),
-        SensorReading(
-            value: _readSensorValue(data, "moisture"),
-            label: "Soil Moisture",
-            unit: "%",
-            minValue: 0,
-            maxValue: 100,
-            minNormal: _thresholdValue('min_moisture', 40),
-            maxNormal: 80,
-            icon: "assets/icons/water.png",
-            colorHex: 0xFF2196F3),
-        SensorReading(
-            value: _readSensorValue(data, "temperature"),
-            label: "Temperature",
-            unit: "°C",
-            minValue: 0,
-            maxValue: 50,
-            minNormal: _thresholdValue('min_temperature', 18),
-            maxNormal: 35,
-            icon: "assets/icons/temp.png",
-            colorHex: 0xFFF44336),
-        SensorReading(
-            value: _readSensorValue(data, "ec"),
-            label: "Electrical Conductivity",
-            unit: "mS/cm",
-            minValue: 0,
-            maxValue: 5,
-            minNormal: _thresholdValue('min_ec', 1.0),
-            maxNormal: 3.0,
-            icon: "assets/icons/ec.png",
-            colorHex: 0xFF7C4DFF),
-      ];
+      _readings = nextReadings;
 
       // update chart history
       nitrogenHistory.add(_readSensorValue(data, "nitrogen"));
@@ -324,6 +264,9 @@ class _HomeScreenState extends State<HomeScreen>
       if (potassiumHistory.length > 1800) potassiumHistory.removeAt(0);
       if (chartTimes.length > 1800) chartTimes.removeAt(0);
     });
+
+    _alertCountService.updateFromSensorReadings(nextReadings);
+    _nutrientAlertService.handleReadings(nextReadings);
   }
 
   Future<void> _openThresholdConfigDialog() async {
@@ -336,13 +279,48 @@ class _HomeScreenState extends State<HomeScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _thresholdField('Nitrogen Min', 'min_nitrogen', 'mg/kg'),
-                _thresholdField('Phosphorus Min', 'min_phosphorus', 'mg/kg'),
-                _thresholdField('Potassium Min', 'min_potassium', 'mg/kg'),
-                _thresholdField('pH Min', 'min_ph', 'pH'),
-                _thresholdField('Moisture Min', 'min_moisture', '%'),
-                _thresholdField('Temperature Min', 'min_temperature', '°C'),
-                _thresholdField('EC Min', 'min_ec', 'mS/cm'),
+                _thresholdRangeField(
+                  'Nitrogen',
+                  minKey: 'min_nitrogen',
+                  maxKey: 'max_nitrogen',
+                  suffix: 'mg/kg',
+                ),
+                _thresholdRangeField(
+                  'Phosphorus',
+                  minKey: 'min_phosphorus',
+                  maxKey: 'max_phosphorus',
+                  suffix: 'mg/kg',
+                ),
+                _thresholdRangeField(
+                  'Potassium',
+                  minKey: 'min_potassium',
+                  maxKey: 'max_potassium',
+                  suffix: 'mg/kg',
+                ),
+                _thresholdRangeField(
+                  'pH',
+                  minKey: 'min_ph',
+                  maxKey: 'max_ph',
+                  suffix: 'pH',
+                ),
+                _thresholdRangeField(
+                  'Moisture',
+                  minKey: 'min_moisture',
+                  maxKey: 'max_moisture',
+                  suffix: '%',
+                ),
+                _thresholdRangeField(
+                  'Temperature',
+                  minKey: 'min_temperature',
+                  maxKey: 'max_temperature',
+                  suffix: '°C',
+                ),
+                _thresholdRangeField(
+                  'EC',
+                  minKey: 'min_ec',
+                  maxKey: 'max_ec',
+                  suffix: 'mS/cm',
+                ),
               ],
             ),
           ),
@@ -365,9 +343,45 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Widget _thresholdRangeField(
+    String label, {
+    required String minKey,
+    required String maxKey,
+    required String suffix,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _thresholdField('Min', minKey, suffix),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _thresholdField('Max', maxKey, suffix),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _thresholdField(String label, String key, String suffix) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.zero,
       child: TextField(
         controller: _thresholdControllers[key],
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -400,6 +414,34 @@ class _HomeScreenState extends State<HomeScreen>
         return false;
       }
       payload[entry.key] = value;
+    }
+
+    final thresholdPairs = {
+      'Nitrogen': ('min_nitrogen', 'max_nitrogen'),
+      'Phosphorus': ('min_phosphorus', 'max_phosphorus'),
+      'Potassium': ('min_potassium', 'max_potassium'),
+      'pH': ('min_ph', 'max_ph'),
+      'Moisture': ('min_moisture', 'max_moisture'),
+      'Temperature': ('min_temperature', 'max_temperature'),
+      'EC': ('min_ec', 'max_ec'),
+    };
+
+    for (final entry in thresholdPairs.entries) {
+      final minValue = payload[entry.value.$1]!;
+      final maxValue = payload[entry.value.$2]!;
+
+      if (minValue > maxValue) {
+        if (!mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text('${entry.key} min must be less than or equal to max.'),
+            backgroundColor: AppTheme.statusLow,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return false;
+      }
     }
 
     _thresholdConfigService.update(payload);
@@ -444,6 +486,7 @@ class _HomeScreenState extends State<HomeScreen>
     totalAlerts = _alertCountService.alertCount.value;
     _alertCountService.alertCount.addListener(_syncAlertCount);
 
+    _nutrientAlertService.initialize();
     initConnectivity();
     initMQTT();
     startConnectionMonitor();
