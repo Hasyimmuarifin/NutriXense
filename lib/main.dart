@@ -12,6 +12,7 @@ import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/control_screen.dart';
+import 'services/rule_based_pump_automation_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,6 +60,8 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation>
     with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
+  final RuleBasedPumpAutomationService _ruleBasedPumpAutomationService =
+      RuleBasedPumpAutomationService();
 
   // Keep screens alive when switching tabs using IndexedStack
   final List<Widget> _screens = const [
@@ -81,6 +84,18 @@ class _MainNavigationState extends State<MainNavigation>
         selectedIcon: Icon(Icons.toggle_on_rounded),
         label: 'Control'),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _ruleBasedPumpAutomationService.start();
+  }
+
+  @override
+  void dispose() {
+    _ruleBasedPumpAutomationService.stop();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

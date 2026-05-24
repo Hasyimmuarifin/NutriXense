@@ -1,6 +1,7 @@
 // Main monitoring dashboard – shows live sensor cards + mini real-time chart
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -8,7 +9,9 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../models/sensor_data.dart';
 
+import '../services/alert_count_service.dart';
 import '../services/mqtt_service.dart';
+import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 
 import '../widgets/sensor_card.dart';
@@ -50,10 +53,23 @@ class _HomeScreenState extends State<HomeScreen>
 
   DateTime? lastDataReceived;
   Timer? connectionTimer;
+  Map<String, dynamic> _latestSensorData = const {};
 
   final MQTTService mqttService = MQTTService();
+  final AlertCountService _alertCountService = AlertCountService.instance;
+  final ThresholdConfigService _thresholdConfigService =
+      ThresholdConfigService.instance;
 
   StreamSubscription? sensorSub;
+  final Map<String, TextEditingController> _thresholdControllers = {
+    'min_nitrogen': TextEditingController(text: '40'),
+    'min_phosphorus': TextEditingController(text: '20'),
+    'min_potassium': TextEditingController(text: '40'),
+    'min_ph': TextEditingController(text: '5.8'),
+    'min_moisture': TextEditingController(text: '40'),
+    'min_temperature': TextEditingController(text: '18'),
+    'min_ec': TextEditingController(text: '1.0'),
+  };
 
   // chart history
   List<double> nitrogenHistory = [];
@@ -120,80 +136,84 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void initializeDefaultReadings() {
-    _readings = [
+    _readings = _buildReadingsFromData(const {});
+  }
+
+  List<SensorReading> _buildReadingsFromData(Map<String, dynamic> data) {
+    return [
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "nitrogen"),
         label: "Nitrogen",
         unit: "mg/kg",
         minValue: 0,
         maxValue: 150,
-        minNormal: 40,
+        minNormal: _thresholdValue('min_nitrogen', 40),
         maxNormal: 80,
         icon: "assets/icons/leaf.png",
         colorHex: 0xFF4CAF50,
       ),
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "phosphorus"),
         label: "Phosphorus",
         unit: "mg/kg",
         minValue: 0,
         maxValue: 100,
-        minNormal: 20,
+        minNormal: _thresholdValue('min_phosphorus', 20),
         maxNormal: 60,
         icon: "assets/icons/root.png",
         colorHex: 0xFF2196F3,
       ),
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "potassium"),
         label: "Potassium",
         unit: "mg/kg",
         minValue: 0,
         maxValue: 150,
-        minNormal: 40,
+        minNormal: _thresholdValue('min_potassium', 40),
         maxNormal: 100,
         icon: "assets/icons/crop.png",
         colorHex: 0xFFFF9800,
       ),
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "ph"),
         label: "pH Level",
         unit: "pH",
         minValue: 0,
         maxValue: 14,
-        minNormal: 5.8,
+        minNormal: _thresholdValue('min_ph', 5.8),
         maxNormal: 7.2,
         icon: "assets/icons/ph.png",
         colorHex: 0xFF9E9E9E,
       ),
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "moisture"),
         label: "Soil Moisture",
         unit: "%",
         minValue: 0,
         maxValue: 100,
-        minNormal: 40,
+        minNormal: _thresholdValue('min_moisture', 40),
         maxNormal: 80,
         icon: "assets/icons/water.png",
         colorHex: 0xFF2196F3,
       ),
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "temperature"),
         label: "Temperature",
         unit: "°C",
         minValue: 0,
         maxValue: 50,
-        minNormal: 18,
+        minNormal: _thresholdValue('min_temperature', 18),
         maxNormal: 35,
         icon: "assets/icons/temp.png",
         colorHex: 0xFFF44336,
       ),
       SensorReading(
-        value: 0,
+        value: _readSensorValue(data, "ec"),
         label: "Electrical Conductivity",
         unit: "mS/cm",
         minValue: 0,
         maxValue: 5,
-        minNormal: 1.0,
+        minNormal: _thresholdValue('min_ec', 1.0),
         maxNormal: 3.0,
         icon: "assets/icons/ec.png",
         colorHex: 0xFF7C4DFF,
@@ -201,89 +221,102 @@ class _HomeScreenState extends State<HomeScreen>
     ];
   }
 
+  double _thresholdValue(String key, double fallback) {
+    return double.tryParse(_thresholdControllers[key]?.text.trim() ?? '') ??
+        _thresholdConfigService.value(key, fallback);
+  }
+
+  double _readSensorValue(Map<String, dynamic> data, String key) {
+    final value = data[key];
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0;
+    return 0;
+  }
+
   void updateSensorData(Map<String, dynamic> data) {
     if (!mounted) return;
 
     setState(() {
+      _latestSensorData = Map<String, dynamic>.from(data);
       totalSensors = sensorKeys.where((key) => data.containsKey(key)).length;
       // update cards
       _readings = [
         SensorReading(
-            value: (data["nitrogen"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "nitrogen"),
             label: "Nitrogen",
             unit: "mg/kg",
             minValue: 0,
             maxValue: 150,
-            minNormal: 20,
+            minNormal: _thresholdValue('min_nitrogen', 40),
             maxNormal: 80,
             icon: "assets/icons/leaf.png",
             colorHex: 0xFF4CAF50),
         SensorReading(
-            value: (data["phosphorus"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "phosphorus"),
             label: "Phosporus",
             unit: "mg/kg",
             minValue: 0,
             maxValue: 100,
-            minNormal: 15,
+            minNormal: _thresholdValue('min_phosphorus', 20),
             maxNormal: 60,
             icon: "assets/icons/root.png",
             colorHex: 0xFF2196F3),
         SensorReading(
-            value: (data["potassium"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "potassium"),
             label: "Potassium",
             unit: "mg/kg",
             minValue: 0,
             maxValue: 150,
-            minNormal: 20,
+            minNormal: _thresholdValue('min_potassium', 40),
             maxNormal: 100,
             icon: "assets/icons/crop.png",
             colorHex: 0xFFFF9800),
         SensorReading(
-            value: (data["ph"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "ph"),
             label: "pH Level",
             unit: "pH",
             minValue: 0,
             maxValue: 14,
-            minNormal: 6.0,
-            maxNormal: 7.5,
+            minNormal: _thresholdValue('min_ph', 5.8),
+            maxNormal: 7.2,
             icon: "assets/icons/ph.png",
             colorHex: 0xFF9E9E9E),
         SensorReading(
-            value: (data["moisture"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "moisture"),
             label: "Soil Moisture",
             unit: "%",
             minValue: 0,
             maxValue: 100,
-            minNormal: 40,
+            minNormal: _thresholdValue('min_moisture', 40),
             maxNormal: 80,
             icon: "assets/icons/water.png",
             colorHex: 0xFF2196F3),
         SensorReading(
-            value: (data["temperature"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "temperature"),
             label: "Temperature",
             unit: "°C",
             minValue: 0,
             maxValue: 50,
-            minNormal: 15,
-            maxNormal: 30,
+            minNormal: _thresholdValue('min_temperature', 18),
+            maxNormal: 35,
             icon: "assets/icons/temp.png",
             colorHex: 0xFFF44336),
         SensorReading(
-            value: (data["ec"] ?? 0).toDouble(),
+            value: _readSensorValue(data, "ec"),
             label: "Electrical Conductivity",
             unit: "mS/cm",
             minValue: 0,
             maxValue: 5,
-            minNormal: 1.0,
+            minNormal: _thresholdValue('min_ec', 1.0),
             maxNormal: 3.0,
             icon: "assets/icons/ec.png",
             colorHex: 0xFF7C4DFF),
       ];
 
       // update chart history
-      nitrogenHistory.add((data["nitrogen"] ?? 0).toDouble());
-      phosphorusHistory.add((data["phosphorus"] ?? 0).toDouble());
-      potassiumHistory.add((data["potassium"] ?? 0).toDouble());
+      nitrogenHistory.add(_readSensorValue(data, "nitrogen"));
+      phosphorusHistory.add(_readSensorValue(data, "phosphorus"));
+      potassiumHistory.add(_readSensorValue(data, "potassium"));
       chartTimes.add(DateTime.now());
 
       if (nitrogenHistory.length > 1800) nitrogenHistory.removeAt(0);
@@ -293,10 +326,123 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  Future<void> _openThresholdConfigDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Threshold Config'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _thresholdField('Nitrogen Min', 'min_nitrogen', 'mg/kg'),
+                _thresholdField('Phosphorus Min', 'min_phosphorus', 'mg/kg'),
+                _thresholdField('Potassium Min', 'min_potassium', 'mg/kg'),
+                _thresholdField('pH Min', 'min_ph', 'pH'),
+                _thresholdField('Moisture Min', 'min_moisture', '%'),
+                _thresholdField('Temperature Min', 'min_temperature', '°C'),
+                _thresholdField('EC Min', 'min_ec', 'mS/cm'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final saved = await _publishThresholdConfig();
+                if (!context.mounted) return;
+                if (saved) Navigator.of(context).pop();
+              },
+              child: const Text('Save Config'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _thresholdField(String label, String key, String suffix) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: _thresholdControllers[key],
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: label,
+          suffixText: suffix,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _publishThresholdConfig() async {
+    final payload = <String, double>{};
+
+    for (final entry in _thresholdControllers.entries) {
+      final value = double.tryParse(entry.value.text.trim());
+      if (value == null) {
+        if (!mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invalid value for ${entry.key}.'),
+            backgroundColor: AppTheme.statusLow,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return false;
+      }
+      payload[entry.key] = value;
+    }
+
+    _thresholdConfigService.update(payload);
+    await mqttService.init();
+    if (!mqttService.isConnected) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('MQTT is not connected. Config was not sent.'),
+          backgroundColor: AppTheme.statusLow,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return false;
+    }
+
+    mqttService.publish('nutrixense/config', jsonEncode(payload), retain: true);
+
+    if (!mounted) return false;
+    setState(() {
+      _readings = _buildReadingsFromData(_latestSensorData);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Threshold successfully updated'),
+        backgroundColor: AppTheme.primaryGreen,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
     initializeDefaultReadings();
+
+    totalAlerts = _alertCountService.alertCount.value;
+    _alertCountService.alertCount.addListener(_syncAlertCount);
 
     initConnectivity();
     initMQTT();
@@ -314,11 +460,22 @@ class _HomeScreenState extends State<HomeScreen>
     _animController.forward();
   }
 
+  void _syncAlertCount() {
+    if (!mounted) return;
+    setState(() {
+      totalAlerts = _alertCountService.alertCount.value;
+    });
+  }
+
   @override
   void dispose() {
     sensorSub?.cancel();
     connectivitySub.cancel();
     connectionTimer?.cancel();
+    _alertCountService.alertCount.removeListener(_syncAlertCount);
+    for (final controller in _thresholdControllers.values) {
+      controller.dispose();
+    }
     _animController.dispose();
     super.dispose();
   }
@@ -466,14 +623,45 @@ class _HomeScreenState extends State<HomeScreen>
 
                               const SizedBox(height: 16),
 
-                              // ─── Greeting ─────────────────────────────────
-                              Text(
-                                'Good Morning,',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.95),
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              // ─── Greeting + Config Button ────────────────
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Good Morning,',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.95),
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Tooltip(
+                                    message: 'Threshold config',
+                                    child: InkWell(
+                                      onTap: _openThresholdConfigDialog,
+                                      borderRadius: BorderRadius.circular(18),
+                                      child: Container(
+                                        width: 36,
+                                        height: 36,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.18),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color:
+                                                Colors.white.withOpacity(0.25),
+                                          ),
+                                        ),
+                                        child: const Icon(
+                                          Icons.tune_rounded,
+                                          color: Colors.white,
+                                          size: 19,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
 
                               const SizedBox(height: 16),
@@ -482,7 +670,7 @@ class _HomeScreenState extends State<HomeScreen>
                               Container(
                                 width: double.infinity,
                                 padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
@@ -496,7 +684,7 @@ class _HomeScreenState extends State<HomeScreen>
                                   children: [
                                     _statItem('7', 'Sensors'),
                                     _divider(),
-                                    _statItem('4', 'Alerts'),
+                                    _statItem('$totalAlerts', 'Alerts'),
                                     _divider(),
                                     _statItem('4', 'Pumps'),
                                   ],
@@ -611,16 +799,18 @@ class _HomeScreenState extends State<HomeScreen>
           value,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 28,
+            fontSize: 24,
             fontWeight: FontWeight.bold,
+            height: 1.0,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           label,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 13,
+            fontSize: 12,
+            height: 1.0,
           ),
         ),
       ],

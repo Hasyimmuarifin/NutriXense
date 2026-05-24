@@ -26,28 +26,30 @@ class MQTTService {
   }
 
   Future<void> init() async {
-    if (_initialized) return;
+    if (_initialized && isConnected) return;
 
-    client = MqttServerClient.withPort(
-      'a8805b4f45744c3f9ac83882e423e0c0.s1.eu.hivemq.cloud',
-      'flutter_client_${DateTime.now().millisecondsSinceEpoch}',
-      8883,
-    );
+    if (!_initialized) {
+      client = MqttServerClient.withPort(
+        'a8805b4f45744c3f9ac83882e423e0c0.s1.eu.hivemq.cloud',
+        'flutter_client_${DateTime.now().millisecondsSinceEpoch}',
+        8883,
+      );
 
-    client.secure = true;
-    client.securityContext = SecurityContext.defaultContext;
+      client.secure = true;
+      client.securityContext = SecurityContext.defaultContext;
 
-    client.keepAlivePeriod = 20;
+      client.keepAlivePeriod = 20;
 
-    client.autoReconnect = true;
-    client.resubscribeOnAutoReconnect = true;
+      client.autoReconnect = true;
+      client.resubscribeOnAutoReconnect = true;
 
-    client.onConnected = onConnected;
-    client.onDisconnected = onDisconnected;
-    client.onSubscribed = onSubscribed;
+      client.onConnected = onConnected;
+      client.onDisconnected = onDisconnected;
+      client.onSubscribed = onSubscribed;
+      _initialized = true;
+    }
 
     await connect();
-    _initialized = true;
   }
 
   Future<void> connect() async {
@@ -91,13 +93,18 @@ class MQTTService {
     });
   }
 
-  void publish(String topic, String message) {
+  void publish(String topic, String message, {bool retain = false}) {
     if (!isConnected) return;
 
     final builder = MqttClientPayloadBuilder();
     builder.addString(message);
 
-    client.publishMessage(topic, MqttQos.exactlyOnce, builder.payload!);
+    client.publishMessage(
+      topic,
+      MqttQos.exactlyOnce,
+      builder.payload!,
+      retain: retain,
+    );
   }
 
   void setRelay(int relay, bool isOn) {

@@ -25,21 +25,39 @@ class AiPumpAutomationService {
   Future<AiPumpAutomationResult> apply(
     AutomationTriggers triggers,
   ) async {
-    final pumpCommands = <_PumpCommand>[
-      if (triggers.activateNitrogenPump)
-        const _PumpCommand(relay: 1, label: 'Pump A (N)'),
-      if (triggers.activatePhosphorusPump)
-        const _PumpCommand(relay: 2, label: 'Pump B (P)'),
-      if (triggers.activatePotassiumPump)
-        const _PumpCommand(relay: 3, label: 'Pump C (K)'),
-      if (triggers.activateWaterPump)
-        const _PumpCommand(relay: 4, label: 'Pump D (Air)'),
-    ];
+    return _applyCommands(
+      <_PumpCommand>[
+        if (triggers.activateNitrogenPump)
+          const _PumpCommand(relay: 1, label: 'Pump A (N)'),
+        if (triggers.activatePhosphorusPump)
+          const _PumpCommand(relay: 2, label: 'Pump B (P)'),
+        if (triggers.activatePotassiumPump)
+          const _PumpCommand(relay: 3, label: 'Pump C (K)'),
+        if (triggers.activateWaterPump)
+          const _PumpCommand(relay: 4, label: 'Pump D (Air)'),
+      ],
+      reason: triggers.reason,
+    );
+  }
 
+  Future<AiPumpAutomationResult> applyRelays(
+    Set<int> relays, {
+    required String reason,
+  }) {
+    return _applyCommands(
+      relays.map(_commandForRelay).whereType<_PumpCommand>().toList(),
+      reason: reason,
+    );
+  }
+
+  Future<AiPumpAutomationResult> _applyCommands(
+    List<_PumpCommand> pumpCommands, {
+    required String reason,
+  }) async {
     if (pumpCommands.isEmpty) {
       return AiPumpAutomationResult(
         activatedPumps: const [],
-        reason: triggers.reason,
+        reason: reason,
       );
     }
 
@@ -61,8 +79,23 @@ class AiPumpAutomationService {
 
     return AiPumpAutomationResult(
       activatedPumps: pumpCommands.map((command) => command.label).toList(),
-      reason: triggers.reason,
+      reason: reason,
     );
+  }
+
+  _PumpCommand? _commandForRelay(int relay) {
+    switch (relay) {
+      case 1:
+        return const _PumpCommand(relay: 1, label: 'Pump A (N)');
+      case 2:
+        return const _PumpCommand(relay: 2, label: 'Pump B (P)');
+      case 3:
+        return const _PumpCommand(relay: 3, label: 'Pump C (K)');
+      case 4:
+        return const _PumpCommand(relay: 4, label: 'Pump D (Air)');
+      default:
+        return null;
+    }
   }
 }
 

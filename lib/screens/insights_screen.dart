@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/ai_recommendation.dart';
 import '../models/sensor_data.dart';
 import '../services/ai_pump_automation_service.dart';
+import '../services/alert_count_service.dart';
 import '../services/gemini_recommendation_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/insight_card_widget.dart';
@@ -21,6 +22,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
       GeminiRecommendationService();
   final AiPumpAutomationService _pumpAutomationService =
       AiPumpAutomationService();
+  final AlertCountService _alertCountService = AlertCountService.instance;
   List<InsightCard> _insights = [];
   AiRecommendationResponse? _aiResponse;
   int? _expandedIndex;
@@ -81,6 +83,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
         _insights = response.toInsightCards();
         _lastUpdated = DateTime.now();
       });
+      _alertCountService.updateFromAiRecommendation(
+        criticalCount: response.recommendations.critical.length,
+        warningCount: response.recommendations.warning.length,
+      );
       await _applyPumpAutomation(response.automationTriggers);
     } catch (e) {
       if (!mounted) return;
