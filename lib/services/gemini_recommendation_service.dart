@@ -74,10 +74,17 @@ class GeminiRecommendationService {
       'language': 'id',
       'control_policy':
           'automation_triggers must be based on numeric thresholds only.',
+      'pump_mapping': {
+        'activate_nitrogen_pump': 'Pump A - Nitrogen (N)',
+        'activate_phosphorus_pump': 'Pump B - Phosphorus (P)',
+        'activate_potassium_pump': 'Pump C - Potassium (K)',
+        'activate_water_pump': 'Pump D - Air/Water (H2O)',
+      },
       'output_rules': [
         'Return one complete JSON object only.',
         'Do not use markdown.',
         'Keep every string concise and close all quotes.',
+        'Set an automation trigger to true only when its matching local_threshold_flag is true.',
       ],
       'thresholds': thresholds,
       'history_summary': summary.toJson(),
@@ -97,7 +104,9 @@ class GeminiRecommendationService {
     );
     return AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
       canActivateWaterPump: summary.canActivateWaterPump,
-      canActivateFertilizerPump: summary.canActivateFertilizerPump,
+      canActivateNitrogenPump: summary.canActivateNitrogenPump,
+      canActivatePhosphorusPump: summary.canActivatePhosphorusPump,
+      canActivatePotassiumPump: summary.canActivatePotassiumPump,
     );
   }
 
@@ -184,6 +193,13 @@ class GeminiRecommendationService {
           'recommendations',
           'automation_triggers',
         ],
+        'automation_trigger_keys': [
+          'activate_nitrogen_pump',
+          'activate_phosphorus_pump',
+          'activate_potassium_pump',
+          'activate_water_pump',
+          'reason',
+        ],
         'original_input': originalPayload,
         'malformed_output': cleaned,
       })),
@@ -248,13 +264,17 @@ final _responseSchema = Schema.object(
     ),
     'automation_triggers': Schema.object(
       properties: {
+        'activate_nitrogen_pump': Schema.boolean(),
+        'activate_phosphorus_pump': Schema.boolean(),
+        'activate_potassium_pump': Schema.boolean(),
         'activate_water_pump': Schema.boolean(),
-        'activate_fertilizer_pump': Schema.boolean(),
         'reason': Schema.string(),
       },
       requiredProperties: [
+        'activate_nitrogen_pump',
+        'activate_phosphorus_pump',
+        'activate_potassium_pump',
         'activate_water_pump',
-        'activate_fertilizer_pump',
         'reason',
       ],
     ),
@@ -393,16 +413,22 @@ class _SensorHistorySummary {
         moisture < GeminiRecommendationService.thresholds['moisture_min']!;
   }
 
-  bool get canActivateFertilizerPump {
+  bool get canActivateNitrogenPump {
     final n = parameters['N']?.current;
+    return n != null &&
+        n < GeminiRecommendationService.thresholds['nitrogen_min']!;
+  }
+
+  bool get canActivatePhosphorusPump {
     final p = parameters['P']?.current;
+    return p != null &&
+        p < GeminiRecommendationService.thresholds['phosphorus_min']!;
+  }
+
+  bool get canActivatePotassiumPump {
     final k = parameters['K']?.current;
-    return (n != null &&
-            n < GeminiRecommendationService.thresholds['nitrogen_min']!) ||
-        (p != null &&
-            p < GeminiRecommendationService.thresholds['phosphorus_min']!) ||
-        (k != null &&
-            k < GeminiRecommendationService.thresholds['potassium_min']!);
+    return k != null &&
+        k < GeminiRecommendationService.thresholds['potassium_min']!;
   }
 
   Map<String, dynamic> toJson() {
@@ -418,7 +444,9 @@ class _SensorHistorySummary {
           )),
       'local_threshold_flags': {
         'water_pump_allowed': canActivateWaterPump,
-        'fertilizer_pump_allowed': canActivateFertilizerPump,
+        'nitrogen_pump_allowed': canActivateNitrogenPump,
+        'phosphorus_pump_allowed': canActivatePhosphorusPump,
+        'potassium_pump_allowed': canActivatePotassiumPump,
       },
     };
   }

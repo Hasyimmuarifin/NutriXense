@@ -31,7 +31,9 @@ class AiRecommendationResponse {
 
   AiRecommendationResponse withAutomationGuard({
     required bool canActivateWaterPump,
-    required bool canActivateFertilizerPump,
+    required bool canActivateNitrogenPump,
+    required bool canActivatePhosphorusPump,
+    required bool canActivatePotassiumPump,
   }) {
     return AiRecommendationResponse(
       plantHealthPercentage: plantHealthPercentage,
@@ -40,8 +42,12 @@ class AiRecommendationResponse {
       automationTriggers: automationTriggers.copyWith(
         activateWaterPump:
             automationTriggers.activateWaterPump && canActivateWaterPump,
-        activateFertilizerPump: automationTriggers.activateFertilizerPump &&
-            canActivateFertilizerPump,
+        activateNitrogenPump:
+            automationTriggers.activateNitrogenPump && canActivateNitrogenPump,
+        activatePhosphorusPump: automationTriggers.activatePhosphorusPump &&
+            canActivatePhosphorusPump,
+        activatePotassiumPump: automationTriggers.activatePotassiumPump &&
+            canActivatePotassiumPump,
       ),
     );
   }
@@ -135,35 +141,59 @@ class AiRecommendationItem {
 
 class AutomationTriggers {
   final bool activateWaterPump;
-  final bool activateFertilizerPump;
+  final bool activateNitrogenPump;
+  final bool activatePhosphorusPump;
+  final bool activatePotassiumPump;
   final String reason;
 
   const AutomationTriggers({
     required this.activateWaterPump,
-    required this.activateFertilizerPump,
+    required this.activateNitrogenPump,
+    required this.activatePhosphorusPump,
+    required this.activatePotassiumPump,
     required this.reason,
   });
 
   factory AutomationTriggers.fromJson(Map<String, dynamic> json) {
+    final fertilizerRequested = json['activate_fertilizer_pump'] == true;
     return AutomationTriggers(
       activateWaterPump: json['activate_water_pump'] == true,
-      activateFertilizerPump: json['activate_fertilizer_pump'] == true,
+      activateNitrogenPump:
+          json['activate_nitrogen_pump'] == true || fertilizerRequested,
+      activatePhosphorusPump:
+          json['activate_phosphorus_pump'] == true || fertilizerRequested,
+      activatePotassiumPump:
+          json['activate_potassium_pump'] == true || fertilizerRequested,
       reason: (json['reason'] ?? '').toString(),
     );
   }
 
   AutomationTriggers copyWith({
     bool? activateWaterPump,
-    bool? activateFertilizerPump,
+    bool? activateNitrogenPump,
+    bool? activatePhosphorusPump,
+    bool? activatePotassiumPump,
     String? reason,
   }) {
     return AutomationTriggers(
       activateWaterPump: activateWaterPump ?? this.activateWaterPump,
-      activateFertilizerPump:
-          activateFertilizerPump ?? this.activateFertilizerPump,
+      activateNitrogenPump: activateNitrogenPump ?? this.activateNitrogenPump,
+      activatePhosphorusPump:
+          activatePhosphorusPump ?? this.activatePhosphorusPump,
+      activatePotassiumPump:
+          activatePotassiumPump ?? this.activatePotassiumPump,
       reason: reason ?? this.reason,
     );
   }
+
+  bool get activateFertilizerPump =>
+      activateNitrogenPump || activatePhosphorusPump || activatePotassiumPump;
+
+  bool get hasActivePump =>
+      activateWaterPump ||
+      activateNitrogenPump ||
+      activatePhosphorusPump ||
+      activatePotassiumPump;
 
   IconData get waterIcon =>
       activateWaterPump ? Icons.water_drop_rounded : Icons.water_drop_outlined;

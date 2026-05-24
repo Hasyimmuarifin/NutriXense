@@ -4,12 +4,18 @@ import 'dart:convert';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
-
 class MQTTService {
   late MqttServerClient client;
-  final _sensorStreamController = StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get sensorStream => _sensorStreamController.stream;
+  bool _initialized = false;
+  final _sensorStreamController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get sensorStream =>
+      _sensorStreamController.stream;
   Function(bool)? onConnectionChanged;
+
+  bool get isConnected =>
+      _initialized &&
+      client.connectionStatus?.state == MqttConnectionState.connected;
 
   Map<String, dynamic> parseMessage(String message) {
     try {
@@ -20,6 +26,8 @@ class MQTTService {
   }
 
   Future<void> init() async {
+    if (_initialized) return;
+
     client = MqttServerClient.withPort(
       'a8805b4f45744c3f9ac83882e423e0c0.s1.eu.hivemq.cloud',
       'flutter_client_${DateTime.now().millisecondsSinceEpoch}',
@@ -39,6 +47,7 @@ class MQTTService {
     client.onSubscribed = onSubscribed;
 
     await connect();
+    _initialized = true;
   }
 
   Future<void> connect() async {
@@ -59,6 +68,8 @@ class MQTTService {
   }
 
   void subscribe(String topic) {
+    if (!isConnected) return;
+
     client.subscribe(topic, MqttQos.atMostOnce);
 
     client.updates!.listen((event) {
@@ -81,6 +92,8 @@ class MQTTService {
   }
 
   void publish(String topic, String message) {
+    if (!isConnected) return;
+
     final builder = MqttClientPayloadBuilder();
     builder.addString(message);
 
@@ -92,10 +105,7 @@ class MQTTService {
   }
 
   void publishRelay(int relay, bool state) {
-
-    final payload = jsonEncode({
-      "relay$relay": state ? 1 : 0
-    });
+    final payload = jsonEncode({"relay$relay": state ? 1 : 0});
 
     publish("nutrixense/control", payload);
 

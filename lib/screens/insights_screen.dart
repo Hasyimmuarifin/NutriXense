@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import '../models/ai_recommendation.dart';
 import '../models/sensor_data.dart';
+import '../services/ai_pump_automation_service.dart';
 import '../services/gemini_recommendation_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/insight_card_widget.dart';
@@ -18,13 +19,17 @@ class InsightsScreen extends StatefulWidget {
 class _InsightsScreenState extends State<InsightsScreen> {
   final GeminiRecommendationService _recommendationService =
       GeminiRecommendationService();
+  final AiPumpAutomationService _pumpAutomationService =
+      AiPumpAutomationService();
   List<InsightCard> _insights = [];
   AiRecommendationResponse? _aiResponse;
   int? _expandedIndex;
   String _selectedFilter = 'All';
   bool _isRequesting = false;
+  bool _isApplyingAutomation = false;
   Object? _requestError;
   DateTime? _lastUpdated;
+  AiPumpAutomationResult? _lastAutomationResult;
 
   final List<String> _filters = ['All', 'Critical', 'Warning', 'Good'];
 
@@ -76,6 +81,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
         _insights = response.toInsightCards();
         _lastUpdated = DateTime.now();
       });
+      await _applyPumpAutomation(response.automationTriggers);
     } catch (e) {
       if (!mounted) return;
       setState(() => _requestError = e);
@@ -84,6 +90,47 @@ class _InsightsScreenState extends State<InsightsScreen> {
         setState(() => _isRequesting = false);
       }
     }
+  }
+
+  Future<void> _applyPumpAutomation(AutomationTriggers triggers) async {
+    if (!triggers.hasActivePump) {
+      setState(() => _lastAutomationResult = AiPumpAutomationResult(
+            activatedPumps: const [],
+            reason: triggers.reason,
+          ));
+      return;
+    }
+
+    setState(() => _isApplyingAutomation = true);
+
+    try {
+      final result = await _pumpAutomationService.apply(triggers);
+      if (!mounted) return;
+      setState(() => _lastAutomationResult = result);
+      _showAutomationSnackBar(result);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _requestError = e);
+    } finally {
+      if (mounted) {
+        setState(() => _isApplyingAutomation = false);
+      }
+    }
+  }
+
+  void _showAutomationSnackBar(AiPumpAutomationResult result) {
+    if (!result.hasActivatedPump) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'AI activated ${result.activatedPumps.join(', ')} for 5 seconds.',
+        ),
+        backgroundColor: AppTheme.primaryGreen,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -471,12 +518,18 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   const SizedBox(height: 12),
                   _buildAutomationTriggerRow(triggers),
                 ],
+                if (_lastAutomationResult != null) ...[
+                  const SizedBox(height: 10),
+                  _buildAutomationResult(_lastAutomationResult!),
+                ],
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: _isRequesting ? null : _requestAiRecommendation,
-                    icon: _isRequesting
+                    onPressed: _isRequesting || _isApplyingAutomation
+                        ? null
+                        : _requestAiRecommendation,
+                    icon: _isRequesting || _isApplyingAutomation
                         ? const SizedBox(
                             width: 16,
                             height: 16,
@@ -486,7 +539,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                     label: Text(
                       _isRequesting
                           ? 'Menganalisis...'
-                          : 'Request AI Recommendation',
+                          : _isApplyingAutomation
+                              ? 'Applying pump automation...'
+                              : 'Request AI Recommendation',
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryGreen,
@@ -513,18 +568,43 @@ class _InsightsScreenState extends State<InsightsScreen> {
       runSpacing: 8,
       children: [
         _buildTriggerChip(
-          triggers.waterIcon,
-          triggers.activateWaterPump ? 'Water: ON' : 'Water: OFF',
-          triggers.activateWaterPump,
+          Icons.eco_rounded,
+          triggers.activateNitrogenPump ? 'Pump A N: ON' : 'Pump A N: OFF',
+          triggers.activateNitrogenPump,
         ),
         _buildTriggerChip(
-          triggers.fertilizerIcon,
-          triggers.activateFertilizerPump
-              ? 'Fertilizer: ON'
-              : 'Fertilizer: OFF',
-          triggers.activateFertilizerPump,
+          Icons.grass_rounded,
+          triggers.activatePhosphorusPump ? 'Pump B P: ON' : 'Pump B P: OFF',
+          triggers.activatePhosphorusPump,
+        ),
+        _buildTriggerChip(
+          Icons.local_florist_rounded,
+          triggers.activatePotassiumPump ? 'Pump C K: ON' : 'Pump C K: OFF',
+          triggers.activatePotassiumPump,
+        ),
+        _buildTriggerChip(
+          Icons.water_drop_rounded,
+          triggers.activateWaterPump ? 'Pump D Air: ON' : 'Pump D Air: OFF',
+          triggers.activateWaterPump,
         ),
       ],
+    );
+  }
+
+  Widget _buildAutomationResult(AiPumpAutomationResult result) {
+    final text = result.hasActivatedPump
+        ? 'Applied: ${result.activatedPumps.join(', ')}'
+        : 'No pump activation needed';
+
+    return Text(
+      text,
+      style: TextStyle(
+        color: result.hasActivatedPump
+            ? AppTheme.primaryGreen
+            : AppTheme.textSecondary,
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+      ),
     );
   }
 

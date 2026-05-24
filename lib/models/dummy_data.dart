@@ -87,11 +87,11 @@ class DummyData {
       final t = i / totalPoints;
       data.add(SensorDataPoint(
         time: time,
-        nitrogen:  38.5 + 15 * _wave(t, 0.0),
+        nitrogen: 38.5 + 15 * _wave(t, 0.0),
         phosphorus: 55.2 + 10 * _wave(t, 1.2),
-        potassium:  92.8 + 12 * _wave(t, 2.4),
-        ph:          5.8 + 0.8 * _wave(t, 0.8),
-        moisture:   64.0 + 12 * _wave(t, 1.6),
+        potassium: 92.8 + 12 * _wave(t, 2.4),
+        ph: 5.8 + 0.8 * _wave(t, 0.8),
+        moisture: 64.0 + 12 * _wave(t, 1.6),
         temperature: 28.4 + 3.0 * _wave(t, 3.0),
       ));
     }
@@ -111,7 +111,8 @@ class DummyData {
               'Nitrogen levels are below optimal range (38.5 mg/kg vs 40–80 mg/kg). Plants may show yellowing of older leaves.',
           icon: '⚠️',
           severity: InsightSeverity.critical,
-          action: 'Apply nitrogen-rich fertilizer (NPK 20-10-10). Activate Pump A for 5 minutes.',
+          action:
+              'Apply nitrogen-rich fertilizer (NPK 20-10-10). Activate Pump A for 5 minutes.',
         ),
         const InsightCard(
           title: 'pH Too Acidic',
@@ -127,7 +128,8 @@ class DummyData {
               'Potassium at 92.8 mg/kg exceeds optimal range (60–90 mg/kg). Excess K may block calcium uptake.',
           icon: '🟡',
           severity: InsightSeverity.warning,
-          action: 'Pause Pump C until K levels normalize. Flush soil with clean water.',
+          action:
+              'Pause Pump C until K levels normalize. Flush soil with clean water.',
         ),
         const InsightCard(
           title: 'Phosphorus is Optimal',
@@ -181,7 +183,7 @@ class DummyData {
         PumpController(
           id: 'pump_d',
           name: 'Pump D',
-          nutrient: 'Water (H2O)',
+          nutrient: 'Air (H2O)',
           iconPath: 'assets/icons/water.png',
           isOn: false,
         ),
@@ -190,11 +192,11 @@ class DummyData {
   // ─── Mini chart data for Home screen ─────────────────────────────────────────
   static List<double> getMiniChartData(String sensor) {
     final Map<String, List<double>> charts = {
-      'Nitrogen':    [42, 40, 37, 35, 38, 36, 38.5],
-      'Phosphorus':  [50, 53, 56, 54, 58, 55, 55.2],
-      'Potassium':   [85, 88, 90, 93, 91, 95, 92.8],
-      'pH Level':    [6.2, 6.0, 5.9, 5.8, 6.0, 5.7, 5.8],
-      'Soil Moisture':[60, 65, 68, 62, 64, 66, 64.0],
+      'Nitrogen': [42, 40, 37, 35, 38, 36, 38.5],
+      'Phosphorus': [50, 53, 56, 54, 58, 55, 55.2],
+      'Potassium': [85, 88, 90, 93, 91, 95, 92.8],
+      'pH Level': [6.2, 6.0, 5.9, 5.8, 6.0, 5.7, 5.8],
+      'Soil Moisture': [60, 65, 68, 62, 64, 66, 64.0],
       'Temperature': [27, 28, 29, 28, 27, 29, 28.4],
     };
     return charts[sensor] ?? [0, 0, 0, 0, 0, 0, 0];
