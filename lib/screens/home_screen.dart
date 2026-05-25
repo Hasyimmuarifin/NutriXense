@@ -166,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Nitrogen",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: 150,
+        maxValue: _gaugeMaxValue('max_nitrogen', 80, 150),
         minNormal: _thresholdValue('min_nitrogen', 40),
         maxNormal: _thresholdValue('max_nitrogen', 80),
         icon: "assets/icons/leaf.png",
@@ -177,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Phosphorus",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: 100,
+        maxValue: _gaugeMaxValue('max_phosphorus', 60, 100),
         minNormal: _thresholdValue('min_phosphorus', 20),
         maxNormal: _thresholdValue('max_phosphorus', 60),
         icon: "assets/icons/root.png",
@@ -188,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Potassium",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: 150,
+        maxValue: _gaugeMaxValue('max_potassium', 100, 150),
         minNormal: _thresholdValue('min_potassium', 40),
         maxNormal: _thresholdValue('max_potassium', 100),
         icon: "assets/icons/crop.png",
@@ -199,7 +199,7 @@ class _HomeScreenState extends State<HomeScreen>
         label: "pH Level",
         unit: "pH",
         minValue: 0,
-        maxValue: 14,
+        maxValue: _gaugeMaxValue('max_ph', 7.2, 14),
         minNormal: _thresholdValue('min_ph', 5.8),
         maxNormal: _thresholdValue('max_ph', 7.2),
         icon: "assets/icons/ph.png",
@@ -210,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Soil Moisture",
         unit: "%",
         minValue: 0,
-        maxValue: 100,
+        maxValue: _gaugeMaxValue('max_moisture', 80, 100),
         minNormal: _thresholdValue('min_moisture', 40),
         maxNormal: _thresholdValue('max_moisture', 80),
         icon: "assets/icons/water.png",
@@ -221,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Temperature",
         unit: "°C",
         minValue: 0,
-        maxValue: 50,
+        maxValue: _gaugeMaxValue('max_temperature', 35, 50),
         minNormal: _thresholdValue('min_temperature', 18),
         maxNormal: _thresholdValue('max_temperature', 35),
         icon: "assets/icons/temp.png",
@@ -232,13 +232,23 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Electrical Conductivity",
         unit: "mS/cm",
         minValue: 0,
-        maxValue: 5,
+        maxValue: _gaugeMaxValue('max_ec', 3.0, 5),
         minNormal: _thresholdValue('min_ec', 1.0),
         maxNormal: _thresholdValue('max_ec', 3.0),
         icon: "assets/icons/ec.png",
         colorHex: 0xFF7C4DFF,
       ),
     ];
+  }
+
+  double _gaugeMaxValue(
+    String maxNormalKey,
+    double originalMaxNormal,
+    double originalMaxValue,
+  ) {
+    final maxNormal = _thresholdValue(maxNormalKey, originalMaxNormal);
+    final originalHeadroom = originalMaxValue - originalMaxNormal;
+    return maxNormal + originalHeadroom;
   }
 
   double _thresholdValue(String key, double fallback) {
