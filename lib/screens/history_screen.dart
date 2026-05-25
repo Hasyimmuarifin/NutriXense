@@ -72,6 +72,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  double? get _chartMinX => _selectedFilter == 0 ? 0 : null;
+
+  double? get _chartMaxX {
+    if (_selectedFilter != 0) return null;
+
+    final now = DateTime.now();
+    return now.hour + (now.minute / 60.0) + (now.second / 3600.0);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -116,14 +125,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Query _historyBaseQuery() {
-    final startDate = DateTime.now().subtract(
-      Duration(days: _filterDays[_selectedFilter]),
-    );
+    final startDate = _historyStartDate();
 
     return FirebaseFirestore.instance.collection('sensor_data').where(
           'timestamp',
           isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
         );
+  }
+
+  DateTime _historyStartDate() {
+    final now = DateTime.now();
+    if (_selectedFilter == 0) {
+      return DateTime(now.year, now.month, now.day);
+    }
+
+    return now.subtract(Duration(days: _filterDays[_selectedFilter]));
   }
 
   List<SensorDataPoint> _applySampling(List<SensorDataPoint> source) {
@@ -135,10 +151,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     // 7 DAYS → ambil 1 data tiap 15 menit
-    final Duration interval =
-        _selectedFilter == 1
-            ? const Duration(minutes: 15)
-            : const Duration(hours: 1);
+    final Duration interval = _selectedFilter == 1
+        ? const Duration(minutes: 15)
+        : const Duration(hours: 1);
 
     final List<SensorDataPoint> sampled = [];
 
@@ -198,9 +213,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   void _listenForLatestHistory() {
-    final startAfter = _data.isNotEmpty
-        ? _data.last.time
-        : DateTime.now().subtract(Duration(days: _filterDays[_selectedFilter]));
+    final startAfter = _data.isNotEmpty ? _data.last.time : _historyStartDate();
 
     _latestSubscription = FirebaseFirestore.instance
         .collection('sensor_data')
@@ -631,6 +644,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       height: 220,
                                       child: LineChart(
                                         LineChartData(
+                                          minX: _chartMinX,
+                                          maxX: _chartMaxX,
                                           minY: _chartMinY,
                                           maxY: _chartMaxY,
                                           gridData: FlGridData(
