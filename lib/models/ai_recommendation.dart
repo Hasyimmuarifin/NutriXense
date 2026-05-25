@@ -86,6 +86,7 @@ class AiRecommendationItem {
   final String status;
   final String message;
   final String explanation;
+  final String recommendation;
 
   const AiRecommendationItem({
     required this.id,
@@ -93,15 +94,19 @@ class AiRecommendationItem {
     required this.status,
     required this.message,
     required this.explanation,
+    required this.recommendation,
   });
 
   factory AiRecommendationItem.fromJson(Map<String, dynamic> json) {
+    final explanation = (json['explanation'] ?? '').toString();
     return AiRecommendationItem(
       id: (json['id'] ?? '').toString(),
       title: (json['title'] ?? 'Rekomendasi').toString(),
       status: (json['status'] ?? 'warning').toString().toLowerCase(),
       message: (json['message'] ?? '').toString(),
-      explanation: (json['explanation'] ?? '').toString(),
+      explanation: explanation,
+      recommendation:
+          (json['recommendation'] ?? json['action'] ?? explanation).toString(),
     );
   }
 
@@ -112,6 +117,7 @@ class AiRecommendationItem {
       icon: _icon,
       severity: _severity,
       action: explanation,
+      recommendation: recommendation,
     );
   }
 

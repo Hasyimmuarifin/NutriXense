@@ -82,6 +82,7 @@ class InsightCard {
   final String icon;
   final InsightSeverity severity;
   final String action;
+  final String recommendation;
 
   const InsightCard({
     required this.title,
@@ -89,6 +90,7 @@ class InsightCard {
     required this.icon,
     required this.severity,
     required this.action,
+    this.recommendation = '',
   });
 }
 

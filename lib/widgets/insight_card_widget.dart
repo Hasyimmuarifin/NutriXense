@@ -145,33 +145,68 @@ class InsightCardWidget extends StatelessWidget {
                 const SizedBox(height: 12),
                 const Divider(height: 1),
                 const SizedBox(height: 12),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.tips_and_updates_rounded,
-                      size: 15,
-                      color: _borderColor,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        insight.action,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _borderColor,
-                          fontWeight: FontWeight.w600,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
+                _buildExpandedInfoRow(
+                  icon: Icons.psychology_alt_rounded,
+                  label: 'Alasan AI',
+                  text: insight.action,
                 ),
+                if (insight.recommendation.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _buildExpandedInfoRow(
+                    icon: Icons.agriculture_rounded,
+                    label: 'Tindak Lanjut',
+                    text: insight.recommendation,
+                  ),
+                ],
               ],
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildExpandedInfoRow({
+    required IconData icon,
+    required String label,
+    required String text,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 15,
+          color: _borderColor,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: _borderColor,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                text,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _borderColor,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

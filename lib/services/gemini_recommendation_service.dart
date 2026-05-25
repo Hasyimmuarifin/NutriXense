@@ -84,6 +84,9 @@ class GeminiRecommendationService {
         'Return one complete JSON object only.',
         'Do not use markdown.',
         'Keep every string concise and close all quotes.',
+        'For each recommendation item, explanation must explain why the condition happened from the sensor data.',
+        'For each recommendation item, recommendation must explain specific follow-up actions a farmer/user can take.',
+        'Recommendations must be practical, safe, and measurable when possible, such as pump use, irrigation, pH correction, fertilizer adjustment, retesting, or monitoring frequency.',
         'Set an automation trigger to true only when its matching local_threshold_flag is true.',
       ],
       'thresholds': thresholds,
@@ -200,6 +203,14 @@ class GeminiRecommendationService {
           'activate_water_pump',
           'reason',
         ],
+        'recommendation_item_keys': [
+          'id',
+          'title',
+          'status',
+          'message',
+          'explanation',
+          'recommendation',
+        ],
         'original_input': originalPayload,
         'malformed_output': cleaned,
       })),
@@ -236,7 +247,7 @@ class GeminiRecommendationService {
 }
 
 const _systemPrompt =
-    'You are an expert AI Agronomist, Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC). Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text explanations must be in Indonesian, providing scientific reasons (XAI) for the plant health status.';
+    'You are an expert AI Agronomist, Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC). Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text must be in Indonesian. The explanation field must provide scientific reasons (XAI) for the plant health status. The recommendation field must provide concrete follow-up actions that a farmer or user can apply safely and practically.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {
@@ -245,8 +256,16 @@ final _recommendationItemSchema = Schema.object(
     'status': Schema.enumString(enumValues: ['critical', 'warning', 'good']),
     'message': Schema.string(),
     'explanation': Schema.string(),
+    'recommendation': Schema.string(),
   },
-  requiredProperties: ['id', 'title', 'status', 'message', 'explanation'],
+  requiredProperties: [
+    'id',
+    'title',
+    'status',
+    'message',
+    'explanation',
+    'recommendation',
+  ],
 );
 
 final _responseSchema = Schema.object(
