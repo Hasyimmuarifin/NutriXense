@@ -15,7 +15,6 @@ import '../services/nutrient_alert_service.dart';
 import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 
-import '../widgets/sensor_card.dart';
 import '../widgets/section_header.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -965,51 +964,26 @@ class _HomeScreenState extends State<HomeScreen>
                   // ─── Sensor grid ──────────────────────────────────────────
                   const SectionHeader(title: 'Sensor Readings'),
                   const SizedBox(height: 20),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isNarrow = constraints.maxWidth < 360;
-                      return GridView.builder(
-                        padding: EdgeInsets.zero,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: isNarrow ? 10 : 12,
-                          mainAxisSpacing: isNarrow ? 10 : 12,
-                          childAspectRatio: isNarrow ? 0.78 : 0.92,
-                        ),
-                        itemCount: _readings.length > 6 ? 6 : _readings.length,
-                        itemBuilder: (context, index) {
-                          return TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration:
-                                Duration(milliseconds: 400 + (index * 80)),
-                            curve: Curves.easeOut,
-                            builder: (context, value, child) => Transform.scale(
-                              scale: 0.8 + 0.2 * value,
-                              child: Opacity(opacity: value, child: child),
-                            ),
-                            child: SensorCard(reading: _readings[index]),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                  ..._readings.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final reading = entry.value;
 
-                  // ─── EC Card (full-width) ──────────────────────────────────
-                  if (_readings.length > 6) ...[
-                    const SizedBox(height: 12),
-                    TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0, end: 1),
-                      duration: const Duration(milliseconds: 900),
-                      curve: Curves.easeOut,
-                      builder: (context, value, child) => Transform.scale(
-                        scale: 0.8 + 0.2 * value,
-                        child: Opacity(opacity: value, child: child),
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == _readings.length - 1 ? 0 : 12,
                       ),
-                      child: _buildECCard(_readings[6]),
-                    ),
-                  ],
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: 1),
+                        duration: Duration(milliseconds: 400 + (index * 80)),
+                        curve: Curves.easeOut,
+                        builder: (context, value, child) => Transform.scale(
+                          scale: 0.8 + 0.2 * value,
+                          child: Opacity(opacity: value, child: child),
+                        ),
+                        child: _buildSensorReadingCard(reading),
+                      ),
+                    );
+                  }),
                 ]),
               ),
             ),
@@ -1209,10 +1183,13 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildECCard(SensorReading reading) {
+  Widget _buildSensorReadingCard(
+    SensorReading reading, {
+    bool compact = false,
+  }) {
     final sensorColor = Color(reading.colorHex);
 
-    // ─── Dynamic UI based on status (SAMA seperti SensorCard) ───
+    // ─── Dynamic UI based on reading status ─────────────────────
     Color borderColor;
     Color statusColor;
     IconData statusIcon;
@@ -1240,9 +1217,23 @@ class _HomeScreenState extends State<HomeScreen>
         backgroundTint = AppTheme.statusNormal.withOpacity(0.005);
     }
 
+    final horizontalPadding = compact ? 12.0 : 20.0;
+    final verticalPadding = compact ? 12.0 : 16.0;
+    final iconBoxSize = compact ? 34.0 : 40.0;
+    final iconSize = compact ? 19.0 : 22.0;
+    final headerGap = compact ? 8.0 : 12.0;
+    final labelFontSize = compact ? 12.0 : 13.5;
+    final valueFontSize = compact ? 24.0 : 30.0;
+    final progressHeight = compact ? 5.0 : 6.0;
+    final statusHorizontalPadding = compact ? 7.0 : 10.0;
+    final statusVerticalPadding = compact ? 4.0 : 5.0;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: EdgeInsets.symmetric(
+        horizontal: horizontalPadding,
+        vertical: verticalPadding,
+      ),
       decoration: BoxDecoration(
         color: backgroundTint,
 
@@ -1270,8 +1261,8 @@ class _HomeScreenState extends State<HomeScreen>
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: iconBoxSize,
+                height: iconBoxSize,
                 decoration: BoxDecoration(
                   color: sensorColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
@@ -1279,14 +1270,14 @@ class _HomeScreenState extends State<HomeScreen>
                 child: Center(
                   child: Image.asset(
                     reading.icon,
-                    width: 22,
-                    height: 22,
+                    width: iconSize,
+                    height: iconSize,
                     fit: BoxFit.contain,
                   ),
                 ),
               ),
 
-              const SizedBox(width: 12),
+              SizedBox(width: headerGap),
 
               Expanded(
                 child: Column(
@@ -1296,8 +1287,8 @@ class _HomeScreenState extends State<HomeScreen>
                       reading.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13.5,
+                      style: TextStyle(
+                        fontSize: labelFontSize,
                         fontWeight: FontWeight.w800,
                         color: Colors.black87,
                         letterSpacing: 0.2,
@@ -1306,7 +1297,7 @@ class _HomeScreenState extends State<HomeScreen>
                     Text(
                       reading.unit,
                       style: const TextStyle(
-                        fontSize: 11,
+                        fontSize: 10.5,
                         color: Colors.black54,
                       ),
                     ),
@@ -1316,8 +1307,10 @@ class _HomeScreenState extends State<HomeScreen>
 
               // STATUS BADGE (tetap konsisten)
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: EdgeInsets.symmetric(
+                  horizontal: statusHorizontalPadding,
+                  vertical: statusVerticalPadding,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -1330,7 +1323,7 @@ class _HomeScreenState extends State<HomeScreen>
                     Text(
                       reading.status,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: compact ? 9.5 : 10,
                         fontWeight: FontWeight.w700,
                         color: statusColor,
                         letterSpacing: 0.4,
@@ -1342,19 +1335,20 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
 
-          const SizedBox(height: 14),
+          SizedBox(height: compact ? 12 : 14),
 
           // VALUE
           Text(
             '${reading.value}',
             style: TextStyle(
-              fontSize: 30,
+              fontSize: valueFontSize,
               fontWeight: FontWeight.w800,
               color: sensorColor,
+              height: 1.0,
             ),
           ),
 
-          const SizedBox(height: 6),
+          SizedBox(height: compact ? 4 : 6),
 
           Text(
             reading.unit,
@@ -1364,7 +1358,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-          const SizedBox(height: 10),
+          SizedBox(height: compact ? 8 : 10),
 
           // PROGRESS
           ClipRRect(
@@ -1373,12 +1367,12 @@ class _HomeScreenState extends State<HomeScreen>
               value: reading.normalizedValue,
               backgroundColor: sensorColor.withOpacity(0.10),
               valueColor: AlwaysStoppedAnimation<Color>(sensorColor),
-              minHeight: 6,
+              minHeight: progressHeight,
             ),
           ),
 
           // ─── Min / Max label ────────────────────────────────────────
-          const SizedBox(height: 6),
+          SizedBox(height: compact ? 5 : 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
