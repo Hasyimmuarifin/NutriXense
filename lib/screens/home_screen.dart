@@ -251,6 +251,16 @@ class _HomeScreenState extends State<HomeScreen>
     return maxNormal + originalHeadroom;
   }
 
+  double get _npkChartMaxY {
+    return [
+      _gaugeMaxValue('max_nitrogen', 80, 150),
+      _gaugeMaxValue('max_phosphorus', 60, 100),
+      _gaugeMaxValue('max_potassium', 100, 150),
+    ].reduce((a, b) => a > b ? a : b);
+  }
+
+  double get _npkChartInterval => _npkChartMaxY / 5;
+
   double _thresholdValue(String key, double fallback) {
     return double.tryParse(_thresholdControllers[key]?.text.trim() ?? '') ??
         _thresholdConfigService.value(key, fallback);
@@ -945,11 +955,11 @@ class _HomeScreenState extends State<HomeScreen>
             child: LineChart(
               LineChartData(
                 minY: 0,
-                maxY: 150,
+                maxY: _npkChartMaxY,
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  horizontalInterval: 30,
+                  horizontalInterval: _npkChartInterval,
                   getDrawingHorizontalLine: (_) => FlLine(
                     color: Colors.grey.withOpacity(0.12),
                     strokeWidth: 1,
@@ -960,7 +970,7 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 32,
-                      interval: 30,
+                      interval: _npkChartInterval,
                       getTitlesWidget: (v, _) => Text(
                         v.toInt().toString(),
                         style: const TextStyle(

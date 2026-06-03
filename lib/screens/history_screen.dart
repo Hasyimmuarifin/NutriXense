@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/sensor_data.dart';
+import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -33,6 +34,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   StreamSubscription<QuerySnapshot>? _latestSubscription;
   bool _isLoadingHistory = true;
   Object? _historyError;
+  final ThresholdConfigService _thresholdConfigService =
+      ThresholdConfigService.instance;
 
   final List<String> _filters = ['Today', '7 Days', '30 Days'];
   final List<int> _filterDays = [1, 7, 30];
@@ -45,7 +48,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double get _chartMaxY {
     switch (_selectedSensor) {
       case 0:
-        return 150; // NPK
+        return _npkChartMaxY;
       case 1:
         return 14; // pH
       case 2:
@@ -60,7 +63,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double get _chartHorizontalInterval {
     switch (_selectedSensor) {
       case 0:
-        return 30;
+        return _npkChartMaxY / 5;
       case 1:
         return 2;
       case 2:
@@ -81,16 +84,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return now.hour + (now.minute / 60.0) + (now.second / 3600.0);
   }
 
+  double get _npkChartMaxY {
+    return [
+      _gaugeMaxValue('max_nitrogen', 80, 150),
+      _gaugeMaxValue('max_phosphorus', 60, 100),
+      _gaugeMaxValue('max_potassium', 100, 150),
+    ].reduce((a, b) => a > b ? a : b);
+  }
+
+  double _gaugeMaxValue(
+    String maxNormalKey,
+    double originalMaxNormal,
+    double originalMaxValue,
+  ) {
+    final maxNormal = _thresholdConfigService.value(
+      maxNormalKey,
+      originalMaxNormal,
+    );
+    final originalHeadroom = originalMaxValue - originalMaxNormal;
+    return maxNormal + originalHeadroom;
+  }
+
   @override
   void initState() {
     super.initState();
+    _thresholdConfigService.addListener(_syncThresholdConfig);
     _refreshHistory();
   }
 
   @override
   void dispose() {
+    _thresholdConfigService.removeListener(_syncThresholdConfig);
     _latestSubscription?.cancel();
     super.dispose();
+  }
+
+  void _syncThresholdConfig() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _refreshHistory() async {

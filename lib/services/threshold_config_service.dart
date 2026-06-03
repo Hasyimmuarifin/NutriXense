@@ -1,8 +1,9 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class ThresholdConfigService {
+class ThresholdConfigService extends ChangeNotifier {
   ThresholdConfigService._();
 
   static final ThresholdConfigService instance = ThresholdConfigService._();
@@ -59,5 +60,6 @@ class ThresholdConfigService {
     _thresholds.addAll(thresholds);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_storageKey, jsonEncode(_thresholds));
+    notifyListeners();
   }
 }
