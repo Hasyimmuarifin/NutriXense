@@ -180,26 +180,33 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                Row(
-                                  children: [
-                                    Image.asset(
-                                      'assets/images/w_nutrixense.png',
-                                      width: 40,
-                                      height: 40,
-                                      fit: BoxFit.contain,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    const Text(
-                                      'NutriXense',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.3,
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Image.asset(
+                                        'assets/images/w_nutrixense.png',
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.contain,
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 10),
+                                      const Expanded(
+                                        child: Text(
+                                          'NutriXense',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
+                                const SizedBox(width: 10),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 14,
@@ -237,6 +244,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             const SizedBox(height: 20),
                             const Text(
                               'Plant Health Report',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 28,
@@ -374,8 +383,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
                 // ─── Last updated ───────────────────────────────────────────
                 Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    runSpacing: 4,
                     children: [
                       const Icon(Icons.access_time_rounded,
                           size: 12, color: AppTheme.textLight),
@@ -384,6 +395,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                         _lastUpdated == null
                             ? 'Belum ada rekomendasi AI • Powered by Gemini'
                             : 'Updated ${_formatUpdateTime(_lastUpdated!)} • Powered by Gemini',
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 11,
                           color: AppTheme.textLight,
@@ -548,6 +560,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                           : _isApplyingAutomation
                               ? 'Applying pump automation...'
                               : 'Request AI Recommendation',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryGreen,

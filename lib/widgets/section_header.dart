@@ -21,19 +21,26 @@ class SectionHeader extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF37909D),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF37909D),
+            ),
           ),
         ),
+        if (actionLabel != null) const SizedBox(width: 12),
         if (actionLabel != null)
           GestureDetector(
             onTap: onAction,
             child: Text(
               actionLabel!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,

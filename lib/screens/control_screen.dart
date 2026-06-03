@@ -46,21 +46,6 @@ class _ControlScreenState extends State<ControlScreen> {
     super.dispose();
   }
 
-  Future<void> _wateringPump() async {
-    const pumpDIndex = 3;
-
-    if (_pumps[pumpDIndex].isOn || _pumps[pumpDIndex].isLoading) {
-      return;
-    }
-
-    await _runPumpsForDuration(
-      pumpIndexes: const [pumpDIndex],
-      duration: const Duration(seconds: 5),
-      startedMessage: 'Water irrigation started',
-      completedMessage: 'Water irrigation completed',
-    );
-  }
-
   Future<void> _runPumpsForDuration({
     required List<int> pumpIndexes,
     required Duration duration,
@@ -119,13 +104,17 @@ class _ControlScreenState extends State<ControlScreen> {
               size: 18,
             ),
             const SizedBox(width: 8),
-            Text(
-              message ??
-                  (started
-                      ? 'Water irrigation started'
-                      : 'Water irrigation completed'),
-              style: const TextStyle(
-                fontWeight: FontWeight.w500,
+            Expanded(
+              child: Text(
+                message ??
+                    (started
+                        ? 'Water irrigation started'
+                        : 'Water irrigation completed'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
@@ -348,9 +337,13 @@ class _ControlScreenState extends State<ControlScreen> {
               size: 18,
             ),
             const SizedBox(width: 8),
-            Text(
-              '${pump.name} (${pump.nutrient}) ${pump.isOn ? 'started' : 'stopped'}',
-              style: const TextStyle(fontWeight: FontWeight.w500),
+            Expanded(
+              child: Text(
+                '${pump.name} (${pump.nutrient}) ${pump.isOn ? 'started' : 'stopped'}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
             ),
           ],
         ),
@@ -412,26 +405,33 @@ class _ControlScreenState extends State<ControlScreen> {
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 // Logo + App Name
-                                Row(
-                                  children: [
-                                    Image.asset(
-                                      'assets/images/w_nutrixense.png',
-                                      width: 40,
-                                      height: 40,
-                                      fit: BoxFit.contain,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    const Text(
-                                      'NutriXense',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.3,
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Image.asset(
+                                        'assets/images/w_nutrixense.png',
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.contain,
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 10),
+                                      const Expanded(
+                                        child: Text(
+                                          'NutriXense',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
+                                const SizedBox(width: 10),
 
                                 // AI Powered Badge
                                 Container(
@@ -446,8 +446,9 @@ class _ControlScreenState extends State<ControlScreen> {
                                       color: Colors.white.withOpacity(0.25),
                                     ),
                                   ),
-                                  child: Row(
-                                    children: const [
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
                                       Icon(
                                         Icons.auto_awesome,
                                         color: Colors.white,
@@ -483,17 +484,15 @@ class _ControlScreenState extends State<ControlScreen> {
                             const SizedBox(height: 8),
 
                             // ─── Subtitle ─────────────────────────────────
-                            Row(
-                              children: [
-                                Text(
-                                  'Manage your nutrient & irrigation pumps',
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.9),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
+                            Text(
+                              'Manage your nutrient & irrigation pumps',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.9),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
 
                             const SizedBox(height: 20),
@@ -514,11 +513,15 @@ class _ControlScreenState extends State<ControlScreen> {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    '$_activePumps of ${_pumps.length} pumps active',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.8),
-                                      fontSize: 13,
+                                  Flexible(
+                                    child: Text(
+                                      '$_activePumps of ${_pumps.length} pumps active',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.8),
+                                        fontSize: 13,
+                                      ),
                                     ),
                                   ),
                                   SizedBox(width: 8),
@@ -585,11 +588,6 @@ class _ControlScreenState extends State<ControlScreen> {
 
                 const SizedBox(height: 8),
 
-                // ─── Water Irrigation Button ─────────────────────────────
-                _buildWateringButton(),
-
-                const SizedBox(height: 14),
-
                 // ─── Emergency Stop ──────────────────────────────────────
                 _buildEmergencyStop(),
 
@@ -605,58 +603,16 @@ class _ControlScreenState extends State<ControlScreen> {
     );
   }
 
-  Widget _buildWateringButton() {
-    return GestureDetector(
-      onTap: _wateringPump,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppTheme.primaryBlue,
-              AppTheme.primaryBlue.withOpacity(0.85),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primaryBlue.withOpacity(0.25),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.water_drop_rounded,
-              color: Colors.white,
-              size: 22,
-            ),
-            SizedBox(width: 10),
-            Text(
-              'Start Water Irrigation',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildScheduleCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: AppTheme.primaryGreen.withOpacity(0.12),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -685,26 +641,54 @@ class _ControlScreenState extends State<ControlScreen> {
               ),
               const SizedBox(width: 12),
               const Expanded(
-                child: Text(
-                  'Automatic Watering Schedules',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Automatic Watering Schedules',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Set time, pump selection, and watering duration.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryGreen.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppTheme.primaryGreen.withOpacity(0.12),
+              ),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final narrow = constraints.maxWidth < 330;
+                final timeButton = OutlinedButton.icon(
                   onPressed: _pickScheduleTime,
                   icon: const Icon(Icons.access_time_rounded, size: 18),
-                  label: Text(_draftScheduleTime.format(context)),
+                  label: Text(
+                    _draftScheduleTime.format(context),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   style: OutlinedButton.styleFrom(
+                    backgroundColor: Colors.white,
                     foregroundColor: AppTheme.primaryGreen,
                     side: BorderSide(
                       color: AppTheme.primaryGreen.withOpacity(0.35),
@@ -713,14 +697,15 @@ class _ControlScreenState extends State<ControlScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
+                );
+                final addButton = FilledButton.icon(
                   onPressed: _addSchedule,
                   icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Add Schedule'),
+                  label: const Text(
+                    'Add Schedule',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primaryGreen,
                     foregroundColor: Colors.white,
@@ -728,9 +713,27 @@ class _ControlScreenState extends State<ControlScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                ),
-              ),
-            ],
+                );
+
+                if (narrow) {
+                  return Column(
+                    children: [
+                      SizedBox(width: double.infinity, child: timeButton),
+                      const SizedBox(height: 8),
+                      SizedBox(width: double.infinity, child: addButton),
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: timeButton),
+                    const SizedBox(width: 10),
+                    Expanded(child: addButton),
+                  ],
+                );
+              },
+            ),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -846,13 +849,25 @@ class _ControlScreenState extends State<ControlScreen> {
                 color: AppTheme.bgPrimary,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text(
-                'No automatic watering schedule yet.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                  fontWeight: FontWeight.w600,
-                ),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.event_busy_rounded,
+                    size: 18,
+                    color: AppTheme.textLight,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'No automatic watering schedule yet.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             )
           else
@@ -898,6 +913,8 @@ class _ControlScreenState extends State<ControlScreen> {
                     const SizedBox(height: 3),
                     Text(
                       '${_pumpNames(schedule.pumpIndexes)} • ${schedule.durationSeconds}s • ${schedule.repeatsDaily ? 'Daily' : 'Once'}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
@@ -938,14 +955,18 @@ class _ControlScreenState extends State<ControlScreen> {
                     : AppTheme.textSecondary,
               ),
               const SizedBox(width: 6),
-              Text(
-                schedule.isRunning ? 'Running now' : 'Next run: $nextRunText',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: schedule.isRunning
-                      ? AppTheme.primaryBlue
-                      : AppTheme.textSecondary,
-                  fontWeight: FontWeight.w700,
+              Expanded(
+                child: Text(
+                  schedule.isRunning ? 'Running now' : 'Next run: $nextRunText',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: schedule.isRunning
+                        ? AppTheme.primaryBlue
+                        : AppTheme.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
@@ -985,17 +1006,20 @@ class _ControlScreenState extends State<ControlScreen> {
               color: AppTheme.statusLow.withOpacity(0.3),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: const Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            runSpacing: 6,
             children: [
-              const Icon(
+              Icon(
                 Icons.stop_circle_outlined,
                 color: AppTheme.statusLow,
                 size: 20,
               ),
-              const SizedBox(width: 8),
-              const Text(
+              SizedBox(width: 8),
+              Text(
                 'Emergency Stop All Pumps',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,

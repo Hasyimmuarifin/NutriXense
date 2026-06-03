@@ -303,71 +303,156 @@ class _HomeScreenState extends State<HomeScreen>
     await showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Threshold Config'),
-          content: SingleChildScrollView(
+        final mediaQuery = MediaQuery.of(context);
+        final maxDialogHeight = mediaQuery.size.height * 0.86;
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 420,
+              maxHeight: maxDialogHeight,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _thresholdRangeField(
-                  'Nitrogen',
-                  minKey: 'min_nitrogen',
-                  maxKey: 'max_nitrogen',
-                  suffix: 'mg/kg',
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryGreen.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.tune_rounded,
+                          color: AppTheme.primaryGreen,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Threshold Config',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                _thresholdRangeField(
-                  'Phosphorus',
-                  minKey: 'min_phosphorus',
-                  maxKey: 'max_phosphorus',
-                  suffix: 'mg/kg',
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryGreen.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.primaryGreen.withOpacity(0.14),
+                            ),
+                          ),
+                          child: const Text(
+                            'Set normal min and max ranges. Values outside these limits become alerts.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.textSecondary,
+                              height: 1.25,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        _thresholdRangeField(
+                          'Nitrogen',
+                          minKey: 'min_nitrogen',
+                          maxKey: 'max_nitrogen',
+                          suffix: 'mg/kg',
+                        ),
+                        _thresholdRangeField(
+                          'Phosphorus',
+                          minKey: 'min_phosphorus',
+                          maxKey: 'max_phosphorus',
+                          suffix: 'mg/kg',
+                        ),
+                        _thresholdRangeField(
+                          'Potassium',
+                          minKey: 'min_potassium',
+                          maxKey: 'max_potassium',
+                          suffix: 'mg/kg',
+                        ),
+                        _thresholdRangeField(
+                          'pH',
+                          minKey: 'min_ph',
+                          maxKey: 'max_ph',
+                          suffix: 'pH',
+                        ),
+                        _thresholdRangeField(
+                          'Moisture',
+                          minKey: 'min_moisture',
+                          maxKey: 'max_moisture',
+                          suffix: '%',
+                        ),
+                        _thresholdRangeField(
+                          'Temperature',
+                          minKey: 'min_temperature',
+                          maxKey: 'max_temperature',
+                          suffix: '°C',
+                        ),
+                        _thresholdRangeField(
+                          'EC',
+                          minKey: 'min_ec',
+                          maxKey: 'max_ec',
+                          suffix: 'mS/cm',
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                _thresholdRangeField(
-                  'Potassium',
-                  minKey: 'min_potassium',
-                  maxKey: 'max_potassium',
-                  suffix: 'mg/kg',
-                ),
-                _thresholdRangeField(
-                  'pH',
-                  minKey: 'min_ph',
-                  maxKey: 'max_ph',
-                  suffix: 'pH',
-                ),
-                _thresholdRangeField(
-                  'Moisture',
-                  minKey: 'min_moisture',
-                  maxKey: 'max_moisture',
-                  suffix: '%',
-                ),
-                _thresholdRangeField(
-                  'Temperature',
-                  minKey: 'min_temperature',
-                  maxKey: 'max_temperature',
-                  suffix: '°C',
-                ),
-                _thresholdRangeField(
-                  'EC',
-                  minKey: 'min_ec',
-                  maxKey: 'max_ec',
-                  suffix: 'mS/cm',
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () async {
+                          final saved = await _publishThresholdConfig();
+                          if (!context.mounted) return;
+                          if (saved) Navigator.of(context).pop();
+                        },
+                        child: const Text('Save Config'),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final saved = await _publishThresholdConfig();
-                if (!context.mounted) return;
-                if (saved) Navigator.of(context).pop();
-              },
-              child: const Text('Save Config'),
-            ),
-          ],
         );
       },
     );
@@ -380,31 +465,66 @@ class _HomeScreenState extends State<HomeScreen>
     required String suffix,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.sensors_rounded,
+              size: 14,
+              color: AppTheme.primaryGreen,
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _thresholdField('Min', minKey, suffix),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 86,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _thresholdField('Max', maxKey, suffix),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final narrow = constraints.maxWidth < 170;
+                  final minField = _thresholdField('Min', minKey, suffix);
+                  final maxField = _thresholdField('Max', maxKey, suffix);
+
+                  if (narrow) {
+                    return Column(
+                      children: [
+                        minField,
+                        const SizedBox(height: 6),
+                        maxField,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: minField),
+                      const SizedBox(width: 6),
+                      Expanded(child: maxField),
+                    ],
+                  );
+                },
               ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -416,10 +536,31 @@ class _HomeScreenState extends State<HomeScreen>
         controller: _thresholdControllers[key],
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         decoration: InputDecoration(
-          labelText: label,
+          prefixText: '$label ',
+          prefixStyle: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textLight,
+          ),
           suffixText: suffix,
+          filled: true,
+          fillColor: AppTheme.bgPrimary,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(
+              color: AppTheme.primaryGreen,
+              width: 1.4,
+            ),
           ),
           isDense: true,
         ),
@@ -610,28 +751,35 @@ class _HomeScreenState extends State<HomeScreen>
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   // Logo dari assets + App Name
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Image.asset(
-                                        'assets/images/w_nutrixense.png',
-                                        width: 40,
-                                        height: 40,
-                                        fit: BoxFit.contain,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      const Text(
-                                        'NutriXense',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 22,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: 0.3,
+                                  Expanded(
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Image.asset(
+                                          'assets/images/w_nutrixense.png',
+                                          width: 40,
+                                          height: 40,
+                                          fit: BoxFit.contain,
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(width: 10),
+                                        const Expanded(
+                                          child: Text(
+                                            'NutriXense',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
+                                  const SizedBox(width: 10),
 
                                   // ─── MQTT Badge + WiFi Icon ───────────────────────
                                   Row(
@@ -709,14 +857,19 @@ class _HomeScreenState extends State<HomeScreen>
                                     MainAxisAlignment.spaceBetween,
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    'Good Morning,',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.95),
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w600,
+                                  Expanded(
+                                    child: Text(
+                                      'Good Morning,',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.95),
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
+                                  const SizedBox(width: 12),
                                   Tooltip(
                                     message: 'Threshold config',
                                     child: InkWell(
@@ -812,28 +965,33 @@ class _HomeScreenState extends State<HomeScreen>
                   // ─── Sensor grid ──────────────────────────────────────────
                   const SectionHeader(title: 'Sensor Readings'),
                   const SizedBox(height: 20),
-                  GridView.builder(
-                    padding: EdgeInsets.zero,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 0.92,
-                    ),
-                    itemCount: _readings.length > 6 ? 6 : _readings.length,
-                    itemBuilder: (context, index) {
-                      return TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: 1),
-                        duration: Duration(milliseconds: 400 + (index * 80)),
-                        curve: Curves.easeOut,
-                        builder: (context, value, child) => Transform.scale(
-                          scale: 0.8 + 0.2 * value,
-                          child: Opacity(opacity: value, child: child),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isNarrow = constraints.maxWidth < 360;
+                      return GridView.builder(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: isNarrow ? 10 : 12,
+                          mainAxisSpacing: isNarrow ? 10 : 12,
+                          childAspectRatio: isNarrow ? 0.78 : 0.92,
                         ),
-                        child: SensorCard(reading: _readings[index]),
+                        itemCount: _readings.length > 6 ? 6 : _readings.length,
+                        itemBuilder: (context, index) {
+                          return TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0, end: 1),
+                            duration:
+                                Duration(milliseconds: 400 + (index * 80)),
+                            curve: Curves.easeOut,
+                            builder: (context, value, child) => Transform.scale(
+                              scale: 0.8 + 0.2 * value,
+                              child: Opacity(opacity: value, child: child),
+                            ),
+                            child: SensorCard(reading: _readings[index]),
+                          );
+                        },
                       );
                     },
                   ),
@@ -1033,15 +1191,18 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(height: 14),
 
           // Legend
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _legend('Nitrogen', AppTheme.primaryGreen),
-              const SizedBox(width: 16),
-              _legend('Phosphorus', AppTheme.primaryBlue),
-              const SizedBox(width: 16),
-              _legend('Potassium', AppTheme.statusHigh),
-            ],
+          SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 16,
+              runSpacing: 8,
+              children: [
+                _legend('Nitrogen', AppTheme.primaryGreen),
+                _legend('Phosphorus', AppTheme.primaryBlue),
+                _legend('Potassium', AppTheme.statusHigh),
+              ],
+            ),
           ),
         ],
       ),
@@ -1221,18 +1382,28 @@ class _HomeScreenState extends State<HomeScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Min ${reading.minNormal} ${reading.unit}',
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppTheme.textLight,
+              Expanded(
+                child: Text(
+                  'Min ${reading.minNormal} ${reading.unit}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.textLight,
+                  ),
                 ),
               ),
-              Text(
-                'Max ${reading.maxNormal} ${reading.unit}',
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppTheme.textLight,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Max ${reading.maxNormal} ${reading.unit}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.textLight,
+                  ),
                 ),
               ),
             ],

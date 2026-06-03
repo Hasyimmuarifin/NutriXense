@@ -40,8 +40,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final List<String> _filters = ['Today', '7 Days', '30 Days'];
   final List<int> _filterDays = [1, 7, 30];
 
-  int get _totalPages =>
-      _totalRows == 0 ? 1 : ((_totalRows - 1) ~/ _pageSize) + 1;
+  int get _totalPages {
+    final pages = _totalRows == 0 ? 1 : ((_totalRows - 1) ~/ _pageSize) + 1;
+    return pages > 15 ? 15 : pages;
+  }
 
   double get _chartMinY => 0;
 
@@ -430,6 +432,55 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<_StatItem> get _stats {
     if (_data.isEmpty) return [];
 
+    if (_selectedSensor == 0) {
+      double avgOf(Iterable<double> values) =>
+          values.reduce((a, b) => a + b) / values.length;
+      double minOf(Iterable<double> values) =>
+          values.reduce((a, b) => a < b ? a : b);
+      double maxOf(Iterable<double> values) =>
+          values.reduce((a, b) => a > b ? a : b);
+
+      String npkValue({
+        required double nitrogen,
+        required double phosphorus,
+        required double potassium,
+      }) {
+        return 'N ${nitrogen.toStringAsFixed(1)} mg/kg\n'
+            'P ${phosphorus.toStringAsFixed(1)} mg/kg\n'
+            'K ${potassium.toStringAsFixed(1)} mg/kg';
+      }
+
+      return [
+        _StatItem(
+          'Avg',
+          npkValue(
+            nitrogen: avgOf(_data.map((d) => d.nitrogen)),
+            phosphorus: avgOf(_data.map((d) => d.phosphorus)),
+            potassium: avgOf(_data.map((d) => d.potassium)),
+          ),
+          AppTheme.primaryGreen,
+        ),
+        _StatItem(
+          'Min',
+          npkValue(
+            nitrogen: minOf(_data.map((d) => d.nitrogen)),
+            phosphorus: minOf(_data.map((d) => d.phosphorus)),
+            potassium: minOf(_data.map((d) => d.potassium)),
+          ),
+          AppTheme.primaryBlue,
+        ),
+        _StatItem(
+          'Max',
+          npkValue(
+            nitrogen: maxOf(_data.map((d) => d.nitrogen)),
+            phosphorus: maxOf(_data.map((d) => d.phosphorus)),
+            potassium: maxOf(_data.map((d) => d.potassium)),
+          ),
+          AppTheme.statusHigh,
+        ),
+      ];
+    }
+
     List<double> vals;
     String unit;
     switch (_selectedSensor) {
@@ -613,45 +664,69 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               const SizedBox(height: 16),
 
                               // ─── Stats row ───────────────────────────────────────────────
-                              Row(
-                                children: _stats
-                                    .map((s) => Expanded(
-                                          child: Container(
-                                            margin: EdgeInsets.only(
-                                                right:
-                                                    s != _stats.last ? 10 : 0),
-                                            padding: const EdgeInsets.all(12),
-                                            decoration: BoxDecoration(
-                                              color: s.color.withOpacity(0.08),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  s.label,
-                                                  style: const TextStyle(
-                                                    fontSize: 11,
-                                                    color: AppTheme.textLight,
-                                                    fontWeight: FontWeight.w500,
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final narrow = constraints.maxWidth < 330;
+                                  return Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    children: _stats
+                                        .map(
+                                          (s) => SizedBox(
+                                            width: narrow ||
+                                                    _selectedSensor == 0
+                                                ? constraints.maxWidth
+                                                : (constraints.maxWidth - 20) /
+                                                    3,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                color:
+                                                    s.color.withOpacity(0.08),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    s.label,
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      color: AppTheme.textLight,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
                                                   ),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  s.value,
-                                                  style: TextStyle(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w800,
-                                                    color: s.color,
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    s.value,
+                                                    maxLines:
+                                                        _selectedSensor == 0
+                                                            ? 3
+                                                            : 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize:
+                                                          _selectedSensor == 0
+                                                              ? 12
+                                                              : 14,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: s.color,
+                                                      height: 1.35,
+                                                    ),
                                                   ),
-                                                ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
                                           ),
-                                        ))
-                                    .toList(),
+                                        )
+                                        .toList(),
+                                  );
+                                },
                               ),
                               const SizedBox(height: 16),
 
@@ -772,9 +847,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     // Legend
                                     if (_selectedSensor == 0) ...[
                                       const SizedBox(height: 12),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
+                                      Wrap(
+                                        alignment: WrapAlignment.center,
+                                        runSpacing: 8,
                                         children: [
                                           _legend('Nitrogen',
                                               AppTheme.primaryGreen),
@@ -936,7 +1011,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     : null,
                 icon: const Icon(Icons.chevron_left),
               ),
-              Text('Page ${_pageIndex + 1} / $_totalPages'),
+              Flexible(
+                child: Text(
+                  'Page ${_pageIndex + 1} / $_totalPages',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               IconButton(
                 onPressed: _pageIndex < _totalPages - 1
                     ? () {
