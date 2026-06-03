@@ -64,7 +64,7 @@ class _MainNavigationState extends State<MainNavigation>
     with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
   final RuleBasedPumpAutomationService _ruleBasedPumpAutomationService =
-      RuleBasedPumpAutomationService();
+      RuleBasedPumpAutomationService.instance;
 
   // Keep screens alive when switching tabs using IndexedStack
   final List<Widget> _screens = const [

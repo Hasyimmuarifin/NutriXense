@@ -6,7 +6,22 @@ import 'ai_pump_automation_service.dart';
 import 'threshold_config_service.dart';
 
 class RuleBasedPumpAutomationService {
-  RuleBasedPumpAutomationService({
+  static final RuleBasedPumpAutomationService instance =
+      RuleBasedPumpAutomationService._();
+
+  factory RuleBasedPumpAutomationService({
+    FirebaseFirestore? firestore,
+    AiPumpAutomationService? pumpAutomationService,
+    Duration checkInterval = const Duration(minutes: 1),
+  }) {
+    return RuleBasedPumpAutomationService._(
+      firestore: firestore,
+      pumpAutomationService: pumpAutomationService,
+      checkInterval: checkInterval,
+    );
+  }
+
+  RuleBasedPumpAutomationService._({
     FirebaseFirestore? firestore,
     AiPumpAutomationService? pumpAutomationService,
     this.checkInterval = const Duration(minutes: 1),
@@ -23,6 +38,8 @@ class RuleBasedPumpAutomationService {
   Timer? _timer;
   bool _isChecking = false;
   Map<int, DateTime> _lastActivationByRelay = {};
+
+  bool get isRunning => _timer != null;
 
   void start() {
     if (_timer != null) return;

@@ -11,6 +11,7 @@ import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pump_card.dart';
 import '../services/mqtt_service.dart';
+import '../services/rule_based_pump_automation_service.dart';
 
 class ControlScreen extends StatefulWidget {
   const ControlScreen({super.key});
@@ -24,16 +25,20 @@ class _ControlScreenState extends State<ControlScreen> {
 
   late List<PumpController> _pumps;
   final MQTTService mqttService = MQTTService();
+  final RuleBasedPumpAutomationService _ruleBasedPumpAutomationService =
+      RuleBasedPumpAutomationService.instance;
   final List<_WateringSchedule> _wateringSchedules = [];
   TimeOfDay _draftScheduleTime = TimeOfDay.now();
   final Set<int> _draftSchedulePumpIndexes = {3};
   int _draftScheduleDurationSeconds = 5;
   bool _draftScheduleRepeats = true;
+  late bool _isRuleBasedAutomationEnabled;
 
   @override
   void initState() {
     super.initState();
     _pumps = DummyData.getPumps();
+    _isRuleBasedAutomationEnabled = _ruleBasedPumpAutomationService.isRunning;
     mqttService.init();
     _loadSchedules();
   }
@@ -359,6 +364,76 @@ class _ControlScreenState extends State<ControlScreen> {
 
   int get _activePumps => _pumps.where((p) => p.isOn).length;
 
+  void _toggleRuleBasedAutomation(bool enabled) {
+    if (enabled) {
+      _ruleBasedPumpAutomationService.start();
+    } else {
+      _ruleBasedPumpAutomationService.stop();
+    }
+
+    setState(() => _isRuleBasedAutomationEnabled = enabled);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          enabled
+              ? 'Decision Support automation enabled.'
+              : 'Decision Support automation disabled.',
+        ),
+        backgroundColor: enabled ? AppTheme.primaryGreen : Colors.grey.shade700,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _buildDecisionSupportSwitch() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.25),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.rule_rounded,
+            color: _isRuleBasedAutomationEnabled
+                ? const Color(0xFF69F0AE)
+                : Colors.white70,
+            size: 16,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            _isRuleBasedAutomationEnabled ? 'DSS ON' : 'DSS OFF',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Transform.scale(
+            scale: 0.72,
+            child: Switch(
+              value: _isRuleBasedAutomationEnabled,
+              onChanged: _toggleRuleBasedAutomation,
+              activeColor: const Color(0xFF69F0AE),
+              inactiveThumbColor: Colors.white,
+              inactiveTrackColor: Colors.white24,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -469,16 +544,26 @@ class _ControlScreenState extends State<ControlScreen> {
                               ],
                             ),
 
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
 
                             // ─── Title ────────────────────────────────────
-                            const Text(
-                              'Pump Control',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                              ),
+                            Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'Pump Control',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                _buildDecisionSupportSwitch(),
+                              ],
                             ),
 
                             const SizedBox(height: 8),
@@ -495,13 +580,13 @@ class _ControlScreenState extends State<ControlScreen> {
                               ),
                             ),
 
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 12),
 
                             // ─── Status Box ───────────────────────────────
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(
-                                vertical: 16,
+                                vertical: 10,
                               ),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(20),
