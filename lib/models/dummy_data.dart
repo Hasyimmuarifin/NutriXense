@@ -183,7 +183,7 @@ class DummyData {
         PumpController(
           id: 'pump_d',
           name: 'Pump D',
-          nutrient: 'Air (H2O)',
+          nutrient: 'Water (H2O)',
           iconPath: 'assets/icons/water.png',
           isOn: false,
         ),

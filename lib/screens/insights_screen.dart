@@ -605,7 +605,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
         ),
         _buildTriggerChip(
           Icons.water_drop_rounded,
-          triggers.activateWaterPump ? 'Pump D Air: ON' : 'Pump D Air: OFF',
+          triggers.activateWaterPump ? 'Pump D Water: ON' : 'Pump D Water: OFF',
           triggers.activateWaterPump,
         ),
       ],

@@ -78,7 +78,7 @@ class GeminiRecommendationService {
         'activate_nitrogen_pump': 'Pump A - Nitrogen (N)',
         'activate_phosphorus_pump': 'Pump B - Phosphorus (P)',
         'activate_potassium_pump': 'Pump C - Potassium (K)',
-        'activate_water_pump': 'Pump D - Air/Water (H2O)',
+        'activate_water_pump': 'Pump D - Water (H2O)',
       },
       'output_rules': [
         'Return one complete JSON object only.',

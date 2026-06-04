@@ -33,13 +33,16 @@ class _ControlScreenState extends State<ControlScreen> {
   int _draftScheduleDurationSeconds = 5;
   bool _draftScheduleRepeats = true;
   late bool _isRuleBasedAutomationEnabled;
+  StreamSubscription<Map<String, dynamic>>? _controlSub;
 
   @override
   void initState() {
     super.initState();
     _pumps = DummyData.getPumps();
     _isRuleBasedAutomationEnabled = _ruleBasedPumpAutomationService.isRunning;
-    mqttService.init();
+    _ruleBasedPumpAutomationService.activeRelays.addListener(_syncDssRelays);
+    _restoreDssSwitchState();
+    _initControlMqtt();
     _loadSchedules();
   }
 
@@ -48,91 +51,56 @@ class _ControlScreenState extends State<ControlScreen> {
     for (final schedule in _wateringSchedules) {
       schedule.timer?.cancel();
     }
+    _controlSub?.cancel();
+    _ruleBasedPumpAutomationService.activeRelays.removeListener(_syncDssRelays);
     super.dispose();
   }
 
-  Future<void> _runPumpsForDuration({
-    required List<int> pumpIndexes,
-    required Duration duration,
-    String? startedMessage,
-    String? completedMessage,
-  }) async {
-    try {
-      final validPumpIndexes = pumpIndexes
-          .where((index) => index >= 0 && index < _pumps.length)
-          .toList();
-
-      if (validPumpIndexes.isEmpty) return;
-
-      for (final index in validPumpIndexes) {
-        if (!_pumps[index].isOn) {
-          await _togglePump(index, true);
-        }
-      }
-
-      if (startedMessage != null) {
-        _showWaterSnackBar(true, message: startedMessage);
-      }
-
-      await Future.delayed(duration);
-
-      for (final index in validPumpIndexes) {
-        if (_pumps[index].isOn) {
-          await _togglePump(index, false);
-        }
-      }
-
-      if (completedMessage != null) {
-        _showWaterSnackBar(false, message: completedMessage);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Pump run failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+  Future<void> _initControlMqtt() async {
+    await mqttService.init();
+    mqttService.subscribe('nutrixense/control');
+    _controlSub = mqttService.sensorStream.listen(_syncPumpStatesFromMqtt);
   }
 
-  void _showWaterSnackBar(bool started, {String? message}) {
+  void _syncPumpStatesFromMqtt(Map<String, dynamic> data) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(
-              started ? Icons.water_drop_rounded : Icons.water_damage_outlined,
-              color: Colors.white,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message ??
-                    (started
-                        ? 'Water irrigation started'
-                        : 'Water irrigation completed'),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: AppTheme.primaryBlue,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    var changed = false;
+    for (var i = 0; i < _pumps.length; i++) {
+      final rawState = data['relay${i + 1}'];
+      if (rawState == null) continue;
+
+      final relayState = rawState is num
+          ? rawState.toInt()
+          : int.tryParse(rawState.toString());
+      if (relayState == null) continue;
+
+      _pumps[i].isOn = relayState == 0;
+      _pumps[i].isLoading = false;
+      changed = true;
+    }
+
+    if (changed) setState(() {});
+  }
+
+  Future<void> _restoreDssSwitchState() async {
+    final enabled =
+        await _ruleBasedPumpAutomationService.loadEnabledPreference();
+    if (!mounted) return;
+
+    setState(() => _isRuleBasedAutomationEnabled = enabled);
+  }
+
+  void _syncDssRelays() {
+    if (!mounted) return;
+
+    final activeRelays = _ruleBasedPumpAutomationService.activeRelays.value;
+    setState(() {
+      for (var i = 0; i < _pumps.length; i++) {
+        _pumps[i].isOn = activeRelays.contains(i + 1);
+        _pumps[i].isLoading = false;
+      }
+    });
   }
 
   // Toggle pump with simulated network delay
@@ -217,7 +185,10 @@ class _ControlScreenState extends State<ControlScreen> {
   Future<void> _loadSchedules() async {
     final prefs = await SharedPreferences.getInstance();
     final rawSchedules = prefs.getString(_scheduleStorageKey);
-    if (rawSchedules == null) return;
+    if (rawSchedules == null) {
+      _syncNativeSchedules();
+      return;
+    }
 
     final decoded = jsonDecode(rawSchedules);
     if (decoded is! List) return;
@@ -241,6 +212,8 @@ class _ControlScreenState extends State<ControlScreen> {
         _scheduleNextRun(schedule);
       }
     }
+
+    _syncNativeSchedules();
   }
 
   Future<void> _saveSchedules() async {
@@ -248,7 +221,18 @@ class _ControlScreenState extends State<ControlScreen> {
     final schedules = _wateringSchedules
         .map((schedule) => schedule.toJson())
         .toList(growable: false);
-    await prefs.setString(_scheduleStorageKey, jsonEncode(schedules));
+    final schedulesJson = jsonEncode(schedules);
+    await prefs.setString(_scheduleStorageKey, schedulesJson);
+    _ruleBasedPumpAutomationService.syncNativeSchedules(schedulesJson);
+  }
+
+  void _syncNativeSchedules() {
+    final schedulesJson = jsonEncode(
+      _wateringSchedules
+          .map((schedule) => schedule.toJson())
+          .toList(growable: false),
+    );
+    _ruleBasedPumpAutomationService.syncNativeSchedules(schedulesJson);
   }
 
   void _scheduleNextRun(
@@ -270,44 +254,11 @@ class _ControlScreenState extends State<ControlScreen> {
       nextRun = nextRun.add(const Duration(days: 1));
     }
 
-    final delay = nextRun.difference(now);
-
     setState(() {
       schedule.enabled = true;
       schedule.nextRun = nextRun;
     });
     _saveSchedules();
-
-    schedule.timer = Timer(delay, () async {
-      if (!mounted ||
-          !schedule.enabled ||
-          !_wateringSchedules.contains(schedule)) {
-        return;
-      }
-
-      setState(() => schedule.isRunning = true);
-
-      await _runPumpsForDuration(
-        pumpIndexes: schedule.pumpIndexes.toList()..sort(),
-        duration: Duration(seconds: schedule.durationSeconds),
-        startedMessage: 'Scheduled watering started',
-        completedMessage: 'Scheduled watering completed',
-      );
-
-      if (!mounted) return;
-
-      setState(() => schedule.isRunning = false);
-
-      if (schedule.repeatsDaily && schedule.enabled) {
-        _scheduleNextRun(schedule);
-      } else {
-        setState(() {
-          schedule.enabled = false;
-          schedule.nextRun = null;
-        });
-        _saveSchedules();
-      }
-    });
 
     if (showSnackBar) {
       _showScheduleSnackBar(schedule);
@@ -364,13 +315,14 @@ class _ControlScreenState extends State<ControlScreen> {
 
   int get _activePumps => _pumps.where((p) => p.isOn).length;
 
-  void _toggleRuleBasedAutomation(bool enabled) {
+  Future<void> _toggleRuleBasedAutomation(bool enabled) async {
     if (enabled) {
-      _ruleBasedPumpAutomationService.start();
+      await _ruleBasedPumpAutomationService.start();
     } else {
-      _ruleBasedPumpAutomationService.stop();
+      await _ruleBasedPumpAutomationService.stop();
     }
 
+    if (!mounted) return;
     setState(() => _isRuleBasedAutomationEnabled = enabled);
 
     ScaffoldMessenger.of(context).showSnackBar(

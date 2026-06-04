@@ -12,6 +12,7 @@ import '../models/sensor_data.dart';
 import '../services/alert_count_service.dart';
 import '../services/mqtt_service.dart';
 import '../services/nutrient_alert_service.dart';
+import '../services/rule_based_pump_automation_service.dart';
 import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 
@@ -206,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "moisture"),
-        label: "Soil Moisture",
+        label: "Moisture",
         unit: "%",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_moisture', 80, 100),
@@ -217,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "temperature"),
-        label: "Temperature",
+        label: "Temp",
         unit: "°C",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_temperature', 35, 50),
@@ -615,6 +616,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     await _thresholdConfigService.update(payload);
+    RuleBasedPumpAutomationService.instance.syncNativeThresholds();
 
     await mqttService.init();
     if (!mqttService.isConnected) {
@@ -964,26 +966,7 @@ class _HomeScreenState extends State<HomeScreen>
                   // ─── Sensor grid ──────────────────────────────────────────
                   const SectionHeader(title: 'Sensor Readings'),
                   const SizedBox(height: 20),
-                  ..._readings.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final reading = entry.value;
-
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: index == _readings.length - 1 ? 0 : 12,
-                      ),
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: 1),
-                        duration: Duration(milliseconds: 400 + (index * 80)),
-                        curve: Curves.easeOut,
-                        builder: (context, value, child) => Transform.scale(
-                          scale: 0.8 + 0.2 * value,
-                          child: Opacity(opacity: value, child: child),
-                        ),
-                        child: _buildSensorReadingCard(reading),
-                      ),
-                    );
-                  }),
+                  _buildSensorReadingsLayout(),
                 ]),
               ),
             ),
@@ -1026,6 +1009,96 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSensorReadingsLayout() {
+    if (_readings.length < 7) {
+      return Column(
+        children: _readings.asMap().entries.map((entry) {
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: entry.key == _readings.length - 1 ? 0 : 12,
+            ),
+            child: _animatedSensorCard(entry.value, entry.key),
+          );
+        }).toList(),
+      );
+    }
+
+    final leftColumn = [_readings[0], _readings[1], _readings[2]];
+    final rightColumn = [_readings[3], _readings[4], _readings[5]];
+    final ecReading = _readings[6];
+
+    return Column(
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useTwoColumns = constraints.maxWidth >= 280;
+
+            if (!useTwoColumns) {
+              final compactReadings = [...leftColumn, ...rightColumn];
+              return Column(
+                children: compactReadings.asMap().entries.map((entry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _animatedSensorCard(
+                      entry.value,
+                      entry.key,
+                      compact: true,
+                    ),
+                  );
+                }).toList(),
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _buildSensorColumn(leftColumn, 0)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildSensorColumn(rightColumn, 3)),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _animatedSensorCard(ecReading, 6),
+      ],
+    );
+  }
+
+  Widget _buildSensorColumn(List<SensorReading> readings, int startIndex) {
+    return Column(
+      children: readings.asMap().entries.map((entry) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: entry.key == readings.length - 1 ? 0 : 12,
+          ),
+          child: _animatedSensorCard(
+            entry.value,
+            startIndex + entry.key,
+            compact: true,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _animatedSensorCard(
+    SensorReading reading,
+    int index, {
+    bool compact = false,
+  }) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 400 + (index * 80)),
+      curve: Curves.easeOut,
+      builder: (context, value, child) => Transform.scale(
+        scale: 0.8 + 0.2 * value,
+        child: Opacity(opacity: value, child: child),
+      ),
+      child: _buildSensorReadingCard(reading, compact: compact),
     );
   }
 

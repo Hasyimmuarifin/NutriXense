@@ -91,12 +91,20 @@ class _MainNavigationState extends State<MainNavigation>
   @override
   void initState() {
     super.initState();
-    _ruleBasedPumpAutomationService.start();
+    _restoreRuleBasedAutomation();
+  }
+
+  Future<void> _restoreRuleBasedAutomation() async {
+    final enabled =
+        await _ruleBasedPumpAutomationService.loadEnabledPreference();
+    if (enabled) {
+      await _ruleBasedPumpAutomationService.start(persist: false);
+    }
   }
 
   @override
   void dispose() {
-    _ruleBasedPumpAutomationService.stop();
+    _ruleBasedPumpAutomationService.stopInAppChecks();
     super.dispose();
   }
 

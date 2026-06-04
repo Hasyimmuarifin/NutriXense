@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ai_pump_automation_service.dart';
 import 'threshold_config_service.dart';
@@ -34,22 +38,80 @@ class RuleBasedPumpAutomationService {
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
   final Duration checkInterval;
+  static const MethodChannel _backgroundChannel =
+      MethodChannel('com.example.nutrixense/alerts');
+  static const String _enabledStorageKey = 'nutrixense_dss_enabled';
 
   Timer? _timer;
   bool _isChecking = false;
   Map<int, DateTime> _lastActivationByRelay = {};
+  final ValueNotifier<Set<int>> activeRelays = ValueNotifier(<int>{});
 
   bool get isRunning => _timer != null;
 
-  void start() {
+  Future<bool> loadEnabledPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_enabledStorageKey) ?? false;
+  }
+
+  Future<void> setEnabledPreference(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_enabledStorageKey, enabled);
+  }
+
+  Future<void> start({bool persist = true}) async {
+    if (persist) {
+      await setEnabledPreference(true);
+    }
     if (_timer != null) return;
+    _startNativeBackgroundMonitor();
     _checkLatestReading();
     _timer = Timer.periodic(checkInterval, (_) => _checkLatestReading());
   }
 
-  void stop() {
+  Future<void> stop({bool persist = true}) async {
+    if (persist) {
+      await setEnabledPreference(false);
+    }
+    _stopNativeBackgroundMonitor();
+    stopInAppChecks();
+  }
+
+  void stopInAppChecks() {
     _timer?.cancel();
     _timer = null;
+  }
+
+  void syncNativeThresholds() {
+    unawaited(
+      _backgroundChannel.invokeMethod<void>('syncBackgroundThresholds', {
+        'thresholdsJson': jsonEncode(_thresholdConfigService.all()),
+      }).catchError((_) {}),
+    );
+  }
+
+  void syncNativeSchedules(String schedulesJson) {
+    unawaited(
+      _backgroundChannel.invokeMethod<void>('syncBackgroundSchedules', {
+        'schedulesJson': schedulesJson,
+      }).catchError((_) {}),
+    );
+  }
+
+  void _startNativeBackgroundMonitor() {
+    unawaited(
+      _backgroundChannel.invokeMethod<void>('startBackgroundMonitor', {
+        'thresholdsJson': jsonEncode(_thresholdConfigService.all()),
+      }).catchError((_) {}),
+    );
+  }
+
+  void _stopNativeBackgroundMonitor() {
+    unawaited(
+      _backgroundChannel
+          .invokeMethod<void>('stopBackgroundMonitor')
+          .catchError((_) {}),
+    );
   }
 
   Future<void> _checkLatestReading() async {
@@ -79,10 +141,12 @@ class RuleBasedPumpAutomationService {
 
       if (allowedRelays.isEmpty) return;
 
+      activeRelays.value = allowedRelays;
       await _pumpAutomationService.applyRelays(
         allowedRelays,
         reason: 'Rule-based automatic pump control',
       );
+      activeRelays.value = <int>{};
 
       _lastActivationByRelay = {
         ..._lastActivationByRelay,
@@ -90,6 +154,7 @@ class RuleBasedPumpAutomationService {
       };
     } catch (_) {
       // Keep the periodic rule engine alive when Firestore or MQTT is unavailable.
+      activeRelays.value = <int>{};
     } finally {
       _isChecking = false;
     }
@@ -122,6 +187,12 @@ class RuleBasedPumpAutomationService {
     )) {
       relays.add(4);
     }
+    if (_isHigh(
+      reading.temperature,
+      _thresholdConfigService.value('max_temperature', 35),
+    )) {
+      relays.add(4);
+    }
     if (_isLow(
       reading.ec,
       _thresholdConfigService.value('min_ec', 1.0),
@@ -134,6 +205,10 @@ class RuleBasedPumpAutomationService {
 
   bool _isLow(double? value, num? minimum) {
     return value != null && minimum != null && value < minimum;
+  }
+
+  bool _isHigh(double? value, num? maximum) {
+    return value != null && maximum != null && value > maximum;
   }
 }
 

@@ -34,7 +34,7 @@ class AiPumpAutomationService {
         if (triggers.activatePotassiumPump)
           const _PumpCommand(relay: 3, label: 'Pump C (K)'),
         if (triggers.activateWaterPump)
-          const _PumpCommand(relay: 4, label: 'Pump D (Air)'),
+          const _PumpCommand(relay: 4, label: 'Pump D (Water)'),
       ],
       reason: triggers.reason,
     );
@@ -94,7 +94,7 @@ class AiPumpAutomationService {
       case 3:
         return const _PumpCommand(relay: 3, label: 'Pump C (K)');
       case 4:
-        return const _PumpCommand(relay: 4, label: 'Pump D (Air)');
+        return const _PumpCommand(relay: 4, label: 'Pump D (Water)');
       default:
         return null;
     }

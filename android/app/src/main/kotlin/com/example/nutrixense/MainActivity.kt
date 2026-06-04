@@ -44,6 +44,33 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "startBackgroundMonitor" -> {
+                    val thresholdsJson = call.argument<String>("thresholdsJson")
+                    startBackgroundMonitor(thresholdsJson)
+                    result.success(null)
+                }
+
+                "stopBackgroundMonitor" -> {
+                    stopBackgroundMonitor()
+                    result.success(null)
+                }
+
+                "syncBackgroundThresholds" -> {
+                    val thresholdsJson = call.argument<String>("thresholdsJson")
+                    syncBackgroundThresholds(thresholdsJson)
+                    result.success(null)
+                }
+
+                "syncBackgroundSchedules" -> {
+                    val schedulesJson = call.argument<String>("schedulesJson")
+                    syncBackgroundSchedules(schedulesJson)
+                    result.success(null)
+                }
+
+                "isBackgroundMonitorRunning" -> {
+                    result.success(NutrixenseBackgroundService.isServiceRunning)
+                }
+
                 else -> result.notImplemented()
             }
         }
@@ -82,6 +109,54 @@ class MainActivity : FlutterActivity() {
         manager.createNotificationChannel(channel)
     }
 
+    private fun startBackgroundMonitor(thresholdsJson: String?) {
+        val intent = Intent(this, NutrixenseBackgroundService::class.java).apply {
+            action = NutrixenseBackgroundService.ACTION_START
+            putExtra(NutrixenseBackgroundService.EXTRA_THRESHOLDS_JSON, thresholdsJson)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun stopBackgroundMonitor() {
+        val intent = Intent(this, NutrixenseBackgroundService::class.java).apply {
+            action = NutrixenseBackgroundService.ACTION_STOP
+        }
+        startService(intent)
+    }
+
+    private fun syncBackgroundThresholds(thresholdsJson: String?) {
+        NutrixenseBackgroundService.storeThresholds(this, thresholdsJson)
+        if (!NutrixenseBackgroundService.isServiceRunning) return
+
+        val intent = Intent(this, NutrixenseBackgroundService::class.java).apply {
+            action = NutrixenseBackgroundService.ACTION_SYNC_THRESHOLDS
+            putExtra(NutrixenseBackgroundService.EXTRA_THRESHOLDS_JSON, thresholdsJson)
+        }
+        startService(intent)
+    }
+
+    private fun syncBackgroundSchedules(schedulesJson: String?) {
+        NutrixenseBackgroundService.storeSchedules(this, schedulesJson)
+
+        val intent = Intent(this, NutrixenseBackgroundService::class.java).apply {
+            action = NutrixenseBackgroundService.ACTION_SYNC_SCHEDULES
+            putExtra(NutrixenseBackgroundService.EXTRA_SCHEDULES_JSON, schedulesJson)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            NutrixenseBackgroundService.hasEnabledSchedules(this)
+        ) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun showThresholdAlert(title: String, message: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -112,7 +187,7 @@ class MainActivity : FlutterActivity() {
         }
 
         val notification = builder
-            .setSmallIcon(applicationInfo.icon)
+            .setSmallIcon(R.drawable.ic_nutrixense_notification)
             .setContentTitle(title)
             .setContentText(message.lines().firstOrNull() ?: message)
             .setStyle(android.app.Notification.BigTextStyle().bigText(message))
