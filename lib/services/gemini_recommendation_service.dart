@@ -62,7 +62,7 @@ class GeminiRecommendationService {
       systemInstruction: Content.system(_systemPrompt),
       generationConfig: GenerationConfig(
         temperature: 0.2,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 3072,
         responseMimeType: 'application/json',
         responseSchema: _responseSchema,
       ),
@@ -84,6 +84,9 @@ class GeminiRecommendationService {
         'Return one complete JSON object only.',
         'Do not use markdown.',
         'Keep every string concise and close all quotes.',
+        'sensor_summary maximum 2 sentences.',
+        'Return maximum 7 recommendation items total.',
+        'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
         'For each recommendation item, explanation must explain why the condition happened from the sensor data.',
         'For each recommendation item, recommendation must explain specific follow-up actions a farmer/user can take.',
         'Recommendations must be practical, safe, and measurable when possible, such as pump use, irrigation, pH correction, fertilizer adjustment, retesting, or monitoring frequency.',
@@ -104,6 +107,7 @@ class GeminiRecommendationService {
       model: model,
       rawText: text,
       originalPayload: payload,
+      summary: summary,
     );
     return AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
       canActivateWaterPump: summary.canActivateWaterPump,
@@ -181,6 +185,7 @@ class GeminiRecommendationService {
     required GenerativeModel model,
     required String rawText,
     required String originalPayload,
+    required _SensorHistorySummary summary,
   }) async {
     final cleaned = _stripCodeFence(rawText);
     final decoded = _tryDecodeJsonObject(cleaned);
@@ -220,12 +225,11 @@ class GeminiRecommendationService {
     final repaired = _tryDecodeJsonObject(_stripCodeFence(repairedText ?? ''));
     if (repaired != null) return repaired;
 
-    throw FormatException(
-      'Gemini mengembalikan JSON tidak valid. Coba gunakan model lain '
-      'dengan --dart-define=GEMINI_MODEL=gemini-2.5-flash atau kurangi '
-      'panjang penjelasan.',
-      _shortPreview(cleaned),
+    debugPrint(
+      'Gemini returned malformed JSON after repair. Using local fallback. '
+      'Preview: ${_shortPreview(cleaned)}',
     );
+    return _buildLocalFallbackResponse(summary);
   }
 
   static Map<String, dynamic>? _tryDecodeJsonObject(String text) {
@@ -237,6 +241,244 @@ class GeminiRecommendationService {
       return null;
     }
     return null;
+  }
+
+  static Map<String, dynamic> _buildLocalFallbackResponse(
+    _SensorHistorySummary summary,
+  ) {
+    final items = <Map<String, dynamic>>[];
+
+    void addItem({
+      required String id,
+      required String title,
+      required String status,
+      required String message,
+      required String explanation,
+      required String recommendation,
+    }) {
+      items.add({
+        'id': id,
+        'title': title,
+        'status': status,
+        'message': message,
+        'explanation': explanation,
+        'recommendation': recommendation,
+      });
+    }
+
+    void evaluateRange({
+      required String key,
+      required String label,
+      required String unit,
+      required num min,
+      required num max,
+      required String lowTitle,
+      required String highTitle,
+      required String lowAction,
+      required String highAction,
+      required String normalAction,
+    }) {
+      final stats = summary.parameters[key];
+      final current = stats?.current;
+      if (stats == null || current == null) return;
+
+      final currentText = _formatNumber(current);
+      final avgText = _formatNullable(stats.average);
+      final trendText = _translateTrend(stats.trend);
+      if (current < min) {
+        addItem(
+          id: '${key.toLowerCase()}_low',
+          title: lowTitle,
+          status: 'critical',
+          message:
+              '$label saat ini $currentText $unit, di bawah batas minimum ${_formatNumber(min)} $unit.',
+          explanation:
+              'Nilai terakhir $label berada di bawah ambang dan rata-rata data terbaru adalah $avgText $unit dengan tren $trendText. Kondisi ini dapat membatasi penyerapan hara, pertumbuhan akar/daun, atau stabilitas media tanam sesuai parameter yang terdampak.',
+          recommendation: lowAction,
+        );
+      } else if (current > max) {
+        addItem(
+          id: '${key.toLowerCase()}_high',
+          title: highTitle,
+          status: 'warning',
+          message:
+              '$label saat ini $currentText $unit, di atas batas maksimum ${_formatNumber(max)} $unit.',
+          explanation:
+              'Nilai terakhir $label melewati ambang atas dan rata-rata data terbaru adalah $avgText $unit dengan tren $trendText. Jika kondisi ini berlanjut, tanaman dapat mengalami stres lingkungan atau ketidakseimbangan nutrisi.',
+          recommendation: highAction,
+        );
+      } else {
+        addItem(
+          id: '${key.toLowerCase()}_normal',
+          title: '$label dalam Rentang Aman',
+          status: 'good',
+          message:
+              '$label saat ini $currentText $unit dan masih berada dalam rentang target.',
+          explanation:
+              'Nilai terakhir masih berada di antara ${_formatNumber(min)}-${_formatNumber(max)} $unit, dengan rata-rata $avgText $unit dan tren $trendText. Parameter ini belum menunjukkan kebutuhan koreksi mendesak.',
+          recommendation: normalAction,
+        );
+      }
+    }
+
+    evaluateRange(
+      key: 'N',
+      label: 'Nitrogen',
+      unit: 'mg/kg',
+      min: thresholds['nitrogen_min']!,
+      max: 80,
+      lowTitle: 'Nitrogen Rendah',
+      highTitle: 'Nitrogen Berlebih',
+      lowAction:
+          'Aktifkan Pump A sesuai durasi DSS, lalu pantau ulang NPK setelah pencampuran merata. Hindari penambahan berlebihan agar pH dan EC tidak ikut melonjak.',
+      highAction:
+          'Tunda penambahan nitrogen dan lakukan pengenceran bertahap bila EC ikut tinggi. Pantau ulang N dan EC pada pembacaan berikutnya.',
+      normalAction:
+          'Pertahankan dosis nitrogen saat ini dan lanjutkan pemantauan berkala.',
+    );
+    evaluateRange(
+      key: 'P',
+      label: 'Phosphorus',
+      unit: 'mg/kg',
+      min: thresholds['phosphorus_min']!,
+      max: 60,
+      lowTitle: 'Phosphorus Rendah',
+      highTitle: 'Phosphorus Berlebih',
+      lowAction:
+          'Aktifkan Pump B sesuai aturan DSS dan pastikan larutan tercampur sebelum evaluasi ulang. Periksa juga pH karena pH ekstrem dapat menghambat ketersediaan fosfor.',
+      highAction:
+          'Hentikan sementara suplai fosfor dan pantau EC serta pH. Lakukan pengenceran ringan jika konsentrasi nutrisi keseluruhan meningkat.',
+      normalAction:
+          'Pertahankan suplai fosfor dan pantau tren harian untuk mencegah penurunan.',
+    );
+    evaluateRange(
+      key: 'K',
+      label: 'Potassium',
+      unit: 'mg/kg',
+      min: thresholds['potassium_min']!,
+      max: 100,
+      lowTitle: 'Potassium Rendah',
+      highTitle: 'Potassium Berlebih',
+      lowAction:
+          'Aktifkan Pump C sesuai durasi DSS, lalu ulangi pembacaan setelah nutrisi tersebar merata. Perhatikan keseimbangan NPK agar satu unsur tidak mendominasi.',
+      highAction:
+          'Tunda penambahan kalium dan pantau EC. Jika nilai tetap tinggi, kurangi konsentrasi larutan secara bertahap.',
+      normalAction:
+          'Kadar kalium sudah memadai, lanjutkan pemantauan bersama N dan P.',
+    );
+    evaluateRange(
+      key: 'pH',
+      label: 'pH',
+      unit: 'pH',
+      min: thresholds['ph_min']!,
+      max: thresholds['ph_max']!,
+      lowTitle: 'pH Terlalu Asam',
+      highTitle: 'pH Terlalu Basa',
+      lowAction:
+          'Naikkan pH secara bertahap menggunakan korektor pH up dalam dosis kecil. Aduk larutan dan tunggu sebelum pengukuran ulang agar perubahan tidak berlebihan.',
+      highAction:
+          'Turunkan pH secara bertahap menggunakan korektor pH down. Hindari koreksi besar sekaligus karena dapat menyebabkan fluktuasi dan stres akar.',
+      normalAction:
+          'pH berada pada zona serapan hara yang baik, pertahankan prosedur pemantauan.',
+    );
+    evaluateRange(
+      key: 'Moisture',
+      label: 'Soil Moisture',
+      unit: '%',
+      min: thresholds['moisture_min']!,
+      max: 80,
+      lowTitle: 'Kelembapan Media Rendah',
+      highTitle: 'Kelembapan Media Tinggi',
+      lowAction:
+          'Aktifkan Pump D Water atau gunakan jadwal penyiraman otomatis dengan durasi pendek. Pastikan drainase baik dan ulangi pembacaan setelah air meresap.',
+      highAction:
+          'Tunda penyiraman dan periksa drainase media. Jika kelembapan tetap tinggi, kurangi frekuensi irigasi untuk mencegah akar kekurangan oksigen.',
+      normalAction:
+          'Kelembapan media cukup, pertahankan jadwal penyiraman saat ini.',
+    );
+    evaluateRange(
+      key: 'Temp',
+      label: 'Temperature',
+      unit: '°C',
+      min: thresholds['temperature_min']!,
+      max: thresholds['temperature_max']!,
+      lowTitle: 'Suhu Terlalu Rendah',
+      highTitle: 'Suhu Terlalu Tinggi',
+      lowAction:
+          'Kurangi paparan dingin dan pastikan lingkungan tumbuh stabil. Pantau suhu bersama kelembapan karena perubahan suhu dapat memengaruhi penguapan.',
+      highAction:
+          'Aktifkan Pump D Water sesuai DSS bila diperlukan untuk membantu menurunkan stres panas, lalu tingkatkan ventilasi atau naungan. Pantau ulang suhu dan kelembapan setiap beberapa menit.',
+      normalAction:
+          'Suhu berada dalam rentang aman, lanjutkan pemantauan normal.',
+    );
+    evaluateRange(
+      key: 'EC',
+      label: 'Electrical Conductivity',
+      unit: 'mS/cm',
+      min: thresholds['ec_min']!,
+      max: thresholds['ec_max']!,
+      lowTitle: 'EC Rendah',
+      highTitle: 'EC Tinggi',
+      lowAction:
+          'Tambahkan nutrisi secara bertahap melalui pompa NPK yang sesuai dengan unsur yang rendah. Ukur ulang EC setelah pencampuran agar konsentrasi tidak melewati target.',
+      highAction:
+          'Encerkan larutan dengan air bersih secara bertahap dan tunda penambahan pupuk. Pantau ulang EC serta pH setelah larutan stabil.',
+      normalAction:
+          'EC stabil, pertahankan konsentrasi larutan dan pantau perubahan setelah irigasi.',
+    );
+
+    final critical = items
+        .where((item) => item['status'] == 'critical')
+        .toList(growable: false);
+    final warning = items
+        .where((item) => item['status'] == 'warning')
+        .toList(growable: false);
+    final good =
+        items.where((item) => item['status'] == 'good').toList(growable: false);
+    final scorePenalty = (critical.length * 15) + (warning.length * 8);
+
+    return {
+      'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
+      'sensor_summary':
+          'Analisis lokal menggunakan ${summary.rowCount} data sensor terbaru karena respons JSON Gemini tidak valid. Ringkasan tetap menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan ambang batas DSS yang tersimpan.',
+      'recommendations': {
+        'all': items,
+        'critical': critical,
+        'warning': warning,
+        'good': good,
+      },
+      'automation_triggers': {
+        'activate_nitrogen_pump': summary.canActivateNitrogenPump,
+        'activate_phosphorus_pump': summary.canActivatePhosphorusPump,
+        'activate_potassium_pump': summary.canActivatePotassiumPump,
+        'activate_water_pump': summary.canActivateWaterPump,
+        'reason':
+            'Trigger mengikuti flag ambang lokal dari data sensor terbaru.',
+      },
+    };
+  }
+
+  static String _formatNullable(double? value) {
+    if (value == null) return 'tidak tersedia';
+    return _formatNumber(value);
+  }
+
+  static String _formatNumber(num value) {
+    final rounded = value.toDouble().toStringAsFixed(2);
+    return rounded.replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
+  static String _translateTrend(String trend) {
+    switch (trend) {
+      case 'increasing':
+        return 'meningkat';
+      case 'decreasing':
+        return 'menurun';
+      case 'stable':
+        return 'stabil';
+      default:
+        return 'belum tersedia';
+    }
   }
 
   static String _shortPreview(String text) {
