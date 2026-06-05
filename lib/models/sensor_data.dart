@@ -64,14 +64,27 @@ class SensorDataPoint {
     final data = doc.data() as Map<String, dynamic>;
 
     return SensorDataPoint(
-      nitrogen: (data['nitrogen'] ?? 0).toDouble(),
-      phosphorus: (data['phosphorus'] ?? 0).toDouble(),
-      potassium: (data['potassium'] ?? 0).toDouble(),
-      ph: (data['ph'] ?? 0).toDouble(),
-      moisture: (data['moisture'] ?? 0).toDouble(),
-      temperature: (data['temperature'] ?? 0).toDouble(),
+      nitrogen: _readDouble(data, ['nitrogen', 'N', 'n']),
+      phosphorus: _readDouble(data, ['phosphorus', 'P', 'p']),
+      potassium: _readDouble(data, ['potassium', 'K', 'k']),
+      ph: _readDouble(data, ['ph', 'pH', 'PH']),
+      moisture: _readDouble(data, ['moisture', 'Moisture']),
+      temperature: _readDouble(data, ['temperature', 'Temp', 'temp']),
       time: (data['timestamp'] as Timestamp).toDate(),
     );
+  }
+
+  static double _readDouble(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value is num) return value.toDouble();
+      if (value is String) {
+        final parsed = double.tryParse(value);
+        if (parsed != null) return parsed;
+      }
+    }
+
+    return 0;
   }
 }
 

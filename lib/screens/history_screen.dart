@@ -217,13 +217,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     QuerySnapshot<SensorDataPoint>? snapshot;
 
     try {
-      snapshot = await query.get(const GetOptions(source: Source.cache));
+      snapshot = await query.get(const GetOptions(source: Source.server));
     } catch (_) {
       snapshot = null;
     }
 
     if (snapshot == null || snapshot.docs.isEmpty) {
-      snapshot = await query.get(const GetOptions(source: Source.server));
+      snapshot = await query.get(const GetOptions(source: Source.cache));
     }
 
     _knownHistoryDocIds.addAll(snapshot.docs.map((doc) => doc.id));

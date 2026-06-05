@@ -108,7 +108,7 @@ class MQTTService {
   }
 
   void setRelay(int relay, bool isOn) {
-    publishRelay(relay, !isOn);
+    publishRelay(relay, isOn);
   }
 
   void publishRelay(int relay, bool state) {

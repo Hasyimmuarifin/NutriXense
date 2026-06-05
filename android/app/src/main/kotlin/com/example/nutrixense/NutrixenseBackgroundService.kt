@@ -445,7 +445,7 @@ class NutrixenseBackgroundService : Service() {
 
     private fun publishRelay(relay: Int, turnOn: Boolean) {
         val payload = JSONObject()
-            .put("relay$relay", if (turnOn) 0 else 1)
+            .put("relay$relay", if (turnOn) 1 else 0)
             .toString()
         publishMqtt(CONTROL_TOPIC, payload)
     }

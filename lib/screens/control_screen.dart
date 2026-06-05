@@ -75,7 +75,7 @@ class _ControlScreenState extends State<ControlScreen> {
           : int.tryParse(rawState.toString());
       if (relayState == null) continue;
 
-      _pumps[i].isOn = relayState == 0;
+      _pumps[i].isOn = relayState == 1;
       _pumps[i].isLoading = false;
       changed = true;
     }
@@ -260,8 +260,70 @@ class _ControlScreenState extends State<ControlScreen> {
     });
     _saveSchedules();
 
+    schedule.timer = Timer(nextRun.difference(now), () {
+      unawaited(_runSchedule(schedule));
+    });
+
     if (showSnackBar) {
       _showScheduleSnackBar(schedule);
+    }
+  }
+
+  Future<void> _runSchedule(_WateringSchedule schedule) async {
+    if (!mounted || !schedule.enabled || schedule.isRunning) return;
+
+    final pumpIndexes = schedule.pumpIndexes
+        .where((index) => index >= 0 && index < _pumps.length)
+        .toList(growable: false);
+    if (pumpIndexes.isEmpty) return;
+
+    setState(() {
+      schedule.isRunning = true;
+      schedule.nextRun = null;
+      for (final index in pumpIndexes) {
+        _pumps[index].isLoading = true;
+      }
+    });
+
+    try {
+      await mqttService.init();
+
+      for (final index in pumpIndexes) {
+        mqttService.setRelay(index + 1, true);
+      }
+
+      if (mounted) {
+        setState(() {
+          for (final index in pumpIndexes) {
+            _pumps[index].isLoading = false;
+            _pumps[index].isOn = true;
+          }
+        });
+      }
+
+      await Future.delayed(Duration(seconds: schedule.durationSeconds));
+    } finally {
+      for (final index in pumpIndexes) {
+        mqttService.setRelay(index + 1, false);
+      }
+
+      if (mounted) {
+        setState(() {
+          for (final index in pumpIndexes) {
+            _pumps[index].isLoading = false;
+            _pumps[index].isOn = false;
+          }
+          schedule.isRunning = false;
+        });
+
+        if (schedule.repeatsDaily && schedule.enabled) {
+          _scheduleNextRun(schedule);
+        } else {
+          schedule.enabled = false;
+          schedule.nextRun = null;
+          _saveSchedules();
+        }
+      }
     }
   }
 
