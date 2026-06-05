@@ -386,6 +386,52 @@ class _ControlScreenState extends State<ControlScreen> {
     );
   }
 
+  Widget _buildDssInfoButton() {
+    return PopupMenuButton<void>(
+      tooltip: 'DSS info',
+      padding: EdgeInsets.zero,
+      offset: const Offset(0, 18),
+      itemBuilder: (context) => const [
+        PopupMenuItem<void>(
+          enabled: false,
+          child: SizedBox(
+            width: 220,
+            child: Text(
+              'DSS membantu menyalakan pompa secara otomatis berdasarkan kondisi nutrisi, kelembapan, dan suhu tanaman. Aktifkan DSS jika ingin sistem membantu perawatan tanaman.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+        ),
+      ],
+      child: Container(
+        width: 28,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withOpacity(0.18),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.7),
+            width: 1,
+          ),
+        ),
+        child: const Text(
+          'i',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            height: 1,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -460,38 +506,45 @@ class _ControlScreenState extends State<ControlScreen> {
                                 ),
                                 const SizedBox(width: 10),
 
-                                // AI Powered Badge
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.18),
-                                    borderRadius: BorderRadius.circular(30),
-                                    border: Border.all(
-                                      color: Colors.white.withOpacity(0.25),
-                                    ),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.auto_awesome,
-                                        color: Colors.white,
-                                        size: 16,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // AI Powered Badge
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 8,
                                       ),
-                                      SizedBox(width: 6),
-                                      Text(
-                                        'AI Powered',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.18),
+                                        borderRadius: BorderRadius.circular(30),
+                                        border: Border.all(
+                                          color: Colors.white.withOpacity(0.25),
                                         ),
                                       ),
-                                    ],
-                                  ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.auto_awesome,
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                          SizedBox(width: 6),
+                                          Text(
+                                            'DSS Powered',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _buildDssInfoButton(),
+                                  ],
                                 ),
                               ],
                             ),

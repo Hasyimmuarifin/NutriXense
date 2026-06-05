@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'firebase_options.dart';
 
@@ -12,12 +13,14 @@ import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/control_screen.dart';
+import 'services/fcm_notification_service.dart';
 import 'services/nutrient_alert_service.dart';
 import 'services/rule_based_pump_automation_service.dart';
 import 'services/threshold_config_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -29,6 +32,7 @@ void main() async {
 
   await ThresholdConfigService.instance.load();
   await NutrientAlertService.instance.initialize();
+  await FcmNotificationService.instance.initialize();
 
   runApp(const MyApp());
 }

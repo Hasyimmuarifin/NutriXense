@@ -38,6 +38,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_nutrixense_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="nutrixense_fcm_alerts" />
         <service
             android:name=".NutrixenseBackgroundService"
             android:enabled="true"

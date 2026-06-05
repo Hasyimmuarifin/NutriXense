@@ -17,12 +17,14 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val channelName = "com.example.nutrixense/alerts"
     private val notificationChannelId = "nutrixense_threshold_alerts"
+    private val fcmNotificationChannelId = "nutrixense_fcm_alerts"
     private val notificationPermissionRequestCode = 4102
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         createNotificationChannel()
+        createFcmNotificationChannel()
         requestNotificationPermissionIfNeeded()
 
         MethodChannel(
@@ -32,6 +34,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "initializeAlerts" -> {
                     createNotificationChannel()
+                    createFcmNotificationChannel()
                     requestNotificationPermissionIfNeeded()
                     result.success(null)
                 }
@@ -112,6 +115,29 @@ class MainActivity : FlutterActivity() {
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Alerts when plant nutrition readings leave the configured thresholds."
+            enableVibration(true)
+            setSound(soundUri, audioAttributes)
+        }
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun createFcmNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
+        val channel = NotificationChannel(
+            fcmNotificationChannelId,
+            "NutriXense Push Notifications",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Push notifications sent through Firebase Cloud Messaging."
             enableVibration(true)
             setSound(soundUri, audioAttributes)
         }
