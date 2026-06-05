@@ -483,7 +483,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
   Widget _buildAISummaryBanner() {
     final summary = _aiResponse?.sensorSummary ??
-        'Tekan tombol untuk menganalisis hingga 360 data sensor terbaru dari Firestore menggunakan Gemini.';
+        'Tekan tombol untuk memeriksa kondisi tanaman terbaru dan mendapatkan saran perawatan yang mudah dipahami.';
     final triggers = _aiResponse?.automationTriggers;
 
     return Container(
