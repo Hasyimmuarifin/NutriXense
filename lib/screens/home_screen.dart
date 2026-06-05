@@ -304,12 +304,15 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       builder: (context) {
         final mediaQuery = MediaQuery.of(context);
-        final maxDialogHeight = mediaQuery.size.height * 0.86;
+        final screenSize = mediaQuery.size;
+        final maxDialogHeight = screenSize.height * 0.9;
+        final horizontalInset = screenSize.width < 360 ? 10.0 : 20.0;
+        final verticalInset = screenSize.height < 640 ? 10.0 : 24.0;
 
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 24,
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: horizontalInset,
+            vertical: verticalInset,
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -355,7 +358,14 @@ class _HomeScreenState extends State<HomeScreen>
                 Flexible(
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: EdgeInsets.fromLTRB(
+                      screenSize.width < 360 ? 12 : 20,
+                      4,
+                      screenSize.width < 360 ? 12 : 20,
+                      8,
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -473,57 +483,79 @@ class _HomeScreenState extends State<HomeScreen>
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.shade200),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.sensors_rounded,
-              size: 14,
-              color: AppTheme.primaryGreen,
-            ),
-            const SizedBox(width: 6),
-            SizedBox(
-              width: 86,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final narrow = constraints.maxWidth < 170;
-                  final minField = _thresholdField('Min', minKey, suffix);
-                  final maxField = _thresholdField('Max', maxKey, suffix);
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final stackFields = constraints.maxWidth < 320;
+            final fieldPair = LayoutBuilder(
+              builder: (context, fieldConstraints) {
+                final stackInputs = fieldConstraints.maxWidth < 170;
+                final minField = _thresholdField('Min', minKey, suffix);
+                final maxField = _thresholdField('Max', maxKey, suffix);
 
-                  if (narrow) {
-                    return Column(
-                      children: [
-                        minField,
-                        const SizedBox(height: 6),
-                        maxField,
-                      ],
-                    );
-                  }
-
-                  return Row(
+                if (stackInputs) {
+                  return Column(
                     children: [
-                      Expanded(child: minField),
-                      const SizedBox(width: 6),
-                      Expanded(child: maxField),
+                      minField,
+                      const SizedBox(height: 6),
+                      maxField,
                     ],
                   );
-                },
-              ),
-            ),
-          ],
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: minField),
+                    const SizedBox(width: 6),
+                    Expanded(child: maxField),
+                  ],
+                );
+              },
+            );
+
+            final labelContent = Row(
+              mainAxisSize: stackFields ? MainAxisSize.min : MainAxisSize.max,
+              children: [
+                const Icon(
+                  Icons.sensors_rounded,
+                  size: 14,
+                  color: AppTheme.primaryGreen,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            );
+
+            if (stackFields) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  labelContent,
+                  const SizedBox(height: 7),
+                  fieldPair,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(width: 88, child: labelContent),
+                const SizedBox(width: 8),
+                Expanded(child: fieldPair),
+              ],
+            );
+          },
         ),
       ),
     );
