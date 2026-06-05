@@ -30,6 +30,10 @@ import java.util.concurrent.TimeUnit
 class NutrixenseBackgroundService : Service() {
     companion object {
         const val ACTION_START = "com.example.nutrixense.background.START"
+        const val ACTION_START_ALERT_MONITOR =
+            "com.example.nutrixense.background.START_ALERT_MONITOR"
+        const val ACTION_STOP_ALERT_MONITOR =
+            "com.example.nutrixense.background.STOP_ALERT_MONITOR"
         const val ACTION_STOP = "com.example.nutrixense.background.STOP"
         const val ACTION_SYNC_THRESHOLDS = "com.example.nutrixense.background.SYNC_THRESHOLDS"
         const val ACTION_SYNC_SCHEDULES = "com.example.nutrixense.background.SYNC_SCHEDULES"
@@ -38,6 +42,7 @@ class NutrixenseBackgroundService : Service() {
 
         private const val PREFS_NAME = "nutrixense_background_monitor"
         private const val PREF_ENABLED = "enabled"
+        private const val PREF_ALERT_MONITOR_ENABLED = "alert_monitor_enabled"
         private const val PREF_THRESHOLDS = "thresholds_json"
         private const val PREF_SCHEDULES = "schedules_json"
 
@@ -67,6 +72,24 @@ class NutrixenseBackgroundService : Service() {
         fun isEnabled(context: Context): Boolean {
             return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(PREF_ENABLED, false)
+        }
+
+        fun setAlertMonitorEnabled(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_ALERT_MONITOR_ENABLED, enabled)
+                .apply()
+        }
+
+        fun isAlertMonitorEnabled(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_ALERT_MONITOR_ENABLED, false)
+        }
+
+        fun shouldKeepMonitoring(context: Context): Boolean {
+            return isAlertMonitorEnabled(context) ||
+                isEnabled(context) ||
+                hasEnabledSchedules(context)
         }
 
         fun storeThresholds(context: Context, thresholdsJson: String?) {
@@ -130,7 +153,25 @@ class NutrixenseBackgroundService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 setEnabled(this, false)
-                if (hasEnabledSchedules(this)) {
+                if (shouldKeepMonitoring(this)) {
+                    startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification())
+                    startMonitor()
+                } else {
+                    stopMonitor()
+                    stopSelf()
+                }
+                return START_NOT_STICKY
+            }
+            ACTION_START_ALERT_MONITOR -> {
+                setAlertMonitorEnabled(this, true)
+                updateThresholds(intent.getStringExtra(EXTRA_THRESHOLDS_JSON))
+                startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification())
+                startMonitor()
+                return START_STICKY
+            }
+            ACTION_STOP_ALERT_MONITOR -> {
+                setAlertMonitorEnabled(this, false)
+                if (shouldKeepMonitoring(this)) {
                     startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification())
                     startMonitor()
                 } else {
@@ -154,11 +195,21 @@ class NutrixenseBackgroundService : Service() {
                 }
                 return START_STICKY
             }
-            else -> {
+            ACTION_START -> {
                 setEnabled(this, true)
                 updateThresholds(intent?.getStringExtra(EXTRA_THRESHOLDS_JSON))
                 startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification())
                 startMonitor()
+            }
+            else -> {
+                updateThresholds(null)
+                if (shouldKeepMonitoring(this)) {
+                    startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification())
+                    startMonitor()
+                } else {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
             }
         }
 

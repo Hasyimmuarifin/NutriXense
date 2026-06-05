@@ -50,6 +50,17 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "startBackgroundAlertMonitor" -> {
+                    val thresholdsJson = call.argument<String>("thresholdsJson")
+                    startBackgroundAlertMonitor(thresholdsJson)
+                    result.success(null)
+                }
+
+                "stopBackgroundAlertMonitor" -> {
+                    stopBackgroundAlertMonitor()
+                    result.success(null)
+                }
+
                 "stopBackgroundMonitor" -> {
                     stopBackgroundMonitor()
                     result.success(null)
@@ -120,6 +131,26 @@ class MainActivity : FlutterActivity() {
         } else {
             startService(intent)
         }
+    }
+
+    private fun startBackgroundAlertMonitor(thresholdsJson: String?) {
+        val intent = Intent(this, NutrixenseBackgroundService::class.java).apply {
+            action = NutrixenseBackgroundService.ACTION_START_ALERT_MONITOR
+            putExtra(NutrixenseBackgroundService.EXTRA_THRESHOLDS_JSON, thresholdsJson)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun stopBackgroundAlertMonitor() {
+        val intent = Intent(this, NutrixenseBackgroundService::class.java).apply {
+            action = NutrixenseBackgroundService.ACTION_STOP_ALERT_MONITOR
+        }
+        startService(intent)
     }
 
     private fun stopBackgroundMonitor() {

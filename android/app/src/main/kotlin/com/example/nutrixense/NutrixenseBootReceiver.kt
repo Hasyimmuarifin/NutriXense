@@ -8,6 +8,7 @@ import android.os.Build
 class NutrixenseBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (!NutrixenseBackgroundService.isEnabled(context) &&
+            !NutrixenseBackgroundService.isAlertMonitorEnabled(context) &&
             !NutrixenseBackgroundService.hasEnabledSchedules(context)
         ) {
             return
@@ -16,6 +17,8 @@ class NutrixenseBootReceiver : BroadcastReceiver() {
         val serviceIntent = Intent(context, NutrixenseBackgroundService::class.java).apply {
             action = if (NutrixenseBackgroundService.isEnabled(context)) {
                 NutrixenseBackgroundService.ACTION_START
+            } else if (NutrixenseBackgroundService.isAlertMonitorEnabled(context)) {
+                NutrixenseBackgroundService.ACTION_START_ALERT_MONITOR
             } else {
                 NutrixenseBackgroundService.ACTION_SYNC_SCHEDULES
             }

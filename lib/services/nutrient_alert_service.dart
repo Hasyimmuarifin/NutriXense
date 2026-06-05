@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/sensor_data.dart';
+import 'threshold_config_service.dart';
 
 class NutrientAlertService {
   NutrientAlertService._();
@@ -18,6 +21,9 @@ class NutrientAlertService {
   Future<void> initialize() async {
     try {
       await _channel.invokeMethod<void>('initializeAlerts');
+      await _channel.invokeMethod<void>('startBackgroundAlertMonitor', {
+        'thresholdsJson': jsonEncode(ThresholdConfigService.instance.all()),
+      });
     } on PlatformException catch (error) {
       // Alerts should never interrupt sensor monitoring if Android rejects setup.
       debugPrint('Alert initialization failed: ${error.message}');

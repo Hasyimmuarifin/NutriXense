@@ -1332,6 +1332,32 @@ class _HomeScreenState extends State<HomeScreen>
     final progressHeight = compact ? 5.0 : 6.0;
     final statusHorizontalPadding = compact ? 7.0 : 10.0;
     final statusVerticalPadding = compact ? 4.0 : 5.0;
+    final statusBadge = Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: statusHorizontalPadding,
+        vertical: statusVerticalPadding,
+      ),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(statusIcon, size: 11, color: statusColor),
+          const SizedBox(width: 3),
+          Text(
+            reading.status,
+            style: TextStyle(
+              fontSize: compact ? 9.5 : 10,
+              fontWeight: FontWeight.w700,
+              color: statusColor,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
+    );
 
     return Container(
       width: double.infinity,
@@ -1406,37 +1432,16 @@ class _HomeScreenState extends State<HomeScreen>
                         color: Colors.black54,
                       ),
                     ),
+                    if (compact) ...[
+                      const SizedBox(height: 5),
+                      statusBadge,
+                    ],
                   ],
                 ),
               ),
 
               // STATUS BADGE (tetap konsisten)
-              Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: statusHorizontalPadding,
-                  vertical: statusVerticalPadding,
-                ),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(statusIcon, size: 11, color: statusColor),
-                    const SizedBox(width: 3),
-                    Text(
-                      reading.status,
-                      style: TextStyle(
-                        fontSize: compact ? 9.5 : 10,
-                        fontWeight: FontWeight.w700,
-                        color: statusColor,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              if (!compact) statusBadge,
             ],
           ),
 
