@@ -1,4 +1,4 @@
-const { db } = require('./firebase');
+const { admin, db } = require('./firebase');
 const { config } = require('./config');
 const { runPumpPulse } = require('./pumpController');
 const { sensorReadingFromFirestore } = require('./readingUtils');
@@ -76,6 +76,23 @@ async function loadDssConfig() {
   };
 }
 
+async function writeDssRuntimeStatus(status) {
+  try {
+    await db
+      .collection(config.firestore.automationConfigCollection)
+      .doc('dss_runtime')
+      .set(
+        {
+          ...status,
+          checkedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+  } catch (error) {
+    console.error('Failed to write DSS runtime status:', error.message);
+  }
+}
+
 async function loadLatestReading() {
   const snapshot = await db
     .collection(config.firestore.sensorCollection)
@@ -100,26 +117,65 @@ function startDssWorker(mqttClient) {
 
     try {
       const dssConfig = await loadDssConfig();
-      if (!dssConfig.enabled) return;
+      if (!dssConfig.enabled) {
+        await writeDssRuntimeStatus({
+          state: 'disabled',
+          message: 'DSS is disabled in Firestore config.',
+        });
+        return;
+      }
 
       const reading = await loadLatestReading();
-      if (!reading) return;
+      if (!reading) {
+        await writeDssRuntimeStatus({
+          state: 'no_reading',
+          message: 'No sensor reading found in Firestore.',
+        });
+        return;
+      }
 
       if (
         reading.timestampMillis &&
         Date.now() - reading.timestampMillis > config.automation.maxSensorAgeMs
       ) {
         console.warn('DSS skipped because latest sensor reading is stale.');
+        await writeDssRuntimeStatus({
+          state: 'sensor_stale',
+          message: 'Latest sensor reading is older than DSS_MAX_SENSOR_AGE_MS.',
+          sensorReadingId: reading.id,
+          sensorAgeMs: Date.now() - reading.timestampMillis,
+          maxSensorAgeMs: config.automation.maxSensorAgeMs,
+        });
         return;
       }
 
       const relays = relaysForReading(reading, dssConfig.thresholds);
+      if (relays.length === 0) {
+        await writeDssRuntimeStatus({
+          state: 'no_rule_matched',
+          message: 'Latest sensor reading does not cross any DSS threshold.',
+          sensorReadingId: reading.id,
+          reading,
+          thresholds: dssConfig.thresholds,
+        });
+        return;
+      }
+
       const allowedRelays = relays.filter((relay) => {
         const lastActivation = lastActivationByRelay.get(relay);
         return !lastActivation || Date.now() - lastActivation >= dssConfig.cooldownMs;
       });
 
-      if (allowedRelays.length === 0) return;
+      if (allowedRelays.length === 0) {
+        await writeDssRuntimeStatus({
+          state: 'cooldown',
+          message: 'DSS rule matched, but all matched relays are still in cooldown.',
+          sensorReadingId: reading.id,
+          matchedRelays: relays,
+          cooldownMs: dssConfig.cooldownMs,
+        });
+        return;
+      }
 
       await runPumpPulse(
         mqttClient,
@@ -137,8 +193,22 @@ function startDssWorker(mqttClient) {
       for (const relay of allowedRelays) {
         lastActivationByRelay.set(relay, now);
       }
+
+      await writeDssRuntimeStatus({
+        state: 'activated',
+        message: 'DSS activated pump relay(s).',
+        sensorReadingId: reading.id,
+        matchedRelays: relays,
+        activatedRelays: allowedRelays,
+        pulseDurationMs: dssConfig.pulseDurationMs,
+        cooldownMs: dssConfig.cooldownMs,
+      });
     } catch (error) {
       console.error('DSS worker check failed:', error);
+      await writeDssRuntimeStatus({
+        state: 'error',
+        message: error.message,
+      });
     } finally {
       isChecking = false;
     }
