@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/dummy_data.dart';
@@ -22,8 +23,10 @@ class ControlScreen extends StatefulWidget {
 
 class _ControlScreenState extends State<ControlScreen> {
   static const String _scheduleStorageKey = 'nutrixense_watering_schedules';
+  static const String _wateringSchedulesCollection = 'watering_schedules';
 
   late List<PumpController> _pumps;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final MQTTService mqttService = MQTTService();
   final RuleBasedPumpAutomationService _ruleBasedPumpAutomationService =
       RuleBasedPumpAutomationService.instance;
@@ -183,6 +186,26 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   Future<void> _loadSchedules() async {
+    final backendSchedules = await _loadBackendSchedules();
+    if (backendSchedules.isNotEmpty) {
+      if (!mounted) return;
+
+      setState(() {
+        _wateringSchedules
+          ..clear()
+          ..addAll(backendSchedules);
+      });
+
+      for (final schedule in backendSchedules) {
+        if (schedule.enabled) {
+          _scheduleNextRun(schedule, persist: false);
+        }
+      }
+
+      await _saveSchedules();
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final rawSchedules = prefs.getString(_scheduleStorageKey);
     if (rawSchedules == null) {
@@ -223,7 +246,65 @@ class _ControlScreenState extends State<ControlScreen> {
         .toList(growable: false);
     final schedulesJson = jsonEncode(schedules);
     await prefs.setString(_scheduleStorageKey, schedulesJson);
+    await _syncSchedulesToBackend(schedules);
     _ruleBasedPumpAutomationService.syncNativeSchedules(schedulesJson);
+  }
+
+  Future<List<_WateringSchedule>> _loadBackendSchedules() async {
+    try {
+      final snapshot =
+          await _firestore.collection(_wateringSchedulesCollection).get();
+
+      return snapshot.docs
+          .map((doc) => _WateringSchedule.fromJson({
+                ...doc.data(),
+                'id': int.tryParse(doc.id) ?? doc.data()['id'],
+              }))
+          .whereType<_WateringSchedule>()
+          .toList()
+        ..sort((a, b) {
+          final hourCompare = a.time.hour.compareTo(b.time.hour);
+          if (hourCompare != 0) return hourCompare;
+          return a.time.minute.compareTo(b.time.minute);
+        });
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _syncSchedulesToBackend(
+    List<Map<String, dynamic>> schedules,
+  ) async {
+    try {
+      final collection = _firestore.collection(_wateringSchedulesCollection);
+      final existing = await collection.get();
+      final currentIds =
+          schedules.map((schedule) => '${schedule['id']}').toSet();
+      final batch = _firestore.batch();
+
+      for (final doc in existing.docs) {
+        if (doc.id == '_dss_config') continue;
+        if (!currentIds.contains(doc.id)) {
+          batch.delete(doc.reference);
+        }
+      }
+
+      for (final schedule in schedules) {
+        final id = '${schedule['id']}';
+        batch.set(
+          collection.doc(id),
+          {
+            ...schedule,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
+
+      await batch.commit();
+    } catch (_) {
+      // Keep the local app usable when Firestore is temporarily unavailable.
+    }
   }
 
   void _syncNativeSchedules() {
@@ -238,6 +319,7 @@ class _ControlScreenState extends State<ControlScreen> {
   void _scheduleNextRun(
     _WateringSchedule schedule, {
     bool showSnackBar = false,
+    bool persist = true,
   }) {
     schedule.timer?.cancel();
 
@@ -258,72 +340,12 @@ class _ControlScreenState extends State<ControlScreen> {
       schedule.enabled = true;
       schedule.nextRun = nextRun;
     });
-    _saveSchedules();
-
-    schedule.timer = Timer(nextRun.difference(now), () {
-      unawaited(_runSchedule(schedule));
-    });
+    if (persist) {
+      _saveSchedules();
+    }
 
     if (showSnackBar) {
       _showScheduleSnackBar(schedule);
-    }
-  }
-
-  Future<void> _runSchedule(_WateringSchedule schedule) async {
-    if (!mounted || !schedule.enabled || schedule.isRunning) return;
-
-    final pumpIndexes = schedule.pumpIndexes
-        .where((index) => index >= 0 && index < _pumps.length)
-        .toList(growable: false);
-    if (pumpIndexes.isEmpty) return;
-
-    setState(() {
-      schedule.isRunning = true;
-      schedule.nextRun = null;
-      for (final index in pumpIndexes) {
-        _pumps[index].isLoading = true;
-      }
-    });
-
-    try {
-      await mqttService.init();
-
-      for (final index in pumpIndexes) {
-        mqttService.setRelay(index + 1, true);
-      }
-
-      if (mounted) {
-        setState(() {
-          for (final index in pumpIndexes) {
-            _pumps[index].isLoading = false;
-            _pumps[index].isOn = true;
-          }
-        });
-      }
-
-      await Future.delayed(Duration(seconds: schedule.durationSeconds));
-    } finally {
-      for (final index in pumpIndexes) {
-        mqttService.setRelay(index + 1, false);
-      }
-
-      if (mounted) {
-        setState(() {
-          for (final index in pumpIndexes) {
-            _pumps[index].isLoading = false;
-            _pumps[index].isOn = false;
-          }
-          schedule.isRunning = false;
-        });
-
-        if (schedule.repeatsDaily && schedule.enabled) {
-          _scheduleNextRun(schedule);
-        } else {
-          schedule.enabled = false;
-          schedule.nextRun = null;
-          _saveSchedules();
-        }
-      }
     }
   }
 
@@ -378,6 +400,8 @@ class _ControlScreenState extends State<ControlScreen> {
   int get _activePumps => _pumps.where((p) => p.isOn).length;
 
   Future<void> _toggleRuleBasedAutomation(bool enabled) async {
+    setState(() => _isRuleBasedAutomationEnabled = enabled);
+
     if (enabled) {
       await _ruleBasedPumpAutomationService.start();
     } else {
@@ -385,16 +409,26 @@ class _ControlScreenState extends State<ControlScreen> {
     }
 
     if (!mounted) return;
-    setState(() => _isRuleBasedAutomationEnabled = enabled);
+
+    final backendSynced = await _ruleBasedPumpAutomationService
+        .syncBackendDssConfig(enabled: enabled);
+
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          enabled
-              ? 'Decision Support automation enabled.'
-              : 'Decision Support automation disabled.',
+          !backendSynced
+              ? 'DSS switch saved locally, but backend sync failed. Check Firestore rules or internet connection.'
+              : enabled
+                  ? 'Decision Support automation enabled.'
+                  : 'Decision Support automation disabled.',
         ),
-        backgroundColor: enabled ? AppTheme.primaryGreen : Colors.grey.shade700,
+        backgroundColor: !backendSynced
+            ? AppTheme.statusLow
+            : enabled
+                ? AppTheme.primaryGreen
+                : Colors.grey.shade700,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),

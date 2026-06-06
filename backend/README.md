@@ -7,6 +7,8 @@ Tahap pertama yang sudah tersedia:
 - Subscribe data sensor dari HiveMQ Cloud.
 - Normalisasi payload sensor ke field yang dipakai Flutter.
 - Simpan data ke Firestore collection `sensor_data`.
+- Jalankan DSS rule-based dari VPS.
+- Jalankan automatic watering schedule dari VPS.
 
 ## Setup Lokal atau VPS
 
@@ -48,6 +50,50 @@ SAVE_INTERVAL_MS=60000
 FIRESTORE_COLLECTION=sensor_data
 FIREBASE_SERVICE_ACCOUNT=
 ```
+
+## Firestore Collections
+
+Backend membaca dan menulis collection berikut:
+
+```text
+sensor_data
+automation_config/dss
+watering_schedules
+pump_activity_logs
+```
+
+Contoh dokumen `automation_config/dss`:
+
+```json
+{
+  "enabled": true,
+  "thresholds": {
+    "min_nitrogen": 40,
+    "min_phosphorus": 20,
+    "min_potassium": 40,
+    "min_moisture": 40,
+    "max_temperature": 35,
+    "min_ec": 1
+  },
+  "pulseDurationMs": 5000,
+  "cooldownMs": 600000
+}
+```
+
+Contoh dokumen `watering_schedules`:
+
+```json
+{
+  "enabled": true,
+  "hour": 7,
+  "minute": 30,
+  "pumpIndexes": [3],
+  "durationSeconds": 10,
+  "repeatsDaily": true
+}
+```
+
+`pumpIndexes` mengikuti Flutter, jadi `0` berarti relay 1 dan `3` berarti relay 4. Backend juga mendukung field `relays`, misalnya `[4]`.
 
 Untuk VPS, jalankan dengan PM2:
 

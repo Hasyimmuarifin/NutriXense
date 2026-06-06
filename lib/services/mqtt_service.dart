@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
@@ -54,17 +55,17 @@ class MQTTService {
 
   Future<void> connect() async {
     try {
-      print('MQTT Connecting...');
+      debugPrint('MQTT Connecting...');
       await client.connect('hasyim', 'hasyimHiveMQTT@22');
     } catch (e) {
-      print('MQTT Error: $e');
+      debugPrint('MQTT Error: $e');
       client.disconnect();
     }
 
     if (client.connectionStatus!.state == MqttConnectionState.connected) {
-      print('MQTT Connected');
+      debugPrint('MQTT Connected');
     } else {
-      print('MQTT Failed');
+      debugPrint('MQTT Failed');
       client.disconnect();
     }
   }
@@ -80,7 +81,7 @@ class MQTTService {
         recMess.payload.message,
       );
 
-      print('MQTT Message: $msg');
+      debugPrint('MQTT Message: $msg');
       try {
         final data = jsonDecode(msg);
 
@@ -88,7 +89,7 @@ class MQTTService {
           _sensorStreamController.add(data);
         }
       } catch (e) {
-        print("JSON ERROR: $e");
+        debugPrint("JSON ERROR: $e");
       }
     });
   }
@@ -116,20 +117,20 @@ class MQTTService {
 
     publish("nutrixense/control", payload);
 
-    print("Relay Command Sent: $payload");
+    debugPrint("Relay Command Sent: $payload");
   }
 
   void onConnected() {
     onConnectionChanged?.call(true);
-    print('MQTT Connected Callback');
+    debugPrint('MQTT Connected Callback');
   }
 
   void onDisconnected() {
     onConnectionChanged?.call(false);
-    print('MQTT Disconnected');
+    debugPrint('MQTT Disconnected');
   }
 
   void onSubscribed(String topic) {
-    print('Subscribed to $topic');
+    debugPrint('Subscribed to $topic');
   }
 }

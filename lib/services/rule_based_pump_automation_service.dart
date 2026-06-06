@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'ai_pump_automation_service.dart';
 import 'threshold_config_service.dart';
 
 class RuleBasedPumpAutomationService {
@@ -15,39 +14,34 @@ class RuleBasedPumpAutomationService {
 
   factory RuleBasedPumpAutomationService({
     FirebaseFirestore? firestore,
-    AiPumpAutomationService? pumpAutomationService,
     Duration checkInterval = const Duration(minutes: 1),
   }) {
     return RuleBasedPumpAutomationService._(
       firestore: firestore,
-      pumpAutomationService: pumpAutomationService,
       checkInterval: checkInterval,
     );
   }
 
   RuleBasedPumpAutomationService._({
     FirebaseFirestore? firestore,
-    AiPumpAutomationService? pumpAutomationService,
     this.checkInterval = const Duration(minutes: 1),
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _pumpAutomationService =
-            pumpAutomationService ?? AiPumpAutomationService();
+  }) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
-  final AiPumpAutomationService _pumpAutomationService;
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
   final Duration checkInterval;
   static const MethodChannel _backgroundChannel =
       MethodChannel('com.example.nutrixense/alerts');
   static const String _enabledStorageKey = 'nutrixense_dss_enabled';
+  static const String _automationConfigCollection = 'automation_config';
+  static const String _dssConfigDocument = 'dss';
+  static const String _wateringSchedulesCollection = 'watering_schedules';
+  static const String _dssFallbackDocument = '_dss_config';
 
-  Timer? _timer;
-  bool _isChecking = false;
-  Map<int, DateTime> _lastActivationByRelay = {};
   final ValueNotifier<Set<int>> activeRelays = ValueNotifier(<int>{});
 
-  bool get isRunning => _timer != null;
+  bool get isRunning => false;
 
   Future<bool> loadEnabledPreference() async {
     final prefs = await SharedPreferences.getInstance();
@@ -63,10 +57,7 @@ class RuleBasedPumpAutomationService {
     if (persist) {
       await setEnabledPreference(true);
     }
-    if (_timer != null) return;
-    _startNativeBackgroundMonitor();
-    _checkLatestReading();
-    _timer = Timer.periodic(checkInterval, (_) => _checkLatestReading());
+    stopInAppChecks();
   }
 
   Future<void> stop({bool persist = true}) async {
@@ -78,11 +69,11 @@ class RuleBasedPumpAutomationService {
   }
 
   void stopInAppChecks() {
-    _timer?.cancel();
-    _timer = null;
+    activeRelays.value = <int>{};
   }
 
   void syncNativeThresholds() {
+    unawaited(syncBackendDssConfig());
     unawaited(
       _backgroundChannel.invokeMethod<void>('syncBackgroundThresholds', {
         'thresholdsJson': jsonEncode(_thresholdConfigService.all()),
@@ -98,12 +89,42 @@ class RuleBasedPumpAutomationService {
     );
   }
 
-  void _startNativeBackgroundMonitor() {
-    unawaited(
-      _backgroundChannel.invokeMethod<void>('startBackgroundMonitor', {
-        'thresholdsJson': jsonEncode(_thresholdConfigService.all()),
-      }).catchError((_) {}),
+  Future<bool> syncBackendDssConfig({bool? enabled}) async {
+    final payload = {
+      if (enabled != null) 'enabled': enabled,
+      'thresholds': _thresholdConfigService.all(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    final primarySynced = await _safeSetDssConfig(
+      _automationConfigCollection,
+      _dssConfigDocument,
+      payload,
     );
+    final fallbackSynced = await _safeSetDssConfig(
+      _wateringSchedulesCollection,
+      _dssFallbackDocument,
+      payload,
+    );
+
+    return primarySynced || fallbackSynced;
+  }
+
+  Future<bool> _safeSetDssConfig(
+    String collection,
+    String document,
+    Map<String, dynamic> payload,
+  ) async {
+    try {
+      await _firestore
+          .collection(collection)
+          .doc(document)
+          .set(payload, SetOptions(merge: true));
+      return true;
+    } catch (error) {
+      debugPrint('DSS backend sync failed for $collection/$document: $error');
+      return false;
+    }
   }
 
   void _stopNativeBackgroundMonitor() {
@@ -112,146 +133,5 @@ class RuleBasedPumpAutomationService {
           .invokeMethod<void>('stopBackgroundMonitor')
           .catchError((_) {}),
     );
-  }
-
-  Future<void> _checkLatestReading() async {
-    if (_isChecking) return;
-    _isChecking = true;
-
-    try {
-      final snapshot = await _firestore
-          .collection('sensor_data')
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
-
-      if (snapshot.docs.isEmpty) return;
-
-      final reading =
-          _RuleSensorReading.fromFirestore(snapshot.docs.first.data());
-      final relays = _relaysForLowParameters(reading);
-      if (relays.isEmpty) return;
-
-      final now = DateTime.now();
-      final allowedRelays = relays.where((relay) {
-        final lastActivation = _lastActivationByRelay[relay];
-        return lastActivation == null ||
-            now.difference(lastActivation) >= checkInterval;
-      }).toSet();
-
-      if (allowedRelays.isEmpty) return;
-
-      activeRelays.value = allowedRelays;
-      await _pumpAutomationService.applyRelays(
-        allowedRelays,
-        reason: 'Rule-based automatic pump control',
-      );
-      activeRelays.value = <int>{};
-
-      _lastActivationByRelay = {
-        ..._lastActivationByRelay,
-        for (final relay in allowedRelays) relay: now,
-      };
-    } catch (_) {
-      // Keep the periodic rule engine alive when Firestore or MQTT is unavailable.
-      activeRelays.value = <int>{};
-    } finally {
-      _isChecking = false;
-    }
-  }
-
-  Set<int> _relaysForLowParameters(_RuleSensorReading reading) {
-    final relays = <int>{};
-
-    if (_isLow(
-      reading.nitrogen,
-      _thresholdConfigService.value('min_nitrogen', 40),
-    )) {
-      relays.add(1);
-    }
-    if (_isLow(
-      reading.phosphorus,
-      _thresholdConfigService.value('min_phosphorus', 20),
-    )) {
-      relays.add(2);
-    }
-    if (_isLow(
-      reading.potassium,
-      _thresholdConfigService.value('min_potassium', 40),
-    )) {
-      relays.add(3);
-    }
-    if (_isLow(
-      reading.moisture,
-      _thresholdConfigService.value('min_moisture', 40),
-    )) {
-      relays.add(4);
-    }
-    if (_isHigh(
-      reading.temperature,
-      _thresholdConfigService.value('max_temperature', 35),
-    )) {
-      relays.add(4);
-    }
-    if (_isLow(
-      reading.ec,
-      _thresholdConfigService.value('min_ec', 1.0),
-    )) {
-      relays.addAll({1, 2, 3});
-    }
-
-    return relays;
-  }
-
-  bool _isLow(double? value, num? minimum) {
-    return value != null && minimum != null && value < minimum;
-  }
-
-  bool _isHigh(double? value, num? maximum) {
-    return value != null && maximum != null && value > maximum;
-  }
-}
-
-class _RuleSensorReading {
-  const _RuleSensorReading({
-    this.nitrogen,
-    this.phosphorus,
-    this.potassium,
-    this.ph,
-    this.temperature,
-    this.moisture,
-    this.ec,
-  });
-
-  final double? nitrogen;
-  final double? phosphorus;
-  final double? potassium;
-  final double? ph;
-  final double? temperature;
-  final double? moisture;
-  final double? ec;
-
-  factory _RuleSensorReading.fromFirestore(Map<String, dynamic> data) {
-    return _RuleSensorReading(
-      nitrogen: _readDouble(data, ['N', 'n', 'nitrogen']),
-      phosphorus: _readDouble(data, ['P', 'p', 'phosphorus']),
-      potassium: _readDouble(data, ['K', 'k', 'potassium']),
-      ph: _readDouble(data, ['pH', 'ph', 'PH']),
-      temperature: _readDouble(data, ['Temp', 'temp', 'temperature']),
-      moisture: _readDouble(data, ['Moisture', 'moisture']),
-      ec: _readDouble(data, ['EC', 'ec', 'electrical_conductivity']),
-    );
-  }
-
-  static double? _readDouble(Map<String, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final value = data[key];
-      if (value is num) return value.toDouble();
-      if (value is String) {
-        final parsed = double.tryParse(value);
-        if (parsed != null) return parsed;
-      }
-    }
-    return null;
   }
 }
