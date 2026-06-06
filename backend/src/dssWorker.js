@@ -2,23 +2,7 @@ const { admin, db } = require('./firebase');
 const { config } = require('./config');
 const { runPumpPulse } = require('./pumpController');
 const { sensorReadingFromFirestore } = require('./readingUtils');
-
-const DEFAULT_THRESHOLDS = {
-  min_nitrogen: 40,
-  max_nitrogen: 80,
-  min_phosphorus: 20,
-  max_phosphorus: 60,
-  min_potassium: 40,
-  max_potassium: 100,
-  min_ph: 5.8,
-  max_ph: 7.2,
-  min_moisture: 40,
-  max_moisture: 80,
-  min_temperature: 18,
-  max_temperature: 35,
-  min_ec: 1.0,
-  max_ec: 3.0,
-};
+const { DEFAULT_THRESHOLDS, buildThresholds } = require('./thresholdRules');
 
 function isLow(value, minimum) {
   return typeof value === 'number' && typeof minimum === 'number' && value < minimum;
@@ -67,10 +51,7 @@ async function loadDssConfig() {
   };
   return {
     enabled: data.enabled === true,
-    thresholds: {
-      ...DEFAULT_THRESHOLDS,
-      ...(data.thresholds || {}),
-    },
+    thresholds: buildThresholds(data),
     pulseDurationMs: Number(data.pulseDurationMs) || config.automation.dssPulseDurationMs,
     cooldownMs: Number(data.cooldownMs) || config.automation.dssCooldownMs,
   };

@@ -9,6 +9,7 @@ Tahap pertama yang sudah tersedia:
 - Simpan data ke Firestore collection `sensor_data`.
 - Jalankan DSS rule-based dari VPS.
 - Jalankan automatic watering schedule dari VPS.
+- Kirim push notification threshold dari VPS via FCM.
 
 ## Setup Lokal atau VPS
 
@@ -58,8 +59,12 @@ Backend membaca dan menulis collection berikut:
 ```text
 sensor_data
 automation_config/dss
+automation_config/dss_runtime
+automation_config/threshold_notifications
+automation_config/threshold_notifications_runtime
 watering_schedules
 pump_activity_logs
+threshold_alert_logs
 ```
 
 Contoh dokumen `automation_config/dss`:
@@ -94,6 +99,31 @@ Contoh dokumen `watering_schedules`:
 ```
 
 `pumpIndexes` mengikuti Flutter, jadi `0` berarti relay 1 dan `3` berarti relay 4. Backend juga mendukung field `relays`, misalnya `[4]`.
+
+Contoh dokumen opsional `automation_config/threshold_notifications`:
+
+```json
+{
+  "enabled": true,
+  "repeatMs": 60000
+}
+```
+
+Jika dokumen ini tidak ada, worker notifikasi tetap aktif mengikuti `.env`.
+
+Status runtime notifikasi threshold bisa dicek di:
+
+```text
+automation_config/threshold_notifications_runtime
+```
+
+Nilai `state` yang umum:
+
+- `normal`: semua nilai sensor masih dalam ambang.
+- `sent`: push notification berhasil dikirim.
+- `repeat_wait`: kondisi abnormal masih sama, tapi jeda kirim ulang belum lewat.
+- `sensor_stale`: data sensor terbaru terlalu lama.
+- `error`: terjadi error pengiriman atau pembacaan data.
 
 Untuk VPS, jalankan dengan PM2:
 

@@ -70,6 +70,9 @@ const config = {
       'watering_schedules',
     pumpLogsCollection:
       process.env.FIRESTORE_PUMP_LOGS_COLLECTION || 'pump_activity_logs',
+    thresholdAlertLogsCollection:
+      process.env.FIRESTORE_THRESHOLD_ALERT_LOGS_COLLECTION ||
+      'threshold_alert_logs',
   },
   automation: {
     dssCheckIntervalMs: readNumberEnv('DSS_CHECK_INTERVAL_MS', 60 * 1000),
@@ -81,6 +84,22 @@ const config = {
       15 * 1000,
     ),
     timezoneOffsetMinutes: readNumberEnv('TIMEZONE_OFFSET_MINUTES', 7 * 60),
+    thresholdNotificationEnabled:
+      (process.env.THRESHOLD_NOTIFICATION_ENABLED || 'true') !== 'false',
+    thresholdNotificationIntervalMs: readNumberEnv(
+      'THRESHOLD_NOTIFICATION_INTERVAL_MS',
+      60 * 1000,
+    ),
+    thresholdNotificationRepeatMs: readNumberEnv(
+      'THRESHOLD_NOTIFICATION_REPEAT_MS',
+      60 * 1000,
+    ),
+    thresholdNotificationMaxSensorAgeMs: readNumberEnv(
+      'THRESHOLD_NOTIFICATION_MAX_SENSOR_AGE_MS',
+      10 * 60 * 1000,
+    ),
+    fcmTopic: process.env.FCM_ALERT_TOPIC || 'nutrixense_alerts',
+    fcmChannelId: process.env.FCM_CHANNEL_ID || 'nutrixense_fcm_alerts',
   },
 };
 
