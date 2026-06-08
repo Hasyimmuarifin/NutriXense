@@ -15,6 +15,16 @@ function alertKey(alert) {
   return `${alert.key}:${alert.status}`;
 }
 
+function readMutedSensors(...configs) {
+  return configs.reduce((mutedSensors, item) => {
+    const rawMuted = item?.buzzerMuted || item?.buzzer_muted || {};
+    for (const [key, value] of Object.entries(rawMuted)) {
+      mutedSensors[key] = value === true || value === 1;
+    }
+    return mutedSensors;
+  }, {});
+}
+
 async function writeRuntimeStatus(status) {
   try {
     await db
@@ -68,6 +78,7 @@ async function loadNotificationConfig() {
         ? notificationData.enabled === true
         : config.automation.thresholdNotificationEnabled,
     thresholds: buildThresholds(data),
+    mutedSensors: readMutedSensors(dssData, fallbackData, notificationData),
     repeatMs:
       Number(notificationData.repeatMs) ||
       config.automation.thresholdNotificationRepeatMs,
@@ -170,13 +181,16 @@ function startThresholdNotificationWorker() {
         return;
       }
 
-      const alerts = abnormalReadings(reading, notificationConfig.thresholds);
+      const alerts = abnormalReadings(reading, notificationConfig.thresholds)
+        .filter((alert) => notificationConfig.mutedSensors[alert.key] !== true);
       if (alerts.length === 0) {
         lastSentByAlert.clear();
         await writeRuntimeStatus({
           state: 'normal',
-          message: 'All readings are inside configured thresholds.',
+          message:
+            'All unmuted readings are inside configured thresholds.',
           sensorReadingId: reading.id,
+          mutedSensors: notificationConfig.mutedSensors,
         });
         return;
       }
@@ -196,6 +210,7 @@ function startThresholdNotificationWorker() {
           message: 'Abnormal readings found, but repeat interval has not passed.',
           sensorReadingId: reading.id,
           alerts,
+          mutedSensors: notificationConfig.mutedSensors,
           repeatMs: notificationConfig.repeatMs,
         });
         return;
@@ -212,6 +227,7 @@ function startThresholdNotificationWorker() {
         message: 'Threshold push notification sent.',
         sensorReadingId: reading.id,
         alerts: dueAlerts,
+        mutedSensors: notificationConfig.mutedSensors,
         fcmMessageId,
         repeatMs: notificationConfig.repeatMs,
       });

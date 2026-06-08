@@ -135,6 +135,7 @@ class NutrixenseBackgroundService : Service() {
     private var latestReading: SensorReading? = null
     private val schedules = mutableListOf<WateringSchedule>()
     private val thresholds = defaultThresholds().toMutableMap()
+    private val mutedSensors = defaultMutedSensors().toMutableMap()
     private val lastAlertTimes = mutableMapOf<String, Long>()
     private val lastRelayActivationTimes = mutableMapOf<Int, Long>()
     private val lastScheduleRunDates = mutableMapOf<Long, String>()
@@ -318,13 +319,13 @@ class NutrixenseBackgroundService : Service() {
     private fun handleThresholdAlerts(reading: SensorReading) {
         val alertLines = mutableListOf<String>()
 
-        addAlertLine(alertLines, "Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
-        addAlertLine(alertLines, "Phosphorus", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
-        addAlertLine(alertLines, "Potassium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
-        addAlertLine(alertLines, "pH", reading.ph, "pH", "min_ph", "max_ph")
-        addAlertLine(alertLines, "Moisture", reading.moisture, "%", "min_moisture", "max_moisture")
-        addAlertLine(alertLines, "Temperature", reading.temperature, "°C", "min_temperature", "max_temperature")
-        addAlertLine(alertLines, "EC", reading.ec, "mS/cm", "min_ec", "max_ec")
+        addAlertLine(alertLines, "nitrogen", "Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
+        addAlertLine(alertLines, "phosphorus", "Phosphorus", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
+        addAlertLine(alertLines, "potassium", "Potassium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
+        addAlertLine(alertLines, "ph", "pH", reading.ph, "pH", "min_ph", "max_ph")
+        addAlertLine(alertLines, "moisture", "Moisture", reading.moisture, "%", "min_moisture", "max_moisture")
+        addAlertLine(alertLines, "temperature", "Temperature", reading.temperature, "°C", "min_temperature", "max_temperature")
+        addAlertLine(alertLines, "ec", "EC", reading.ec, "mS/cm", "min_ec", "max_ec")
 
         if (alertLines.isEmpty()) return
 
@@ -337,6 +338,7 @@ class NutrixenseBackgroundService : Service() {
 
     private fun addAlertLine(
         lines: MutableList<String>,
+        sensorKey: String,
         label: String,
         value: Double?,
         unit: String,
@@ -344,6 +346,12 @@ class NutrixenseBackgroundService : Service() {
         maxKey: String
     ) {
         if (value == null) return
+        if (mutedSensors[sensorKey] == true) {
+            lastAlertTimes.keys
+                .filter { it.startsWith("$label:") }
+                .forEach { lastAlertTimes.remove(it) }
+            return
+        }
         val min = thresholds[minKey] ?: return
         val max = thresholds[maxKey] ?: return
         val status = when {
@@ -479,9 +487,22 @@ class NutrixenseBackgroundService : Service() {
         try {
             val json = JSONObject(raw)
             json.keys().forEach { key ->
-                thresholds[key] = json.optDouble(key, thresholds[key] ?: 0.0)
+                val value = json.opt(key)
+                if (value is Number) {
+                    thresholds[key] = value.toDouble()
+                }
             }
+            updateMutedSensors(json.optJSONObject("buzzer_muted") ?: json.optJSONObject("buzzerMuted"))
         } catch (_: Exception) {
+        }
+    }
+
+    private fun updateMutedSensors(json: JSONObject?) {
+        if (json == null) return
+        mutedSensors.keys.forEach { key ->
+            if (json.has(key)) {
+                mutedSensors[key] = json.optBoolean(key, false)
+            }
         }
     }
 
@@ -643,6 +664,16 @@ class NutrixenseBackgroundService : Service() {
         "max_temperature" to 35.0,
         "min_ec" to 1.0,
         "max_ec" to 3.0
+    )
+
+    private fun defaultMutedSensors(): Map<String, Boolean> = mapOf(
+        "nitrogen" to false,
+        "phosphorus" to false,
+        "potassium" to false,
+        "ph" to false,
+        "moisture" to false,
+        "temperature" to false,
+        "ec" to false
     )
 
     data class SensorReading(

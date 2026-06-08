@@ -77,8 +77,7 @@ class _HomeScreenState extends State<HomeScreen>
       ThresholdConfigService.instance;
 
   StreamSubscription? sensorSub;
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
-      _buzzerConfigSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _buzzerConfigSub;
   final Map<String, TextEditingController> _thresholdControllers = {
     'min_nitrogen': TextEditingController(text: '40'),
     'max_nitrogen': TextEditingController(text: '80'),
@@ -334,6 +333,11 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }
       });
+      unawaited(
+        _nutrientAlertService.syncBackgroundAlertConfig(
+          mutedSensorKeys: _mutedSensorKeys,
+        ),
+      );
     }, onError: (Object error) {
       debugPrint('Buzzer mute config listener failed: $error');
     });
@@ -380,6 +384,11 @@ class _HomeScreenState extends State<HomeScreen>
     if (mqttService.isConnected) {
       _publishBuzzerMuteConfig();
     }
+    unawaited(
+      _nutrientAlertService.syncBackgroundAlertConfig(
+        mutedSensorKeys: _mutedSensorKeys,
+      ),
+    );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -387,9 +396,9 @@ class _HomeScreenState extends State<HomeScreen>
         content: Text(
           backendSynced
               ? nextMuted
-                  ? 'Buzzer ${_sensorLabel(sensorKey)} dinonaktifkan'
-                  : 'Buzzer ${_sensorLabel(sensorKey)} diaktifkan'
-              : 'Status buzzer berubah di aplikasi, tetapi gagal sync ke backend.',
+                  ? 'Alert ${_sensorLabel(sensorKey)} dinonaktifkan'
+                  : 'Alert ${_sensorLabel(sensorKey)} diaktifkan'
+              : 'Status alert berubah di aplikasi, tetapi gagal sync ke backend.',
         ),
         backgroundColor: backendSynced
             ? nextMuted
@@ -416,6 +425,13 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Set<String> get _mutedSensorKeys {
+    return _buzzerMuted.entries
+        .where((entry) => entry.value)
+        .map((entry) => entry.key)
+        .toSet();
+  }
+
   void updateSensorData(Map<String, dynamic> data) {
     if (!mounted) return;
 
@@ -439,7 +455,10 @@ class _HomeScreenState extends State<HomeScreen>
     });
 
     _alertCountService.updateFromSensorReadings(nextReadings);
-    _nutrientAlertService.handleReadings(nextReadings);
+    _nutrientAlertService.handleReadings(
+      nextReadings,
+      mutedSensorKeys: _mutedSensorKeys,
+    );
   }
 
   Future<void> _openThresholdConfigDialog() async {
@@ -1517,8 +1536,8 @@ class _HomeScreenState extends State<HomeScreen>
     final muteButtonSize = compact ? 30.0 : 34.0;
     final buzzerMuteButton = Tooltip(
       message: isBuzzerMuted
-          ? 'Aktifkan buzzer ${_sensorLabel(sensorKey)}'
-          : 'Nonaktifkan buzzer ${_sensorLabel(sensorKey)}',
+          ? 'Aktifkan alert ${_sensorLabel(sensorKey)}'
+          : 'Nonaktifkan alert ${_sensorLabel(sensorKey)}',
       child: Material(
         color: isBuzzerMuted
             ? Colors.grey.shade200

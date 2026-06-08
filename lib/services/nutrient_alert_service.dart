@@ -22,7 +22,7 @@ class NutrientAlertService {
     try {
       await _channel.invokeMethod<void>('initializeAlerts');
       await _channel.invokeMethod<void>('startBackgroundAlertMonitor', {
-        'thresholdsJson': jsonEncode(ThresholdConfigService.instance.all()),
+        'thresholdsJson': jsonEncode(_backgroundConfig()),
       });
     } on PlatformException catch (error) {
       // Alerts should never interrupt sensor monitoring if Android rejects setup.
@@ -30,10 +30,30 @@ class NutrientAlertService {
     }
   }
 
-  Future<void> handleReadings(List<SensorReading> readings) async {
+  Future<void> syncBackgroundAlertConfig({
+    Set<String> mutedSensorKeys = const {},
+  }) async {
+    try {
+      await _channel.invokeMethod<void>('syncBackgroundThresholds', {
+        'thresholdsJson': jsonEncode(
+          _backgroundConfig(mutedSensorKeys: mutedSensorKeys),
+        ),
+      });
+    } on PlatformException catch (error) {
+      debugPrint('Background alert config sync failed: ${error.message}');
+    }
+  }
+
+  Future<void> handleReadings(
+    List<SensorReading> readings, {
+    Set<String> mutedSensorKeys = const {},
+  }) async {
     final now = DateTime.now();
-    final abnormalReadings =
-        readings.where((reading) => reading.status != 'Normal').toList();
+    final abnormalReadings = readings
+        .where((reading) =>
+            reading.status != 'Normal' &&
+            !mutedSensorKeys.contains(_sensorKeyForReading(reading)))
+        .toList();
 
     if (abnormalReadings.isEmpty) {
       _lastStatuses.clear();
@@ -50,8 +70,10 @@ class NutrientAlertService {
     }).toList();
 
     for (final reading in readings) {
-      if (reading.status == 'Normal') {
+      final sensorKey = _sensorKeyForReading(reading);
+      if (reading.status == 'Normal' || mutedSensorKeys.contains(sensorKey)) {
         _lastStatuses.remove(reading.label);
+        _lastAlertTimes.remove(reading.label);
       } else {
         _lastStatuses[reading.label] = reading.status;
       }
@@ -82,5 +104,43 @@ class NutrientAlertService {
 
     return '${reading.label}: ${reading.value.toStringAsFixed(1)} ${reading.unit} '
         'is $direction ${threshold.toStringAsFixed(1)} ${reading.unit}';
+  }
+
+  Map<String, dynamic> _backgroundConfig({
+    Set<String> mutedSensorKeys = const {},
+  }) {
+    return {
+      ...ThresholdConfigService.instance.all(),
+      'buzzer_muted': {
+        'nitrogen': mutedSensorKeys.contains('nitrogen'),
+        'phosphorus': mutedSensorKeys.contains('phosphorus'),
+        'potassium': mutedSensorKeys.contains('potassium'),
+        'ph': mutedSensorKeys.contains('ph'),
+        'moisture': mutedSensorKeys.contains('moisture'),
+        'temperature': mutedSensorKeys.contains('temperature'),
+        'ec': mutedSensorKeys.contains('ec'),
+      },
+    };
+  }
+
+  String _sensorKeyForReading(SensorReading reading) {
+    switch (reading.label) {
+      case 'Nitrogen':
+        return 'nitrogen';
+      case 'Phosphorus':
+        return 'phosphorus';
+      case 'Potassium':
+        return 'potassium';
+      case 'pH Level':
+        return 'ph';
+      case 'Moisture':
+        return 'moisture';
+      case 'Temp':
+        return 'temperature';
+      case 'Electrical Conductivity':
+        return 'ec';
+      default:
+        return reading.label.toLowerCase().replaceAll(' ', '_');
+    }
   }
 }

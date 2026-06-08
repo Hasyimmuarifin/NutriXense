@@ -10,6 +10,7 @@ Tahap pertama yang sudah tersedia:
 - Jalankan DSS rule-based dari VPS.
 - Jalankan automatic watering schedule dari VPS.
 - Kirim push notification threshold dari VPS via FCM.
+- Publish konfigurasi perangkat dari Firestore ke MQTT retained config.
 
 ## Setup Lokal atau VPS
 
@@ -85,6 +86,27 @@ Contoh dokumen `automation_config/dss`:
 }
 ```
 
+Untuk menonaktifkan buzzer dan Threshold Alert per sensor, tambahkan field
+`buzzerMuted` pada dokumen yang sama:
+
+```json
+{
+  "buzzerMuted": {
+    "nitrogen": true,
+    "phosphorus": false,
+    "potassium": false,
+    "ph": false,
+    "moisture": false,
+    "temperature": false,
+    "ec": false
+  }
+}
+```
+
+Sensor bernilai `true` tetap tampil Low/High di aplikasi, tetapi dikeluarkan
+dari notifikasi threshold dan dikirim ke perangkat sebagai `buzzer_muted`
+melalui topic MQTT config.
+
 Contoh dokumen `watering_schedules`:
 
 ```json
@@ -149,6 +171,25 @@ Contoh:
   "Moisture": 58,
   "Temp": 29.5,
   "EC": 1.8
+}
+```
+
+Backend juga publish retained config ke topic `nutrixense/config`
+atau nilai `.env` `MQTT_CONFIG_TOPIC`:
+
+```json
+{
+  "min_nitrogen": 40,
+  "max_nitrogen": 80,
+  "buzzer_muted": {
+    "nitrogen": true,
+    "phosphorus": false,
+    "potassium": false,
+    "ph": false,
+    "moisture": false,
+    "temperature": false,
+    "ec": false
+  }
 }
 ```
 

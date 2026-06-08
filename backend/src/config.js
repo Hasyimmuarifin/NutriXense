@@ -45,6 +45,7 @@ const config = {
       process.env.MQTT_SENSOR_TOPIC ||
       'nutrixense/sensor',
     controlTopic: process.env.MQTT_CONTROL_TOPIC || 'nutrixense/control',
+    configTopic: process.env.MQTT_CONFIG_TOPIC || 'nutrixense/config',
     clientId:
       process.env.MQTT_CLIENT_ID ||
       `nutrixense-backend-${Date.now().toString(36)}`,
