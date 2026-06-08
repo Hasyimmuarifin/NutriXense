@@ -1,4 +1,21 @@
 const DEFAULT_THRESHOLDS = {
+  min_nitrogen: 80,
+  max_nitrogen: 180,
+  min_phosphorus: 100,
+  max_phosphorus: 300,
+  min_potassium: 250,
+  max_potassium: 650,
+  min_ph: 4.5,
+  max_ph: 5.5,
+  min_moisture: 40,
+  max_moisture: 70,
+  min_temperature: 18,
+  max_temperature: 25,
+  min_ec: 1.2,
+  max_ec: 2.5,
+};
+
+const LEGACY_DEFAULT_THRESHOLDS = {
   min_nitrogen: 40,
   max_nitrogen: 80,
   min_phosphorus: 20,
@@ -68,10 +85,25 @@ const SENSOR_DEFINITIONS = [
 ];
 
 function buildThresholds(configData = {}) {
+  if (isLegacyDefaultThresholds(configData.thresholds)) {
+    return { ...DEFAULT_THRESHOLDS };
+  }
+
   return {
     ...DEFAULT_THRESHOLDS,
     ...(configData.thresholds || {}),
   };
+}
+
+function isLegacyDefaultThresholds(thresholds = {}) {
+  const keys = Object.keys(LEGACY_DEFAULT_THRESHOLDS);
+  if (Object.keys(thresholds).length !== keys.length) return false;
+
+  return keys.every((key) => {
+    const value = thresholds[key];
+    return typeof value === 'number' &&
+      Math.abs(value - LEGACY_DEFAULT_THRESHOLDS[key]) < 0.0001;
+  });
 }
 
 function abnormalReadings(reading, thresholds) {

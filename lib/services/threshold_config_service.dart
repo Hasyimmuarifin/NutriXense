@@ -8,8 +8,23 @@ class ThresholdConfigService extends ChangeNotifier {
 
   static final ThresholdConfigService instance = ThresholdConfigService._();
   static const String _storageKey = 'nutrixense_threshold_config';
-
-  final Map<String, double> _thresholds = {
+  static const Map<String, double> _teaPotThresholds = {
+    'min_nitrogen': 80,
+    'max_nitrogen': 180,
+    'min_phosphorus': 100,
+    'max_phosphorus': 300,
+    'min_potassium': 250,
+    'max_potassium': 650,
+    'min_ph': 4.5,
+    'max_ph': 5.5,
+    'min_moisture': 40,
+    'max_moisture': 70,
+    'min_temperature': 18,
+    'max_temperature': 25,
+    'min_ec': 1.2,
+    'max_ec': 2.5,
+  };
+  static const Map<String, double> _legacyDefaultThresholds = {
     'min_nitrogen': 40,
     'max_nitrogen': 80,
     'min_phosphorus': 20,
@@ -25,6 +40,8 @@ class ThresholdConfigService extends ChangeNotifier {
     'min_ec': 1.0,
     'max_ec': 3.0,
   };
+
+  final Map<String, double> _thresholds = Map.of(_teaPotThresholds);
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -45,6 +62,14 @@ class ThresholdConfigService extends ChangeNotifier {
       }
     }
 
+    if (_isLegacyDefaultConfig(savedThresholds)) {
+      _thresholds
+        ..clear()
+        ..addAll(_teaPotThresholds);
+      await prefs.setString(_storageKey, jsonEncode(_thresholds));
+      return;
+    }
+
     _thresholds.addAll(savedThresholds);
   }
 
@@ -61,5 +86,18 @@ class ThresholdConfigService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_storageKey, jsonEncode(_thresholds));
     notifyListeners();
+  }
+
+  bool _isLegacyDefaultConfig(Map<String, double> thresholds) {
+    if (thresholds.length != _legacyDefaultThresholds.length) return false;
+
+    for (final entry in _legacyDefaultThresholds.entries) {
+      final value = thresholds[entry.key];
+      if (value == null || (value - entry.value).abs() > 0.0001) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

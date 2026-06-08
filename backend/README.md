@@ -74,12 +74,20 @@ Contoh dokumen `automation_config/dss`:
 {
   "enabled": true,
   "thresholds": {
-    "min_nitrogen": 40,
-    "min_phosphorus": 20,
-    "min_potassium": 40,
+    "min_nitrogen": 80,
+    "max_nitrogen": 180,
+    "min_phosphorus": 100,
+    "max_phosphorus": 300,
+    "min_potassium": 250,
+    "max_potassium": 650,
+    "min_ph": 4.5,
+    "max_ph": 5.5,
     "min_moisture": 40,
-    "max_temperature": 35,
-    "min_ec": 1
+    "max_moisture": 70,
+    "min_temperature": 18,
+    "max_temperature": 25,
+    "min_ec": 1.2,
+    "max_ec": 2.5
   },
   "pulseDurationMs": 5000,
   "cooldownMs": 600000
@@ -179,8 +187,20 @@ atau nilai `.env` `MQTT_CONFIG_TOPIC`:
 
 ```json
 {
-  "min_nitrogen": 40,
-  "max_nitrogen": 80,
+  "min_nitrogen": 80,
+  "max_nitrogen": 180,
+  "min_phosphorus": 100,
+  "max_phosphorus": 300,
+  "min_potassium": 250,
+  "max_potassium": 650,
+  "min_ph": 4.5,
+  "max_ph": 5.5,
+  "min_moisture": 40,
+  "max_moisture": 70,
+  "min_temperature": 18,
+  "max_temperature": 25,
+  "min_ec": 1.2,
+  "max_ec": 2.5,
   "buzzer_muted": {
     "nitrogen": true,
     "phosphorus": false,

@@ -650,20 +650,20 @@ class NutrixenseBackgroundService : Service() {
     }
 
     private fun defaultThresholds(): Map<String, Double> = mapOf(
-        "min_nitrogen" to 40.0,
-        "max_nitrogen" to 80.0,
-        "min_phosphorus" to 20.0,
-        "max_phosphorus" to 60.0,
-        "min_potassium" to 40.0,
-        "max_potassium" to 100.0,
-        "min_ph" to 5.8,
-        "max_ph" to 7.2,
+        "min_nitrogen" to 80.0,
+        "max_nitrogen" to 180.0,
+        "min_phosphorus" to 100.0,
+        "max_phosphorus" to 300.0,
+        "min_potassium" to 250.0,
+        "max_potassium" to 650.0,
+        "min_ph" to 4.5,
+        "max_ph" to 5.5,
         "min_moisture" to 40.0,
-        "max_moisture" to 80.0,
+        "max_moisture" to 70.0,
         "min_temperature" to 18.0,
-        "max_temperature" to 35.0,
-        "min_ec" to 1.0,
-        "max_ec" to 3.0
+        "max_temperature" to 25.0,
+        "min_ec" to 1.2,
+        "max_ec" to 2.5
     )
 
     private fun defaultMutedSensors(): Map<String, Boolean> = mapOf(
