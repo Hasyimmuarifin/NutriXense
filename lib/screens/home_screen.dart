@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/sensor_data.dart';
 
@@ -41,6 +42,8 @@ class _HomeScreenState extends State<HomeScreen>
     "temperature",
     "ec"
   ];
+  static const String _automationConfigCollection = 'automation_config';
+  static const String _dssConfigDocument = 'dss';
 
   int totalSensors = 0;
   int totalAlerts = 0;
@@ -55,8 +58,18 @@ class _HomeScreenState extends State<HomeScreen>
   DateTime? lastDataReceived;
   Timer? connectionTimer;
   Map<String, dynamic> _latestSensorData = const {};
+  final Map<String, bool> _buzzerMuted = {
+    'nitrogen': false,
+    'phosphorus': false,
+    'potassium': false,
+    'ph': false,
+    'moisture': false,
+    'temperature': false,
+    'ec': false,
+  };
 
   final MQTTService mqttService = MQTTService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final AlertCountService _alertCountService = AlertCountService.instance;
   final NutrientAlertService _nutrientAlertService =
       NutrientAlertService.instance;
@@ -64,6 +77,8 @@ class _HomeScreenState extends State<HomeScreen>
       ThresholdConfigService.instance;
 
   StreamSubscription? sensorSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+      _buzzerConfigSub;
   final Map<String, TextEditingController> _thresholdControllers = {
     'min_nitrogen': TextEditingController(text: '40'),
     'max_nitrogen': TextEditingController(text: '80'),
@@ -96,6 +111,10 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         isMqttConnected = status;
       });
+
+      if (status) {
+        _publishBuzzerMuteConfig();
+      }
     };
 
     mqttService.subscribe("nutrixense/sensor");
@@ -271,6 +290,130 @@ class _HomeScreenState extends State<HomeScreen>
     if (value is num) return value.toDouble();
     if (value is String) return double.tryParse(value) ?? 0;
     return 0;
+  }
+
+  String _sensorKeyForReading(SensorReading reading) {
+    switch (reading.label) {
+      case 'Nitrogen':
+        return 'nitrogen';
+      case 'Phosphorus':
+        return 'phosphorus';
+      case 'Potassium':
+        return 'potassium';
+      case 'pH Level':
+        return 'ph';
+      case 'Moisture':
+        return 'moisture';
+      case 'Temp':
+        return 'temperature';
+      case 'Electrical Conductivity':
+        return 'ec';
+      default:
+        return reading.label.toLowerCase().replaceAll(' ', '_');
+    }
+  }
+
+  void _listenBuzzerMuteConfig() {
+    _buzzerConfigSub = _firestore
+        .collection(_automationConfigCollection)
+        .doc(_dssConfigDocument)
+        .snapshots()
+        .listen((snapshot) {
+      final data = snapshot.data();
+      final rawConfig = data?['buzzerMuted'] ?? data?['buzzer_muted'];
+      if (rawConfig is! Map) return;
+
+      if (!mounted) return;
+      setState(() {
+        for (final key in sensorKeys) {
+          final value = rawConfig[key];
+          if (value is bool) {
+            _buzzerMuted[key] = value;
+          } else if (value is num) {
+            _buzzerMuted[key] = value != 0;
+          }
+        }
+      });
+    }, onError: (Object error) {
+      debugPrint('Buzzer mute config listener failed: $error');
+    });
+  }
+
+  Future<bool> _saveBuzzerMuteConfigToBackend() async {
+    try {
+      await _firestore
+          .collection(_automationConfigCollection)
+          .doc(_dssConfigDocument)
+          .set(
+        {
+          'buzzerMuted': Map<String, bool>.from(_buzzerMuted),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+      return true;
+    } catch (error) {
+      debugPrint('Buzzer mute config sync failed: $error');
+      return false;
+    }
+  }
+
+  void _publishBuzzerMuteConfig() {
+    if (!mqttService.isConnected) return;
+
+    final payload = {
+      ..._thresholdConfigService.all(),
+      'buzzer_muted': Map<String, bool>.from(_buzzerMuted),
+    };
+    mqttService.publish('nutrixense/config', jsonEncode(payload), retain: true);
+  }
+
+  Future<void> _toggleBuzzerMute(String sensorKey) async {
+    final nextMuted = !(_buzzerMuted[sensorKey] ?? false);
+
+    setState(() {
+      _buzzerMuted[sensorKey] = nextMuted;
+    });
+
+    final backendSynced = await _saveBuzzerMuteConfigToBackend();
+
+    if (mqttService.isConnected) {
+      _publishBuzzerMuteConfig();
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          backendSynced
+              ? nextMuted
+                  ? 'Buzzer ${_sensorLabel(sensorKey)} dinonaktifkan'
+                  : 'Buzzer ${_sensorLabel(sensorKey)} diaktifkan'
+              : 'Status buzzer berubah di aplikasi, tetapi gagal sync ke backend.',
+        ),
+        backgroundColor: backendSynced
+            ? nextMuted
+                ? Colors.grey.shade700
+                : AppTheme.primaryGreen
+            : AppTheme.statusLow,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(milliseconds: 500),
+      ),
+    );
+  }
+
+  String _sensorLabel(String sensorKey) {
+    switch (sensorKey) {
+      case 'ph':
+        return 'pH';
+      case 'ec':
+        return 'EC';
+      case 'temperature':
+        return 'Temperature';
+      default:
+        return sensorKey[0].toUpperCase() + sensorKey.substring(1);
+    }
   }
 
   void updateSensorData(Map<String, dynamic> data) {
@@ -670,7 +813,15 @@ class _HomeScreenState extends State<HomeScreen>
       return true;
     }
 
-    mqttService.publish('nutrixense/config', jsonEncode(payload), retain: true);
+    final mqttPayload = {
+      ...payload,
+      'buzzer_muted': Map<String, bool>.from(_buzzerMuted),
+    };
+    mqttService.publish(
+      'nutrixense/config',
+      jsonEncode(mqttPayload),
+      retain: true,
+    );
 
     if (!mounted) return false;
     setState(() {
@@ -692,6 +843,7 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _syncThresholdControllersFromStorage();
+    _listenBuzzerMuteConfig();
     initializeDefaultReadings();
 
     totalAlerts = _alertCountService.alertCount.value;
@@ -724,6 +876,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     sensorSub?.cancel();
+    _buzzerConfigSub?.cancel();
     connectivitySub.cancel();
     connectionTimer?.cancel();
     _alertCountService.alertCount.removeListener(_syncAlertCount);
@@ -1293,6 +1446,9 @@ class _HomeScreenState extends State<HomeScreen>
     bool compact = false,
   }) {
     final sensorColor = Color(reading.colorHex);
+    final sensorKey = _sensorKeyForReading(reading);
+    final isBuzzerMuted = _buzzerMuted[sensorKey] ?? false;
+    final isEcCard = sensorKey == 'ec';
 
     // ─── Dynamic UI based on reading status ─────────────────────
     Color borderColor;
@@ -1357,6 +1513,44 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
+    );
+    final muteButtonSize = compact ? 30.0 : 34.0;
+    final buzzerMuteButton = Tooltip(
+      message: isBuzzerMuted
+          ? 'Aktifkan buzzer ${_sensorLabel(sensorKey)}'
+          : 'Nonaktifkan buzzer ${_sensorLabel(sensorKey)}',
+      child: Material(
+        color: isBuzzerMuted
+            ? Colors.grey.shade200
+            : AppTheme.primaryGreen.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () => _toggleBuzzerMute(sensorKey),
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: muteButtonSize,
+            height: muteButtonSize,
+            child: Icon(
+              isBuzzerMuted
+                  ? Icons.volume_off_rounded
+                  : Icons.volume_up_rounded,
+              size: compact ? 16 : 18,
+              color: isBuzzerMuted
+                  ? AppTheme.textSecondary
+                  : AppTheme.primaryGreen,
+            ),
+          ),
+        ),
+      ),
+    );
+    final ecStatusControls = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        statusBadge,
+        const SizedBox(height: 6),
+        buzzerMuteButton,
+      ],
     );
 
     return Container(
@@ -1434,14 +1628,28 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                     if (compact) ...[
                       const SizedBox(height: 5),
-                      statusBadge,
+                      if (isEcCard)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ecStatusControls,
+                        )
+                      else
+                        statusBadge,
                     ],
                   ],
                 ),
               ),
 
               // STATUS BADGE (tetap konsisten)
-              if (!compact) statusBadge,
+              if (!compact)
+                isEcCard ? ecStatusControls : statusBadge
+              else if (!isEcCard)
+                buzzerMuteButton,
+
+              if (!compact && !isEcCard) ...[
+                const SizedBox(width: 8),
+                buzzerMuteButton,
+              ],
             ],
           ),
 
