@@ -68,6 +68,26 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return (((good * 100) + (warning * 60)) / total).round();
   }
 
+  String get _requestErrorMessage {
+    final error = _requestError;
+    if (error == null) return '';
+    if (error is AiRecommendationException) return error.message;
+
+    final raw = error.toString();
+    final lower = raw.toLowerCase();
+    if (lower.contains('503') ||
+        lower.contains('generativeaiexception') ||
+        lower.contains('server error') ||
+        lower.contains('unavailable') ||
+        lower.contains('overloaded') ||
+        lower.contains('traffic') ||
+        lower.contains('timeout')) {
+      return 'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
+    }
+
+    return raw.replaceFirst(RegExp(r'^Exception:\s*'), '');
+  }
+
   Future<void> _requestAiRecommendation() async {
     setState(() {
       _isRequesting = true;
@@ -675,7 +695,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              _requestError.toString(),
+              _requestErrorMessage,
               style: const TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 12,

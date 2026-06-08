@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -21,41 +23,144 @@ import 'services/threshold_config_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-  );
-
-  await ThresholdConfigService.instance.load();
-  await NutrientAlertService.instance.initialize();
-  await FcmNotificationService.instance.initialize();
-
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late Future<void> _startupFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _startupFuture = _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    await Future.wait([
+      _bootstrapServices(),
+      Future<void>.delayed(const Duration(seconds: 3)),
+    ]);
+  }
+
+  Future<void> _bootstrapServices() async {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(const Duration(seconds: 20));
+
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+    );
+
+    await ThresholdConfigService.instance
+        .load()
+        .timeout(const Duration(seconds: 5));
+
+    unawaited(
+      NutrientAlertService.instance
+          .initialize()
+          .timeout(const Duration(seconds: 8))
+          .catchError((error) {
+        debugPrint('Alert service startup skipped: $error');
+      }),
+    );
+
+    unawaited(
+      FcmNotificationService.instance
+          .initialize()
+          .timeout(const Duration(seconds: 15))
+          .catchError((error) {
+        debugPrint('FCM service startup skipped: $error');
+      }),
+    );
+  }
 
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-        title: 'NutriXense',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
-        home: FutureBuilder(
-          future: Future.delayed(Duration(seconds: 3)),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.done) {
-              return MainNavigation(); // halaman utama
-            }
-            return SplashScreen();
-          },
-        ));
+      title: 'NutriXense',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      home: FutureBuilder<void>(
+        future: _startupFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done &&
+              !snapshot.hasError) {
+            return const MainNavigation();
+          }
+
+          if (snapshot.hasError) {
+            return _StartupErrorScreen(
+              onRetry: () {
+                setState(() {
+                  _startupFuture = _initializeApp();
+                });
+              },
+            );
+          }
+
+          return const SplashScreen();
+        },
+      ),
+    );
+  }
+}
+
+class _StartupErrorScreen extends StatelessWidget {
+  const _StartupErrorScreen({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset('assets/images/nutrixense.png', width: 110),
+                const SizedBox(height: 20),
+                const Text(
+                  'Aplikasi belum siap dibuka',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Periksa koneksi internet lalu coba lagi.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  onPressed: onRetry,
+                  child: const Text('Coba Lagi'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -21,6 +22,9 @@ class GeminiRecommendationService {
   static const _configAssetPath = 'assets/config/gemini_config.json';
   static const _dartDefineApiKey = String.fromEnvironment('GEMINI_API_KEY');
   static const _dartDefineModelName = String.fromEnvironment('GEMINI_MODEL');
+  static const _busyMessage =
+      'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
+  static const _requestTimeout = Duration(minutes: 1);
 
   // Threshold target for tea plants grown in pots.
   static const thresholds = {
@@ -102,7 +106,10 @@ class GeminiRecommendationService {
       'history_summary': summary.toJson(),
     });
 
-    final response = await model.generateContent([Content.text(payload)]);
+    final response = await _generateContentWithRetry(
+      model,
+      [Content.text(payload)],
+    );
 
     final text = response.text;
     if (text == null || text.trim().isEmpty) {
@@ -197,35 +204,38 @@ class GeminiRecommendationService {
     final decoded = _tryDecodeJsonObject(cleaned);
     if (decoded != null) return decoded;
 
-    final repairResponse = await model.generateContent([
-      Content.text(jsonEncode({
-        'task':
-            'Repair the malformed model output into one valid minified JSON object matching the schema. Do not add markdown or explanation.',
-        'schema_keys': [
-          'plant_health_percentage',
-          'sensor_summary',
-          'recommendations',
-          'automation_triggers',
-        ],
-        'automation_trigger_keys': [
-          'activate_nitrogen_pump',
-          'activate_phosphorus_pump',
-          'activate_potassium_pump',
-          'activate_water_pump',
-          'reason',
-        ],
-        'recommendation_item_keys': [
-          'id',
-          'title',
-          'status',
-          'message',
-          'explanation',
-          'recommendation',
-        ],
-        'original_input': originalPayload,
-        'malformed_output': cleaned,
-      })),
-    ]);
+    final repairResponse = await _generateContentWithRetry(
+      model,
+      [
+        Content.text(jsonEncode({
+          'task':
+              'Repair the malformed model output into one valid minified JSON object matching the schema. Do not add markdown or explanation.',
+          'schema_keys': [
+            'plant_health_percentage',
+            'sensor_summary',
+            'recommendations',
+            'automation_triggers',
+          ],
+          'automation_trigger_keys': [
+            'activate_nitrogen_pump',
+            'activate_phosphorus_pump',
+            'activate_potassium_pump',
+            'activate_water_pump',
+            'reason',
+          ],
+          'recommendation_item_keys': [
+            'id',
+            'title',
+            'status',
+            'message',
+            'explanation',
+            'recommendation',
+          ],
+          'original_input': originalPayload,
+          'malformed_output': cleaned,
+        })),
+      ],
+    );
 
     final repairedText = repairResponse.text;
     final repaired = _tryDecodeJsonObject(_stripCodeFence(repairedText ?? ''));
@@ -247,6 +257,61 @@ class GeminiRecommendationService {
       return null;
     }
     return null;
+  }
+
+  static Future<dynamic> _generateContentWithRetry(
+    GenerativeModel model,
+    List<Content> contents,
+  ) async {
+    final startedAt = DateTime.now();
+    var attempt = 0;
+    Object? lastError;
+
+    while (DateTime.now().difference(startedAt) < _requestTimeout) {
+      attempt += 1;
+      final remaining = _requestTimeout - DateTime.now().difference(startedAt);
+      if (remaining <= Duration.zero) break;
+
+      try {
+        return await model.generateContent(contents).timeout(remaining);
+      } on Object catch (error) {
+        lastError = error;
+        if (!_shouldRetryAiRequest(error)) rethrow;
+
+        final delay = _retryDelay(attempt);
+        final remainingAfterDelay =
+            _requestTimeout - DateTime.now().difference(startedAt);
+        if (remainingAfterDelay <= delay) break;
+        await Future<void>.delayed(delay);
+      }
+    }
+
+    debugPrint('Gemini request failed after retry: $lastError');
+    throw const AiRecommendationException(_busyMessage);
+  }
+
+  static bool _shouldRetryAiRequest(Object error) {
+    if (error is TimeoutException) return true;
+
+    final text = error.toString().toLowerCase();
+    return text.contains('503') ||
+        text.contains('server error') ||
+        text.contains('unavailable') ||
+        text.contains('overloaded') ||
+        text.contains('traffic') ||
+        text.contains('timeout');
+  }
+
+  static Duration _retryDelay(int attempt) {
+    const delays = [
+      Duration(seconds: 2),
+      Duration(seconds: 4),
+      Duration(seconds: 8),
+      Duration(seconds: 12),
+      Duration(seconds: 15),
+    ];
+    if (attempt <= delays.length) return delays[attempt - 1];
+    return delays.last;
   }
 
   static Map<String, dynamic> _buildLocalFallbackResponse(
@@ -446,7 +511,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Analisis lokal menggunakan ${summary.rowCount} data sensor terbaru karena respons JSON Gemini tidak valid. Ringkasan menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh dalam pot.',
+          'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh dalam pot.',
       'recommendations': {
         'all': items,
         'critical': critical,
@@ -492,6 +557,15 @@ class GeminiRecommendationService {
     if (normalized.length <= 220) return normalized;
     return '${normalized.substring(0, 220)}...';
   }
+}
+
+class AiRecommendationException implements Exception {
+  const AiRecommendationException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 const _systemPrompt =
