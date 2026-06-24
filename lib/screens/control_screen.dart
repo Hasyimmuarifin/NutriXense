@@ -37,6 +37,7 @@ class _ControlScreenState extends State<ControlScreen> {
   bool _draftScheduleRepeats = true;
   late bool _isRuleBasedAutomationEnabled;
   StreamSubscription<Map<String, dynamic>>? _controlSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _scheduleSub;
 
   @override
   void initState() {
@@ -47,6 +48,7 @@ class _ControlScreenState extends State<ControlScreen> {
     _restoreDssSwitchState();
     _initControlMqtt();
     _loadSchedules();
+    _listenBackendSchedules();
   }
 
   @override
@@ -55,6 +57,7 @@ class _ControlScreenState extends State<ControlScreen> {
       schedule.timer?.cancel();
     }
     _controlSub?.cancel();
+    _scheduleSub?.cancel();
     _ruleBasedPumpAutomationService.activeRelays.removeListener(_syncDssRelays);
     super.dispose();
   }
@@ -272,6 +275,46 @@ class _ControlScreenState extends State<ControlScreen> {
     }
   }
 
+  void _listenBackendSchedules() {
+    _scheduleSub = _firestore
+        .collection(_wateringSchedulesCollection)
+        .snapshots()
+        .listen((snapshot) {
+      final schedules = snapshot.docs
+          .map((doc) => _WateringSchedule.fromJson({
+                ...doc.data(),
+                'id': int.tryParse(doc.id) ?? doc.data()['id'],
+              }))
+          .whereType<_WateringSchedule>()
+          .toList()
+        ..sort((a, b) {
+          final hourCompare = a.time.hour.compareTo(b.time.hour);
+          if (hourCompare != 0) return hourCompare;
+          return a.time.minute.compareTo(b.time.minute);
+        });
+
+      if (!mounted) return;
+
+      for (final schedule in _wateringSchedules) {
+        schedule.timer?.cancel();
+      }
+
+      setState(() {
+        _wateringSchedules
+          ..clear()
+          ..addAll(schedules);
+      });
+
+      for (final schedule in schedules) {
+        if (schedule.enabled) {
+          _scheduleNextRun(schedule, persist: false);
+        }
+      }
+
+      _syncNativeSchedules();
+    });
+  }
+
   Future<void> _syncSchedulesToBackend(
     List<Map<String, dynamic>> schedules,
   ) async {
@@ -379,7 +422,7 @@ class _ControlScreenState extends State<ControlScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '${pump.name} (${pump.nutrient}) ${pump.isOn ? 'started' : 'stopped'}',
+                '${pump.name} (${pump.nutrient}) ${pump.isOn ? 'aktif' : 'nonaktif'}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w500),
@@ -652,7 +695,7 @@ class _ControlScreenState extends State<ControlScreen> {
                               children: [
                                 const Expanded(
                                   child: Text(
-                                    'Pump Control',
+                                    'Kontrol Pompa',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -671,7 +714,7 @@ class _ControlScreenState extends State<ControlScreen> {
 
                             // ─── Subtitle ─────────────────────────────────
                             Text(
-                              'Manage your nutrient & irrigation pumps',
+                              'Kelola pompa nutrisi dan irigasi Anda',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -701,7 +744,7 @@ class _ControlScreenState extends State<ControlScreen> {
                                 children: [
                                   Flexible(
                                     child: Text(
-                                      '$_activePumps of ${_pumps.length} pumps active',
+                                      '$_activePumps dari ${_pumps.length} pompa aktif',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
@@ -831,7 +874,7 @@ class _ControlScreenState extends State<ControlScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Automatic Watering Schedules',
+                      'Jadwal Penyiraman Otomatis',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -840,7 +883,7 @@ class _ControlScreenState extends State<ControlScreen> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'Set time, pump selection, and watering duration.',
+                      'Atur waktu, pilih pompa, dan durasi penyiraman.',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,
@@ -888,7 +931,7 @@ class _ControlScreenState extends State<ControlScreen> {
                   onPressed: _addSchedule,
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text(
-                    'Add Schedule',
+                    'Tambahkan Jadwal',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -923,7 +966,7 @@ class _ControlScreenState extends State<ControlScreen> {
           ),
           const SizedBox(height: 16),
           const Text(
-            'Pumps',
+            'Pompa yang dipilih',
             style: TextStyle(
               fontSize: 12,
               color: AppTheme.textSecondary,
@@ -978,7 +1021,7 @@ class _ControlScreenState extends State<ControlScreen> {
             children: [
               const Expanded(
                 child: Text(
-                  'Duration',
+                  'Durasi penyiraman',
                   style: TextStyle(
                     fontSize: 12,
                     color: AppTheme.textSecondary,
@@ -987,7 +1030,7 @@ class _ControlScreenState extends State<ControlScreen> {
                 ),
               ),
               Text(
-                '$_draftScheduleDurationSeconds sec',
+                '$_draftScheduleDurationSeconds detik',
                 style: const TextStyle(
                   fontSize: 13,
                   color: AppTheme.textPrimary,
@@ -1001,7 +1044,7 @@ class _ControlScreenState extends State<ControlScreen> {
             min: 5,
             max: 300,
             divisions: 59,
-            label: '$_draftScheduleDurationSeconds sec',
+            label: '$_draftScheduleDurationSeconds detik',
             activeColor: AppTheme.primaryGreen,
             onChanged: (value) {
               setState(() => _draftScheduleDurationSeconds = value.round());
@@ -1016,7 +1059,7 @@ class _ControlScreenState extends State<ControlScreen> {
             },
             activeColor: AppTheme.primaryGreen,
             title: const Text(
-              'Repeat daily',
+              'Ulangi setiap hari',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -1045,7 +1088,7 @@ class _ControlScreenState extends State<ControlScreen> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'No automatic watering schedule yet.',
+                      'Tidak ada jadwal penyiraman otomatis yang diatur.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
@@ -1204,7 +1247,7 @@ class _ControlScreenState extends State<ControlScreen> {
               ),
               SizedBox(width: 8),
               Text(
-                'Emergency Stop All Pumps',
+                'Hentikan Darurat Semua Pompa',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,

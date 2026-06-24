@@ -18,7 +18,7 @@ class GeminiRecommendationService {
         _modelNameOverride = modelName;
 
   static const _collection = 'sensor_data';
-  static const _historyLimit = 360;
+  static const _historyLimit = 720;
   static const _configAssetPath = 'assets/config/gemini_config.json';
   static const _dartDefineApiKey = String.fromEnvironment('GEMINI_API_KEY');
   static const _dartDefineModelName = String.fromEnvironment('GEMINI_MODEL');
@@ -83,12 +83,12 @@ class GeminiRecommendationService {
           'Tanaman teh (Camellia sinensis) dalam pot, media tanam asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
       'language': 'id',
       'control_policy':
-          'automation_triggers must be based on numeric thresholds only.',
+          'Do not directly activate pumps. Return decision support only; the user must confirm and may adjust pump duration.',
       'pump_mapping': {
-        'activate_nitrogen_pump': 'Pump A - Nitrogen (N)',
-        'activate_phosphorus_pump': 'Pump B - Phosphorus (P)',
-        'activate_potassium_pump': 'Pump C - Potassium (K)',
-        'activate_water_pump': 'Pump D - Water (H2O)',
+        'activate_nitrogen_pump': 'Pompa A - Nitrogen (N)',
+        'activate_phosphorus_pump': 'Pompa B - Phosphorus (P)',
+        'activate_potassium_pump': 'Pompa C - Potassium (K)',
+        'activate_water_pump': 'Pompa D - Water (H2O)',
       },
       'output_rules': [
         'Return one complete JSON object only.',
@@ -101,15 +101,30 @@ class GeminiRecommendationService {
         'For each recommendation item, recommendation must explain specific follow-up actions for tea plants grown in pots.',
         'Recommendations must be practical, safe, and measurable for potted tea plants, such as small-dose pump use, careful irrigation, acidic pH correction, fertilizer adjustment, retesting, drainage, shade, or monitoring frequency.',
         'Set an automation trigger to true only when its matching local_threshold_flag is true.',
+        'Mention that pump activation requires user confirmation when nutrient or water correction is recommended.',
       ],
       'thresholds': thresholds,
       'history_summary': summary.toJson(),
     });
 
-    final response = await _generateContentWithRetry(
-      model,
-      [Content.text(payload)],
-    );
+    dynamic response;
+    try {
+      response = await _generateContentWithRetry(
+        model,
+        [Content.text(payload)],
+      );
+    } on Object catch (error) {
+      if (_shouldUseLocalFallback(error)) {
+        debugPrint(
+          'Gemini unavailable, using local DSS/XAI fallback: $error',
+        );
+        return _responseWithDecisionPlan(
+          _buildAiUnavailableFallbackResponse(summary, error),
+          summary,
+        );
+      }
+      rethrow;
+    }
 
     final text = response.text;
     if (text == null || text.trim().isEmpty) {
@@ -122,11 +137,31 @@ class GeminiRecommendationService {
       originalPayload: payload,
       summary: summary,
     );
-    return AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
+    return _responseWithDecisionPlan(decoded, summary);
+  }
+
+  static AiRecommendationResponse _responseWithDecisionPlan(
+    Map<String, dynamic> decoded,
+    _SensorHistorySummary summary,
+  ) {
+    final guardedResponse =
+        AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
       canActivateWaterPump: summary.canActivateWaterPump,
       canActivateNitrogenPump: summary.canActivateNitrogenPump,
       canActivatePhosphorusPump: summary.canActivatePhosphorusPump,
       canActivatePotassiumPump: summary.canActivatePotassiumPump,
+    );
+    final pumpRecommendations = _buildPumpRecommendations(summary);
+
+    return guardedResponse.copyWith(
+      pumpRecommendations: pumpRecommendations,
+      dailyScheduleRecommendation: pumpRecommendations.isEmpty
+          ? null
+          : DailyFertilizationScheduleRecommendation.fromPlan(
+              recommendations: pumpRecommendations,
+              reason:
+                  'Jadwal harian direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor.',
+            ),
     );
   }
 
@@ -204,38 +239,49 @@ class GeminiRecommendationService {
     final decoded = _tryDecodeJsonObject(cleaned);
     if (decoded != null) return decoded;
 
-    final repairResponse = await _generateContentWithRetry(
-      model,
-      [
-        Content.text(jsonEncode({
-          'task':
-              'Repair the malformed model output into one valid minified JSON object matching the schema. Do not add markdown or explanation.',
-          'schema_keys': [
-            'plant_health_percentage',
-            'sensor_summary',
-            'recommendations',
-            'automation_triggers',
-          ],
-          'automation_trigger_keys': [
-            'activate_nitrogen_pump',
-            'activate_phosphorus_pump',
-            'activate_potassium_pump',
-            'activate_water_pump',
-            'reason',
-          ],
-          'recommendation_item_keys': [
-            'id',
-            'title',
-            'status',
-            'message',
-            'explanation',
-            'recommendation',
-          ],
-          'original_input': originalPayload,
-          'malformed_output': cleaned,
-        })),
-      ],
-    );
+    dynamic repairResponse;
+    try {
+      repairResponse = await _generateContentWithRetry(
+        model,
+        [
+          Content.text(jsonEncode({
+            'task':
+                'Repair the malformed model output into one valid minified JSON object matching the schema. Do not add markdown or explanation.',
+            'schema_keys': [
+              'plant_health_percentage',
+              'sensor_summary',
+              'recommendations',
+              'automation_triggers',
+            ],
+            'automation_trigger_keys': [
+              'activate_nitrogen_pump',
+              'activate_phosphorus_pump',
+              'activate_potassium_pump',
+              'activate_water_pump',
+              'reason',
+            ],
+            'recommendation_item_keys': [
+              'id',
+              'title',
+              'status',
+              'message',
+              'explanation',
+              'recommendation',
+            ],
+            'original_input': originalPayload,
+            'malformed_output': cleaned,
+          })),
+        ],
+      );
+    } on Object catch (error) {
+      if (_shouldUseLocalFallback(error)) {
+        debugPrint(
+          'Gemini repair unavailable, using local DSS/XAI fallback: $error',
+        );
+        return _buildAiUnavailableFallbackResponse(summary, error);
+      }
+      rethrow;
+    }
 
     final repairedText = repairResponse.text;
     final repaired = _tryDecodeJsonObject(_stripCodeFence(repairedText ?? ''));
@@ -257,6 +303,24 @@ class GeminiRecommendationService {
       return null;
     }
     return null;
+  }
+
+  static bool _shouldUseLocalFallback(Object error) {
+    return error is AiRecommendationException ||
+        _isQuotaOrRateLimitError(error);
+  }
+
+  static bool _isQuotaOrRateLimitError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('429') ||
+        text.contains('quota') ||
+        text.contains('rate limit') ||
+        text.contains('rate-limit') ||
+        text.contains('resource exhausted') ||
+        text.contains('free_tier') ||
+        text.contains('free tier') ||
+        text.contains('retrydelay') ||
+        text.contains('retry in');
   }
 
   static Future<dynamic> _generateContentWithRetry(
@@ -360,7 +424,7 @@ class GeminiRecommendationService {
         addItem(
           id: '${key.toLowerCase()}_low',
           title: lowTitle,
-          status: 'critical',
+          status: 'kritis',
           message:
               '$label saat ini $currentText $unit, di bawah batas minimum ${_formatNumber(min)} $unit.',
           explanation:
@@ -371,7 +435,7 @@ class GeminiRecommendationService {
         addItem(
           id: '${key.toLowerCase()}_high',
           title: highTitle,
-          status: 'warning',
+          status: 'awas',
           message:
               '$label saat ini $currentText $unit, di atas batas maksimum ${_formatNumber(max)} $unit.',
           explanation:
@@ -382,7 +446,7 @@ class GeminiRecommendationService {
         addItem(
           id: '${key.toLowerCase()}_normal',
           title: '$label dalam Rentang Aman',
-          status: 'good',
+          status: 'baik',
           message:
               '$label saat ini $currentText $unit dan masih berada dalam rentang target.',
           explanation:
@@ -401,7 +465,7 @@ class GeminiRecommendationService {
       lowTitle: 'Nitrogen Rendah',
       highTitle: 'Nitrogen Berlebih',
       lowAction:
-          'Aktifkan Pump A dalam dosis kecil sesuai DSS untuk teh pot, lalu pantau ulang NPK setelah larutan merata. Hindari penambahan besar sekaligus karena teh sensitif terhadap lonjakan EC.',
+          'Aktifkan Pompa A dalam dosis kecil sesuai DSS untuk teh pot, lalu pantau ulang NPK setelah larutan merata. Hindari penambahan besar sekaligus karena teh sensitif terhadap lonjakan EC.',
       highAction:
           'Tunda penambahan nitrogen dan lakukan pengenceran bertahap bila EC ikut tinggi. Pantau pucuk daun teh dan ulangi pembacaan N serta EC sebelum koreksi berikutnya.',
       normalAction:
@@ -498,15 +562,15 @@ class GeminiRecommendationService {
           'EC stabil untuk tanaman teh dalam pot, pertahankan konsentrasi larutan dan pantau perubahan setelah irigasi.',
     );
 
-    final critical = items
-        .where((item) => item['status'] == 'critical')
+    final kritis = items
+        .where((item) => item['status'] == 'kritis')
         .toList(growable: false);
-    final warning = items
-        .where((item) => item['status'] == 'warning')
+    final awas = items
+        .where((item) => item['status'] == 'awas')
         .toList(growable: false);
-    final good =
-        items.where((item) => item['status'] == 'good').toList(growable: false);
-    final scorePenalty = (critical.length * 15) + (warning.length * 8);
+    final baik =
+        items.where((item) => item['status'] == 'baik').toList(growable: false);
+    final scorePenalty = (kritis.length * 15) + (awas.length * 8);
 
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
@@ -514,9 +578,9 @@ class GeminiRecommendationService {
           'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh dalam pot.',
       'recommendations': {
         'all': items,
-        'critical': critical,
-        'warning': warning,
-        'good': good,
+        'kritis': kritis,
+        'awas': awas,
+        'baik': baik,
       },
       'automation_triggers': {
         'activate_nitrogen_pump': summary.canActivateNitrogenPump,
@@ -527,6 +591,117 @@ class GeminiRecommendationService {
             'Trigger mengikuti flag ambang lokal dari data sensor terbaru.',
       },
     };
+  }
+
+  static Map<String, dynamic> _buildAiUnavailableFallbackResponse(
+    _SensorHistorySummary summary,
+    Object error,
+  ) {
+    final fallback = _buildLocalFallbackResponse(summary);
+    final prefix = _isQuotaOrRateLimitError(error)
+        ? 'Kuota atau rate limit Gemini API sedang tercapai, sehingga rekomendasi sementara dibuat memakai analisis DSS/XAI lokal.'
+        : 'Gemini sedang tidak tersedia sementara, sehingga rekomendasi dibuat memakai analisis DSS/XAI lokal.';
+
+    return {
+      ...fallback,
+      'sensor_summary': '$prefix ${fallback['sensor_summary']}',
+    };
+  }
+
+  static List<PumpFertilizationRecommendation> _buildPumpRecommendations(
+    _SensorHistorySummary summary,
+  ) {
+    final recommendations = <PumpFertilizationRecommendation>[];
+
+    void addIfLow({
+      required String key,
+      required int relay,
+      required int pumpIndex,
+      required String pumpName,
+      required String nutrient,
+      required String unit,
+      required double minimum,
+      required int maxSeconds,
+    }) {
+      final current = summary.parameters[key]?.current;
+      if (current == null || current >= minimum) return;
+
+      final deficit = _roundDouble(minimum - current);
+      final deficitPercent = _roundDouble((deficit / minimum) * 100);
+      final recommendedSeconds =
+          _secondsFromDeficit(deficitPercent, maxSeconds: maxSeconds);
+
+      recommendations.add(
+        PumpFertilizationRecommendation(
+          relay: relay,
+          pumpIndex: pumpIndex,
+          pumpName: pumpName,
+          nutrient: nutrient,
+          unit: unit,
+          currentValue: current,
+          targetMinimum: minimum,
+          deficit: deficit,
+          deficitPercent: deficitPercent,
+          recommendedSeconds: recommendedSeconds,
+          reason:
+              '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit.',
+        ),
+      );
+    }
+
+    addIfLow(
+      key: 'N',
+      relay: 1,
+      pumpIndex: 0,
+      pumpName: 'Pompa A',
+      nutrient: 'Nitrogen',
+      unit: 'mg/kg',
+      minimum: thresholds['nitrogen_min']!.toDouble(),
+      maxSeconds: 180,
+    );
+    addIfLow(
+      key: 'P',
+      relay: 2,
+      pumpIndex: 1,
+      pumpName: 'Pompa B',
+      nutrient: 'Phosphorus',
+      unit: 'mg/kg',
+      minimum: thresholds['phosphorus_min']!.toDouble(),
+      maxSeconds: 180,
+    );
+    addIfLow(
+      key: 'K',
+      relay: 3,
+      pumpIndex: 2,
+      pumpName: 'Pompa C',
+      nutrient: 'Potassium',
+      unit: 'mg/kg',
+      minimum: thresholds['potassium_min']!.toDouble(),
+      maxSeconds: 180,
+    );
+    addIfLow(
+      key: 'Moisture',
+      relay: 4,
+      pumpIndex: 3,
+      pumpName: 'Pompa D',
+      nutrient: 'Water',
+      unit: '%',
+      minimum: thresholds['moisture_min']!.toDouble(),
+      maxSeconds: 120,
+    );
+
+    return recommendations;
+  }
+
+  static int _secondsFromDeficit(
+    double deficitPercent, {
+    required int maxSeconds,
+  }) {
+    return (10 + (deficitPercent * 2.4)).round().clamp(5, maxSeconds).toInt();
+  }
+
+  static double _roundDouble(double value) {
+    return double.parse(value.toStringAsFixed(2));
   }
 
   static String _formatNullable(double? value) {
@@ -569,13 +744,13 @@ class AiRecommendationException implements Exception {
 }
 
 const _systemPrompt =
-    'You are an expert AI Agronomist for potted tea plants (Camellia sinensis), Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC) using target ranges for tea plants grown in pots. Tea prefers acidic media, stable moisture with good drainage, moderate temperature, and gradual nutrient correction to avoid root stress and EC shock. Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text must be in Indonesian. The explanation field must provide scientific reasons (XAI) for tea plant health status. The recommendation field must provide concrete follow-up actions that a farmer or user can apply safely and practically for tea plants in pots.';
+    'You are an expert AI Agronomist for tea plants (Camellia sinensis), Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC) using target ranges for tea plants. Tea prefers acidic media, stable moisture with good drainage, moderate temperature, and gradual nutrient correction to avoid root stress and EC shock. Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text must be in Indonesian. The explanation field must provide scientific reasons (XAI) for tea plant health status. The recommendation field must provide concrete follow-up actions that a farmer or user can apply safely and practically for tea plants.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {
     'id': Schema.string(),
     'title': Schema.string(),
-    'status': Schema.enumString(enumValues: ['critical', 'warning', 'good']),
+    'status': Schema.enumString(enumValues: ['kritis', 'awas', 'baik']),
     'message': Schema.string(),
     'explanation': Schema.string(),
     'recommendation': Schema.string(),
@@ -597,11 +772,11 @@ final _responseSchema = Schema.object(
     'recommendations': Schema.object(
       properties: {
         'all': Schema.array(items: _recommendationItemSchema),
-        'critical': Schema.array(items: _recommendationItemSchema),
-        'warning': Schema.array(items: _recommendationItemSchema),
-        'good': Schema.array(items: _recommendationItemSchema),
+        'kritis': Schema.array(items: _recommendationItemSchema),
+        'awas': Schema.array(items: _recommendationItemSchema),
+        'baik': Schema.array(items: _recommendationItemSchema),
       },
-      requiredProperties: ['all', 'critical', 'warning', 'good'],
+      requiredProperties: ['all', 'kritis', 'awas', 'baik'],
     ),
     'automation_triggers': Schema.object(
       properties: {

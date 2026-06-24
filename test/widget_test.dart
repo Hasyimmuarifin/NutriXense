@@ -1,30 +1,41 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:nutrixense/main.dart';
+import 'package:nutrixense/models/ai_recommendation.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('pump recommendation can keep an adjusted duration', () {
+    const recommendation = PumpFertilizationRecommendation(
+      relay: 1,
+      pumpIndex: 0,
+      pumpName: 'Pompa A',
+      nutrient: 'Nitrogen',
+      unit: 'mg/kg',
+      currentValue: 60,
+      targetMinimum: 80,
+      deficit: 20,
+      deficitPercent: 25,
+      recommendedSeconds: 70,
+      reason: 'Nitrogen is below the minimum threshold.',
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    final adjusted = recommendation.copyWith(recommendedSeconds: 95);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(adjusted.relay, 1);
+    expect(adjusted.recommendedSeconds, 95);
+    expect(adjusted.deficit, 20);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('daily schedule recommendation parses Control-compatible data', () {
+    final schedule = DailyFertilizationScheduleRecommendation.fromJson({
+      'hour': 7,
+      'minute': 0,
+      'pumpIndexes': [0, 1, 2],
+      'durationSeconds': 90,
+      'reason': 'Daily AI fertilization recommendation.',
+    });
+
+    expect(schedule, isNotNull);
+    expect(schedule!.formattedTime, '07:00');
+    expect(schedule.hasPumps, isTrue);
+    expect(schedule.durationSeconds, 90);
   });
 }

@@ -28,15 +28,34 @@ class AiPumpAutomationService {
     return _applyCommands(
       <_PumpCommand>[
         if (triggers.activateNitrogenPump)
-          const _PumpCommand(relay: 1, label: 'Pump A (N)'),
+          const _PumpCommand(relay: 1, label: 'Pompa A (N)'),
         if (triggers.activatePhosphorusPump)
-          const _PumpCommand(relay: 2, label: 'Pump B (P)'),
+          const _PumpCommand(relay: 2, label: 'Pompa B (P)'),
         if (triggers.activatePotassiumPump)
-          const _PumpCommand(relay: 3, label: 'Pump C (K)'),
+          const _PumpCommand(relay: 3, label: 'Pompa C (K)'),
         if (triggers.activateWaterPump)
-          const _PumpCommand(relay: 4, label: 'Pump D (Water)'),
+          const _PumpCommand(relay: 4, label: 'Pompa D (Water)'),
       ],
       reason: triggers.reason,
+    );
+  }
+
+  Future<AiPumpAutomationResult> applyRecommendations(
+    List<PumpFertilizationRecommendation> recommendations,
+  ) {
+    return _applyCommands(
+      recommendations
+          .where((item) => item.recommendedSeconds > 0)
+          .map(
+            (item) => _PumpCommand(
+              relay: item.relay,
+              label: '${item.pumpName} (${item.nutrient})',
+              duration: Duration(seconds: item.recommendedSeconds),
+            ),
+          )
+          .toList(),
+      reason:
+          'AI recommendation confirmed by user with adjustable pump duration.',
     );
   }
 
@@ -72,7 +91,17 @@ class AiPumpAutomationService {
         _mqttService.setRelay(command.relay, true);
       }
 
-      await Future.delayed(pulseDuration);
+      final startedAt = DateTime.now();
+      final sortedCommands = [...pumpCommands]
+        ..sort((a, b) => a.duration.compareTo(b.duration));
+      for (final command in sortedCommands) {
+        final elapsed = DateTime.now().difference(startedAt);
+        final remaining = command.duration - elapsed;
+        if (remaining > Duration.zero) {
+          await Future.delayed(remaining);
+        }
+        _mqttService.setRelay(command.relay, false);
+      }
     } finally {
       for (final command in pumpCommands) {
         _mqttService.setRelay(command.relay, false);
@@ -88,13 +117,29 @@ class AiPumpAutomationService {
   _PumpCommand? _commandForRelay(int relay) {
     switch (relay) {
       case 1:
-        return const _PumpCommand(relay: 1, label: 'Pump A (N)');
+        return _PumpCommand(
+          relay: 1,
+          label: 'Pompa A (N)',
+          duration: pulseDuration,
+        );
       case 2:
-        return const _PumpCommand(relay: 2, label: 'Pump B (P)');
+        return _PumpCommand(
+          relay: 2,
+          label: 'Pompa B (P)',
+          duration: pulseDuration,
+        );
       case 3:
-        return const _PumpCommand(relay: 3, label: 'Pump C (K)');
+        return _PumpCommand(
+          relay: 3,
+          label: 'Pompa C (K)',
+          duration: pulseDuration,
+        );
       case 4:
-        return const _PumpCommand(relay: 4, label: 'Pump D (Water)');
+        return _PumpCommand(
+          relay: 4,
+          label: 'Pompa D (Air)',
+          duration: pulseDuration,
+        );
       default:
         return null;
     }
@@ -105,8 +150,10 @@ class _PumpCommand {
   const _PumpCommand({
     required this.relay,
     required this.label,
+    this.duration = const Duration(seconds: 5),
   });
 
   final int relay;
   final String label;
+  final Duration duration;
 }

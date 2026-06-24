@@ -1,6 +1,7 @@
 // lib/screens/insights_screen.dart
 // AI Insights page – displays smart recommendations, plant health summary, and actions
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../models/ai_recommendation.dart';
 import '../models/sensor_data.dart';
@@ -23,28 +24,32 @@ class _InsightsScreenState extends State<InsightsScreen> {
   final AiPumpAutomationService _pumpAutomationService =
       AiPumpAutomationService();
   final AlertCountService _alertCountService = AlertCountService.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   List<InsightCard> _insights = [];
   AiRecommendationResponse? _aiResponse;
   int? _expandedIndex;
   String _selectedFilter = 'All';
   bool _isRequesting = false;
   bool _isApplyingAutomation = false;
+  bool _isAddingSchedule = false;
+  bool _scheduleAdded = false;
   Object? _requestError;
   DateTime? _lastUpdated;
   AiPumpAutomationResult? _lastAutomationResult;
+  final Map<int, int> _adjustedPumpSeconds = {};
 
-  final List<String> _filters = ['All', 'Critical', 'Warning', 'Good'];
+  final List<String> _filters = ['All', 'Kritis', 'Awas', 'Baik'];
 
   List<InsightCard> get _filteredInsights {
     if (_selectedFilter == 'All') return _insights;
     return _insights.where((i) {
       switch (_selectedFilter) {
-        case 'Critical':
-          return i.severity == InsightSeverity.critical;
-        case 'Warning':
-          return i.severity == InsightSeverity.warning;
-        case 'Good':
-          return i.severity == InsightSeverity.good;
+        case 'Kritis':
+          return i.severity == InsightSeverity.kritis;
+        case 'Awas':
+          return i.severity == InsightSeverity.awas;
+        case 'Baik':
+          return i.severity == InsightSeverity.baik;
         default:
           return true;
       }
@@ -52,20 +57,20 @@ class _InsightsScreenState extends State<InsightsScreen> {
   }
 
   int get _criticalCount =>
-      _insights.where((i) => i.severity == InsightSeverity.critical).length;
+      _insights.where((i) => i.severity == InsightSeverity.kritis).length;
   int get _warningCount =>
-      _insights.where((i) => i.severity == InsightSeverity.warning).length;
+      _insights.where((i) => i.severity == InsightSeverity.awas).length;
   int get _goodCount =>
-      _insights.where((i) => i.severity == InsightSeverity.good).length;
+      _insights.where((i) => i.severity == InsightSeverity.baik).length;
 
   // Calculate overall plant health score
   int get _healthScore {
     if (_aiResponse != null) return _aiResponse!.plantHealthPercentage;
     final total = _insights.length;
     if (total == 0) return 0;
-    final good = _goodCount;
-    final warning = _warningCount;
-    return (((good * 100) + (warning * 60)) / total).round();
+    final baik = _goodCount;
+    final awas = _warningCount;
+    return (((baik * 100) + (awas * 60)) / total).round();
   }
 
   String get _requestErrorMessage {
@@ -75,6 +80,16 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
     final raw = error.toString();
     final lower = raw.toLowerCase();
+    if (lower.contains('429') ||
+        lower.contains('quota') ||
+        lower.contains('rate limit') ||
+        lower.contains('rate-limit') ||
+        lower.contains('resource exhausted') ||
+        lower.contains('free_tier') ||
+        lower.contains('free tier')) {
+      return 'Kuota Gemini API sedang habis atau terkena rate limit. Aplikasi akan memakai analisis DSS lokal bila data sensor tersedia; coba lagi nanti untuk respons penuh dari Gemini.';
+    }
+
     if (lower.contains('503') ||
         lower.contains('generativeaiexception') ||
         lower.contains('server error') ||
@@ -102,12 +117,24 @@ class _InsightsScreenState extends State<InsightsScreen> {
         _aiResponse = response;
         _insights = response.toInsightCards();
         _lastUpdated = DateTime.now();
+        _lastAutomationResult = null;
+        _scheduleAdded = false;
+        _adjustedPumpSeconds
+          ..clear()
+          ..addEntries(
+            response.pumpRecommendations.map(
+              (item) => MapEntry(item.relay, item.recommendedSeconds),
+            ),
+          );
       });
       _alertCountService.updateFromAiRecommendation(
-        criticalCount: response.recommendations.critical.length,
-        warningCount: response.recommendations.warning.length,
+        criticalCount: response.recommendations.kritis.length,
+        warningCount: response.recommendations.awas.length,
       );
-      await _applyPumpAutomation(response.automationTriggers);
+      if (mounted) {
+        setState(() => _isRequesting = false);
+      }
+      await _showRecommendationPopup(response);
     } catch (e) {
       if (!mounted) return;
       setState(() => _requestError = e);
@@ -118,11 +145,32 @@ class _InsightsScreenState extends State<InsightsScreen> {
     }
   }
 
-  Future<void> _applyPumpAutomation(AutomationTriggers triggers) async {
-    if (!triggers.hasActivePump) {
+  List<PumpFertilizationRecommendation> get _adjustedPumpRecommendations {
+    final recommendations = _aiResponse?.pumpRecommendations ?? const [];
+    return recommendations
+        .map(
+          (item) => item.copyWith(
+            recommendedSeconds:
+                _adjustedPumpSeconds[item.relay] ?? item.recommendedSeconds,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  int _recommendedScheduleDuration({required int fallback}) {
+    final recommendations = _adjustedPumpRecommendations;
+    if (recommendations.isEmpty) return fallback;
+    return recommendations
+        .map((item) => item.recommendedSeconds)
+        .reduce((a, b) => a > b ? a : b);
+  }
+
+  Future<void> _confirmPumpRecommendation() async {
+    final recommendations = _adjustedPumpRecommendations;
+    if (recommendations.isEmpty) {
       setState(() => _lastAutomationResult = AiPumpAutomationResult(
             activatedPumps: const [],
-            reason: triggers.reason,
+            reason: _aiResponse?.automationTriggers.reason ?? '',
           ));
       return;
     }
@@ -130,7 +178,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
     setState(() => _isApplyingAutomation = true);
 
     try {
-      final result = await _pumpAutomationService.apply(triggers);
+      final result =
+          await _pumpAutomationService.applyRecommendations(recommendations);
       if (!mounted) return;
       setState(() => _lastAutomationResult = result);
       _showAutomationSnackBar(result);
@@ -144,13 +193,312 @@ class _InsightsScreenState extends State<InsightsScreen> {
     }
   }
 
+  Future<void> _addRecommendedSchedule() async {
+    final response = _aiResponse;
+    final schedule = response?.dailyScheduleRecommendation;
+    if (schedule == null || !schedule.hasPumps) return;
+
+    final recommendations = _adjustedPumpRecommendations;
+    final durationSeconds = recommendations.isEmpty
+        ? schedule.durationSeconds
+        : recommendations
+            .map((item) => item.recommendedSeconds)
+            .reduce((a, b) => a > b ? a : b);
+    final id = DateTime.now().microsecondsSinceEpoch;
+
+    setState(() => _isAddingSchedule = true);
+    try {
+      await _firestore.collection('watering_schedules').doc('$id').set({
+        'id': id,
+        'hour': schedule.hour,
+        'minute': schedule.minute,
+        'pumpIndexes': schedule.pumpIndexes.toList()..sort(),
+        'durationSeconds': durationSeconds,
+        'repeatsDaily': true,
+        'enabled': true,
+        'source': 'gemini_ai_recommendation',
+        'reason': schedule.reason,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+      setState(() => _scheduleAdded = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'AI daily schedule added to Control at ${schedule.formattedTime}.',
+          ),
+          backgroundColor: AppTheme.primaryGreen,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _requestError = e);
+    } finally {
+      if (mounted) setState(() => _isAddingSchedule = false);
+    }
+  }
+
+  Future<void> _showRecommendationPopup(
+    AiRecommendationResponse response,
+  ) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final recommendations = response.pumpRecommendations;
+            final schedule = response.dailyScheduleRecommendation;
+            final hasSchedule = schedule != null && schedule.hasPumps;
+            final durationSeconds = _recommendedScheduleDuration(
+              fallback: schedule?.durationSeconds ?? 0,
+            );
+
+            Future<void> refreshDialog(Future<void> Function() action) async {
+              await action();
+              if (mounted) setDialogState(() {});
+            }
+
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 24,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.82,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 16, 12, 10),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryGreen.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.auto_awesome_rounded,
+                              color: AppTheme.primaryGreen,
+                              size: 21,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Rekomendasi Pemupukan AI',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: AppTheme.textPrimary,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cancel',
+                            onPressed: _isApplyingAutomation
+                                ? null
+                                : () => Navigator.of(dialogContext).pop(),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              response.sensorSummary,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                                height: 1.45,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            if (recommendations.isEmpty)
+                              _buildNoPumpRecommendationBox()
+                            else ...[
+                              const Text(
+                                'Rencana Pemupukan',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.textPrimary,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Sesuaikan durasi sebelum menekan Konfirmasi.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textSecondary,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              ...recommendations.map(
+                                (item) => _buildPumpRecommendationTile(
+                                  item,
+                                  onDurationChanged: () =>
+                                      setDialogState(() {}),
+                                ),
+                              ),
+                            ],
+                            if (hasSchedule) ...[
+                              const SizedBox(height: 8),
+                              _buildSchedulePopupInfo(
+                                schedule: schedule,
+                                durationSeconds: durationSeconds,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (hasSchedule) ...[
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: _isAddingSchedule || _scheduleAdded
+                                    ? null
+                                    : () => refreshDialog(
+                                          _addRecommendedSchedule,
+                                        ),
+                                icon: _isAddingSchedule
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Icon(
+                                        _scheduleAdded
+                                            ? Icons.check_circle_rounded
+                                            : Icons.event_available_rounded,
+                                        size: 18,
+                                      ),
+                                label: Text(
+                                  _scheduleAdded
+                                      ? 'Jadwal Ditambahkan ke Control'
+                                      : 'Tambah Jadwal Otomatis ke Control',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppTheme.primaryBlue,
+                                  side: BorderSide(
+                                    color:
+                                        AppTheme.primaryBlue.withOpacity(0.35),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: _isApplyingAutomation
+                                      ? null
+                                      : () => Navigator.of(dialogContext).pop(),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.textSecondary,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: _isApplyingAutomation ||
+                                          recommendations.isEmpty
+                                      ? null
+                                      : () async {
+                                          if (dialogContext.mounted) {
+                                            Navigator.of(dialogContext).pop();
+                                          }
+                                          await _confirmPumpRecommendation();
+                                        },
+                                  icon: _isApplyingAutomation
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.check_circle_rounded,
+                                          size: 18,
+                                        ),
+                                  label: const Text('Konfirmasi'),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryGreen,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showAutomationSnackBar(AiPumpAutomationResult result) {
     if (!result.hasActivatedPump) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'AI activated ${result.activatedPumps.join(', ')} for 5 seconds.',
+          'Confirmed: ${result.activatedPumps.join(', ')} applied with adjusted duration.',
         ),
         backgroundColor: AppTheme.primaryGreen,
         behavior: SnackBarBehavior.floating,
@@ -263,7 +611,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             ),
                             const SizedBox(height: 20),
                             const Text(
-                              'Plant Health Report',
+                              'Kesehatan Tanaman',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -284,12 +632,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                     children: [
                                       _buildStatPill(
                                         Icons.error_outline_rounded,
-                                        '$_criticalCount Critical',
+                                        '$_criticalCount Kritis',
                                         AppTheme.statusLow,
                                       ),
                                       _buildStatPill(
                                         Icons.warning_amber_rounded,
-                                        '$_warningCount Warnings',
+                                        '$_warningCount Awas',
                                         AppTheme.statusHigh,
                                       ),
                                       _buildStatPill(
@@ -556,6 +904,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   const SizedBox(height: 12),
                   _buildAutomationTriggerRow(triggers),
                 ],
+                if (_aiResponse != null) ...[
+                  const SizedBox(height: 12),
+                  _buildPumpRecommendationPanel(_aiResponse!),
+                ],
                 if (_lastAutomationResult != null) ...[
                   const SizedBox(height: 10),
                   _buildAutomationResult(_lastAutomationResult!),
@@ -564,7 +916,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: _isRequesting || _isApplyingAutomation
+                    onPressed: _isRequesting ||
+                            _isApplyingAutomation ||
+                            _isAddingSchedule
                         ? null
                         : _requestAiRecommendation,
                     icon: _isRequesting || _isApplyingAutomation
@@ -577,9 +931,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                     label: Text(
                       _isRequesting
                           ? 'Menganalisis...'
-                          : _isApplyingAutomation
-                              ? 'Applying pump automation...'
-                              : 'Request AI Recommendation',
+                          : 'Minta Rekomendasi AI',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
@@ -610,32 +962,196 @@ class _InsightsScreenState extends State<InsightsScreen> {
       children: [
         _buildTriggerChip(
           Icons.eco_rounded,
-          triggers.activateNitrogenPump ? 'Pump A N: ON' : 'Pump A N: OFF',
+          triggers.activateNitrogenPump
+              ? 'Pompa A N: Direkomendasikan'
+              : 'Pompa A N: Normal',
           triggers.activateNitrogenPump,
         ),
         _buildTriggerChip(
           Icons.grass_rounded,
-          triggers.activatePhosphorusPump ? 'Pump B P: ON' : 'Pump B P: OFF',
+          triggers.activatePhosphorusPump
+              ? 'Pompa B P: Direkomendasikan'
+              : 'Pompa B P: Normal',
           triggers.activatePhosphorusPump,
         ),
         _buildTriggerChip(
           Icons.local_florist_rounded,
-          triggers.activatePotassiumPump ? 'Pump C K: ON' : 'Pump C K: OFF',
+          triggers.activatePotassiumPump
+              ? 'Pompa C K: Direkomendasikan'
+              : 'Pompa C K: Normal',
           triggers.activatePotassiumPump,
         ),
         _buildTriggerChip(
           Icons.water_drop_rounded,
-          triggers.activateWaterPump ? 'Pump D Water: ON' : 'Pump D Water: OFF',
+          triggers.activateWaterPump
+              ? 'Pompa D Air: Direkomendasikan'
+              : 'Pompa D Air: Normal',
           triggers.activateWaterPump,
         ),
       ],
     );
   }
 
+  Widget _buildPumpRecommendationPanel(AiRecommendationResponse response) {
+    final recommendations = response.pumpRecommendations;
+    final label = recommendations.isEmpty
+        ? 'Lihat Hasil Rekomendasi AI'
+        : 'Lihat ${recommendations.length} Rekomendasi Pemupukan';
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _isApplyingAutomation
+            ? null
+            : () => _showRecommendationPopup(response),
+        icon: const Icon(Icons.open_in_new_rounded, size: 18),
+        label: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppTheme.primaryGreen,
+          side: BorderSide(color: AppTheme.primaryGreen.withOpacity(0.35)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPumpRecommendationTile(
+      PumpFertilizationRecommendation recommendation,
+      {VoidCallback? onDurationChanged}) {
+    final seconds = _adjustedPumpSeconds[recommendation.relay] ??
+        recommendation.recommendedSeconds;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.bgPrimary,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${recommendation.pumpName} - ${recommendation.nutrient}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text(
+                '$seconds detik',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.primaryGreen,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${recommendation.reason} Defisit ${recommendation.formattedDeficitPercent}.',
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          Slider(
+            value: seconds.toDouble(),
+            min: 5,
+            max: 300,
+            divisions: 59,
+            label: '$seconds detik',
+            activeColor: AppTheme.primaryGreen,
+            onChanged: (value) {
+              setState(() {
+                _adjustedPumpSeconds[recommendation.relay] = value.round();
+              });
+              onDurationChanged?.call();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoPumpRecommendationBox() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.statusNormal.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.statusNormal.withOpacity(0.2)),
+      ),
+      child: const Text(
+        'Tidak ada pompa yang perlu dijalankan. Semua nilai utama sudah berada pada ambang aman atau tidak membutuhkan koreksi langsung.',
+        style: TextStyle(
+          fontSize: 12,
+          color: AppTheme.textSecondary,
+          height: 1.4,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSchedulePopupInfo({
+    required DailyFertilizationScheduleRecommendation schedule,
+    required int durationSeconds,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryBlue.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Recommended Daily Schedule',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Rekomendasi jadwal harian pukul ${schedule.formattedTime} selama $durationSeconds detik. Gunakan tombol di bawah popup untuk menambahkannya ke menu Control.',
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAutomationResult(AiPumpAutomationResult result) {
     final text = result.hasActivatedPump
-        ? 'Applied: ${result.activatedPumps.join(', ')}'
-        : 'No pump activation needed';
+        ? 'Telah dikonfirmasi : ${result.activatedPumps.join(', ')}'
+        : 'Tidak perlu mengaktifkan pompa';
 
     return Text(
       text,

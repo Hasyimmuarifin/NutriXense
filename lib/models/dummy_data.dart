@@ -110,7 +110,7 @@ class DummyData {
           description:
               'Nitrogen levels are below optimal range (38.5 mg/kg vs 40–80 mg/kg). Plants may show yellowing of older leaves.',
           icon: '⚠️',
-          severity: InsightSeverity.critical,
+          severity: InsightSeverity.kritis,
           action:
               'Apply nitrogen-rich fertilizer (NPK 20-10-10). Activate Pump A for 5 minutes.',
         ),
@@ -119,7 +119,7 @@ class DummyData {
           description:
               'Soil pH of 5.8 is below the ideal range of 6.0–7.5. Acidic soil limits nutrient absorption.',
           icon: '🔴',
-          severity: InsightSeverity.warning,
+          severity: InsightSeverity.awas,
           action: 'Apply agricultural lime or dolomite to raise pH gradually.',
         ),
         const InsightCard(
@@ -127,7 +127,7 @@ class DummyData {
           description:
               'Potassium at 92.8 mg/kg exceeds optimal range (60–90 mg/kg). Excess K may block calcium uptake.',
           icon: '🟡',
-          severity: InsightSeverity.warning,
+          severity: InsightSeverity.awas,
           action:
               'Pause Pump C until K levels normalize. Flush soil with clean water.',
         ),
@@ -136,7 +136,7 @@ class DummyData {
           description:
               'Phosphorus at 55.2 mg/kg is within the ideal range. Root development and flowering should be healthy.',
           icon: '✅',
-          severity: InsightSeverity.good,
+          severity: InsightSeverity.baik,
           action: 'Maintain current Pump B schedule.',
         ),
         const InsightCard(
@@ -144,7 +144,7 @@ class DummyData {
           description:
               'Soil moisture at 64% is within the healthy range. Plants have adequate water availability.',
           icon: '💧',
-          severity: InsightSeverity.good,
+          severity: InsightSeverity.baik,
           action: 'Continue current irrigation schedule.',
         ),
         const InsightCard(
@@ -152,7 +152,7 @@ class DummyData {
           description:
               'Soil temperature at 28.4°C is within optimal range. Microbial activity and nutrient cycling are active.',
           icon: '🌡️',
-          severity: InsightSeverity.good,
+          severity: InsightSeverity.baik,
           action: 'No action required. Monitor during peak afternoon heat.',
         ),
       ];
@@ -161,29 +161,29 @@ class DummyData {
   static List<PumpController> getPumps() => [
         PumpController(
           id: 'pump_a',
-          name: 'Pump A',
+          name: 'Pompa A',
           nutrient: 'Nitrogen (N)',
           iconPath: 'assets/icons/leaf.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_b',
-          name: 'Pump B',
+          name: 'Pompa B',
           nutrient: 'Phosphorus (P)',
           iconPath: 'assets/icons/root.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_c',
-          name: 'Pump C',
+          name: 'Pompa C',
           nutrient: 'Potassium (K)',
           iconPath: 'assets/icons/crop.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_d',
-          name: 'Pump D',
-          nutrient: 'Water (H2O)',
+          name: 'Pompa D',
+          nutrient: 'Air (H2O)',
           iconPath: 'assets/icons/water.png',
           isOn: false,
         ),

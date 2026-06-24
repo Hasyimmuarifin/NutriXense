@@ -107,7 +107,7 @@ class InsightCard {
   });
 }
 
-enum InsightSeverity { critical, warning, good }
+enum InsightSeverity { kritis, awas, baik }
 
 /// Pump controller model
 class PumpController {

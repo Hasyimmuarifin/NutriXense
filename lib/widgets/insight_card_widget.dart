@@ -19,33 +19,33 @@ class InsightCardWidget extends StatelessWidget {
 
   Color get _borderColor {
     switch (insight.severity) {
-      case InsightSeverity.critical:
+      case InsightSeverity.kritis:
         return AppTheme.statusLow;
-      case InsightSeverity.warning:
+      case InsightSeverity.awas:
         return AppTheme.statusHigh;
-      case InsightSeverity.good:
+      case InsightSeverity.baik:
         return AppTheme.statusNormal;
     }
   }
 
   Color get _bgColor {
     switch (insight.severity) {
-      case InsightSeverity.critical:
+      case InsightSeverity.kritis:
         return const Color(0xFFFFF5F5);
-      case InsightSeverity.warning:
+      case InsightSeverity.awas:
         return const Color(0xFFFFFBF0);
-      case InsightSeverity.good:
+      case InsightSeverity.baik:
         return const Color(0xFFF1FBF4);
     }
   }
 
   String get _severityLabel {
     switch (insight.severity) {
-      case InsightSeverity.critical:
+      case InsightSeverity.kritis:
         return 'ACTION REQUIRED';
-      case InsightSeverity.warning:
+      case InsightSeverity.awas:
         return 'MONITOR';
-      case InsightSeverity.good:
+      case InsightSeverity.baik:
         return 'OPTIMAL';
     }
   }

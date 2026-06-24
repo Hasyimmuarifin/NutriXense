@@ -20,7 +20,7 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  int _selectedFilter = 0; // 0=Today, 1=7 Days, 2=30 Days
+  int _selectedFilter = 0; // 0=Hari ini, 1=7 Hari, 2=30 Hari
   int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp
   List<SensorDataPoint> _data = [];
   int _pageIndex = 0;
@@ -37,7 +37,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
 
-  final List<String> _filters = ['Today', '7 Days', '30 Days'];
+  final List<String> _filters = ['Hari ini', '7 Hari', '30 Hari'];
   final List<int> _filterDays = [1, 7, 30];
 
   int get _totalPages {
@@ -452,7 +452,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
       return [
         _StatItem(
-          'Avg',
+          'Rata-rata',
           npkValue(
             nitrogen: avgOf(_data.map((d) => d.nitrogen)),
             phosphorus: avgOf(_data.map((d) => d.phosphorus)),
@@ -461,7 +461,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           AppTheme.primaryGreen,
         ),
         _StatItem(
-          'Min',
+          'Minimal',
           npkValue(
             nitrogen: minOf(_data.map((d) => d.nitrogen)),
             phosphorus: minOf(_data.map((d) => d.phosphorus)),
@@ -470,7 +470,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           AppTheme.primaryBlue,
         ),
         _StatItem(
-          'Max',
+          'Maksimal',
           npkValue(
             nitrogen: maxOf(_data.map((d) => d.nitrogen)),
             phosphorus: maxOf(_data.map((d) => d.phosphorus)),
@@ -507,7 +507,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return [
       _StatItem(
-          'Avg', '${avg.toStringAsFixed(1)} $unit', AppTheme.primaryGreen),
+          'Rata-rata', '${avg.toStringAsFixed(1)} $unit', AppTheme.primaryGreen),
       _StatItem('Min', '${min.toStringAsFixed(1)} $unit', AppTheme.primaryBlue),
       _StatItem('Max', '${max.toStringAsFixed(1)} $unit', AppTheme.statusHigh),
     ];

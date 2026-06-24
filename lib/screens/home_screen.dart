@@ -546,7 +546,7 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           ),
                           child: const Text(
-                            'Set normal min and max ranges. Values outside these limits become alerts.',
+                            'Atur rentang minimal dan maksimal normal. Nilai yang berada di luar batas ini akan menjadi peringatan.',
                             style: TextStyle(
                               fontSize: 11,
                               color: AppTheme.textSecondary,
@@ -1064,7 +1064,7 @@ class _HomeScreenState extends State<HomeScreen>
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      'Good Morning,',
+                                      'Selamat Datang,',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
@@ -1168,7 +1168,7 @@ class _HomeScreenState extends State<HomeScreen>
                   const SizedBox(height: 40),
 
                   // ─── Sensor grid ──────────────────────────────────────────
-                  const SectionHeader(title: 'Sensor Readings'),
+                  const SectionHeader(title: 'Pembacaan Sensor'),
                   const SizedBox(height: 20),
                   _buildSensorReadingsLayout(),
                 ]),
@@ -1349,7 +1349,7 @@ class _HomeScreenState extends State<HomeScreen>
           const SectionHeader(title: 'Real-Time Trends'),
           const SizedBox(height: 6),
           Text(
-            'NPK levels over the last few minutes',
+            'NPK levels - dalam beberapa menit terakhir',
             style: TextStyle(
               fontSize: 12,
               color: AppTheme.textLight,

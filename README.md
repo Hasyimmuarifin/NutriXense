@@ -11,10 +11,10 @@ NutriXense is a production-grade Flutter application for monitoring and controll
 | # | Screen | Description |
 |---|--------|-------------|
 | 1 | **Home** | Live dashboard — 6 sensor cards (N, P, K, pH, Moisture, Temp) + real-time NPK trend chart |
-| 2 | **History** | Time-series charts with Today / 7 Days / 30 Days filter, sensor selector, stats summary, data table |
+| 2 | **History** | Time-series charts with Hari ini / 7 Hari / 30 Hari filter, sensor selector, stats summary, data table |
 | 3 | **Scan** | AI plant scan simulation — camera viewfinder, scan animation, detailed health report |
 | 4 | **Insights** | AI recommendation cards with severity filters, NutriAI summary, expandable action cards |
-| 5 | **Control** | Pump A/B/C toggle with loading state, IoT gateway status, auto-schedule display |
+| 5 | **Control** | Pompa A/B/C toggle with auto-schedule display |
 
 ---
 
