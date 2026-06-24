@@ -29,7 +29,7 @@ class DummyData {
           colorHex: 0xFF1565C0,
         ),
         const SensorReading(
-          label: 'Potassium',
+          label: 'Kalium',
           unit: 'mg/kg',
           value: 92.8,
           minValue: 0,
@@ -123,9 +123,9 @@ class DummyData {
           action: 'Apply agricultural lime or dolomite to raise pH gradually.',
         ),
         const InsightCard(
-          title: 'High Potassium Levels',
+          title: 'Kadar Kalium Tinggi',
           description:
-              'Potassium at 92.8 mg/kg exceeds optimal range (60–90 mg/kg). Excess K may block calcium uptake.',
+              'Kalium 92.8 mg/kg melebihi rentang optimal (60–90 mg/kg). K berlebih dapat menghambat penyerapan kalsium.',
           icon: '🟡',
           severity: InsightSeverity.awas,
           action:
@@ -176,7 +176,7 @@ class DummyData {
         PumpController(
           id: 'pump_c',
           name: 'Pompa C',
-          nutrient: 'Potassium (K)',
+          nutrient: 'Kalium (K)',
           iconPath: 'assets/icons/crop.png',
           isOn: false,
         ),
@@ -194,7 +194,7 @@ class DummyData {
     final Map<String, List<double>> charts = {
       'Nitrogen': [42, 40, 37, 35, 38, 36, 38.5],
       'Phosphorus': [50, 53, 56, 54, 58, 55, 55.2],
-      'Potassium': [85, 88, 90, 93, 91, 95, 92.8],
+      'Kalium': [85, 88, 90, 93, 91, 95, 92.8],
       'pH Level': [6.2, 6.0, 5.9, 5.8, 6.0, 5.7, 5.8],
       'Soil Moisture': [60, 65, 68, 62, 64, 66, 64.0],
       'Temperature': [27, 28, 29, 28, 27, 29, 28.4],

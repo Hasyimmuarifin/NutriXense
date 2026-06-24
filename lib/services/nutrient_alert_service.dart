@@ -89,7 +89,7 @@ class NutrientAlertService {
 
     try {
       await _channel.invokeMethod<void>('showNutrientAlert', {
-        'title': 'Nutrient threshold alert',
+        'title': 'Peringatan Nutrisi Tanaman',
         'message': message,
       });
     } on PlatformException catch (error) {
@@ -129,7 +129,7 @@ class NutrientAlertService {
         return 'nitrogen';
       case 'Phosphorus':
         return 'phosphorus';
-      case 'Potassium':
+      case 'Kalium':
         return 'potassium';
       case 'pH Level':
         return 'ph';

@@ -101,7 +101,7 @@ async function loadLatestReading() {
 
 async function sendThresholdNotification(alerts, reading) {
   const body = alerts.map(formatAlertLine).join('\n');
-  const title = 'Nutrient threshold alert';
+  const title = 'Peringatan Nutrisi Tanaman';
 
   const response = await admin.messaging().send({
     topic: config.automation.fcmTopic,

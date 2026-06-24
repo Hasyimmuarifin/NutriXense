@@ -49,7 +49,7 @@ const SENSOR_DEFINITIONS = [
   },
   {
     key: 'potassium',
-    label: 'Potassium',
+    label: 'Kalium',
     unit: 'mg/kg',
     minKey: 'min_potassium',
     maxKey: 'max_potassium',

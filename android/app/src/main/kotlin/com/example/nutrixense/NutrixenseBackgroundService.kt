@@ -321,7 +321,7 @@ class NutrixenseBackgroundService : Service() {
 
         addAlertLine(alertLines, "nitrogen", "Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
         addAlertLine(alertLines, "phosphorus", "Phosphorus", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
-        addAlertLine(alertLines, "potassium", "Potassium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
+        addAlertLine(alertLines, "potassium", "Kalium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
         addAlertLine(alertLines, "ph", "pH", reading.ph, "pH", "min_ph", "max_ph")
         addAlertLine(alertLines, "moisture", "Moisture", reading.moisture, "%", "min_moisture", "max_moisture")
         addAlertLine(alertLines, "temperature", "Temperature", reading.temperature, "°C", "min_temperature", "max_temperature")
@@ -331,7 +331,7 @@ class NutrixenseBackgroundService : Service() {
 
         publishAlertBuzzer()
         showThresholdAlert(
-            "Nutrient threshold alert",
+            "Peringatan Nutrisi Tanaman",
             alertLines.joinToString("\n")
         )
     }
@@ -565,7 +565,7 @@ class NutrixenseBackgroundService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 ALERT_CHANNEL_ID,
-                "Nutrient Threshold Alerts",
+                "Peringatan Nutrisi Tanaman",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Alerts when plant nutrition readings leave the configured thresholds."

@@ -203,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "potassium"),
-        label: "Potassium",
+        label: "Kalium",
         unit: "mg/kg",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_potassium', 650, 800),
@@ -297,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen>
         return 'nitrogen';
       case 'Phosphorus':
         return 'phosphorus';
-      case 'Potassium':
+      case 'Kalium':
         return 'potassium';
       case 'pH Level':
         return 'ph';
@@ -568,7 +568,7 @@ class _HomeScreenState extends State<HomeScreen>
                           suffix: 'mg/kg',
                         ),
                         _thresholdRangeField(
-                          'Potassium',
+                          'Kalium',
                           minKey: 'min_potassium',
                           maxKey: 'max_potassium',
                           suffix: 'mg/kg',
@@ -784,7 +784,7 @@ class _HomeScreenState extends State<HomeScreen>
     final thresholdPairs = {
       'Nitrogen': ('min_nitrogen', 'max_nitrogen'),
       'Phosphorus': ('min_phosphorus', 'max_phosphorus'),
-      'Potassium': ('min_potassium', 'max_potassium'),
+      'Kalium': ('min_potassium', 'max_potassium'),
       'pH': ('min_ph', 'max_ph'),
       'Moisture': ('min_moisture', 'max_moisture'),
       'Temperature': ('min_temperature', 'max_temperature'),
@@ -1451,7 +1451,7 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 _legend('Nitrogen', AppTheme.primaryGreen),
                 _legend('Phosphorus', AppTheme.primaryBlue),
-                _legend('Potassium', AppTheme.statusHigh),
+                _legend('Kalium', AppTheme.statusHigh),
               ],
             ),
           ),

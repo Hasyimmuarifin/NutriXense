@@ -87,7 +87,7 @@ class GeminiRecommendationService {
       'pump_mapping': {
         'activate_nitrogen_pump': 'Pompa A - Nitrogen (N)',
         'activate_phosphorus_pump': 'Pompa B - Phosphorus (P)',
-        'activate_potassium_pump': 'Pompa C - Potassium (K)',
+        'activate_potassium_pump': 'Pompa C - Kalium (K)',
         'activate_water_pump': 'Pompa D - Water (H2O)',
       },
       'output_rules': [
@@ -488,12 +488,12 @@ class GeminiRecommendationService {
     );
     evaluateRange(
       key: 'K',
-      label: 'Potassium',
+      label: 'Kalium',
       unit: 'mg/kg',
       min: thresholds['potassium_min']!,
       max: thresholds['potassium_max']!,
-      lowTitle: 'Potassium Rendah',
-      highTitle: 'Potassium Berlebih',
+      lowTitle: 'Kalium Rendah',
+      highTitle: 'Kalium Berlebih',
       lowAction:
           'Aktifkan Pump C sesuai durasi DSS, lalu ulangi pembacaan setelah nutrisi tersebar merata. Kalium penting untuk ketahanan teh, tetapi tetap jaga keseimbangan NPK agar EC tidak melonjak.',
       highAction:
@@ -565,9 +565,8 @@ class GeminiRecommendationService {
     final kritis = items
         .where((item) => item['status'] == 'kritis')
         .toList(growable: false);
-    final awas = items
-        .where((item) => item['status'] == 'awas')
-        .toList(growable: false);
+    final awas =
+        items.where((item) => item['status'] == 'awas').toList(growable: false);
     final baik =
         items.where((item) => item['status'] == 'baik').toList(growable: false);
     final scorePenalty = (kritis.length * 15) + (awas.length * 8);
@@ -674,7 +673,7 @@ class GeminiRecommendationService {
       relay: 3,
       pumpIndex: 2,
       pumpName: 'Pompa C',
-      nutrient: 'Potassium',
+      nutrient: 'Kalium',
       unit: 'mg/kg',
       minimum: thresholds['potassium_min']!.toDouble(),
       maxSeconds: 180,

@@ -506,8 +506,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final max = vals.reduce((a, b) => a > b ? a : b);
 
     return [
-      _StatItem(
-          'Rata-rata', '${avg.toStringAsFixed(1)} $unit', AppTheme.primaryGreen),
+      _StatItem('Rata-rata', '${avg.toStringAsFixed(1)} $unit',
+          AppTheme.primaryGreen),
       _StatItem('Min', '${min.toStringAsFixed(1)} $unit', AppTheme.primaryBlue),
       _StatItem('Max', '${max.toStringAsFixed(1)} $unit', AppTheme.statusHigh),
     ];
@@ -858,7 +858,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                               AppTheme.primaryBlue),
                                           const SizedBox(width: 16),
                                           _legend(
-                                              'Potassium', AppTheme.statusHigh),
+                                              'Kalium', AppTheme.statusHigh),
                                         ],
                                       ),
                                     ],

@@ -1,7 +1,7 @@
 const FIELD_ALIASES = {
   nitrogen: ['nitrogen', 'Nitrogen', 'N', 'n'],
   phosphorus: ['phosphorus', 'Phosphorus', 'P', 'p'],
-  potassium: ['potassium', 'Potassium', 'K', 'k'],
+  potassium: ['potassium', 'Potassium', 'Kalium', 'K', 'k'],
   ph: ['ph', 'pH', 'PH'],
   moisture: ['moisture', 'Moisture', 'soil_moisture'],
   temperature: ['temperature', 'Temperature', 'Temp', 'temp'],

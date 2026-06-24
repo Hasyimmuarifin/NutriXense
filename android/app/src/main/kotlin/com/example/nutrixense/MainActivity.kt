@@ -40,7 +40,7 @@ class MainActivity : FlutterActivity() {
                 }
 
                 "showNutrientAlert" -> {
-                    val title = call.argument<String>("title") ?: "Nutrient threshold alert"
+                    val title = call.argument<String>("title") ?: "Peringatan Nutrisi Tanaman"
                     val message = call.argument<String>("message") ?: "A sensor reading is out of range."
 
                     showThresholdAlert(title, message)
@@ -111,7 +111,7 @@ class MainActivity : FlutterActivity() {
 
         val channel = NotificationChannel(
             notificationChannelId,
-            "Nutrient Threshold Alerts",
+            "Peringatan Nutrisi Tanaman",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Alerts when plant nutrition readings leave the configured thresholds."
