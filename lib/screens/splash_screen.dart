@@ -59,7 +59,7 @@ class _SplashScreenState extends State<SplashScreen>
             child: Padding(
               padding: EdgeInsets.fromLTRB(24, 0, 24, 30),
               child: Text(
-                "Integrated Plant Nutrition Monitoring and Controlling Application",
+                "Aplikasi Pemantauan dan Pengendalian Nutrisi Tanaman Terpadu",
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12,

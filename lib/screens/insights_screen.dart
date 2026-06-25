@@ -642,7 +642,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       ),
                                       _buildStatPill(
                                         Icons.check_circle_outline_rounded,
-                                        '$_goodCount Optimal',
+                                        '$_goodCount Baik',
                                         const Color(0xFF69F0AE),
                                       ),
                                     ],

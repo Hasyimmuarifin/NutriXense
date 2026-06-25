@@ -86,7 +86,7 @@ class GeminiRecommendationService {
           'Do not directly activate pumps. Return decision support only; the user must confirm and may adjust pump duration.',
       'pump_mapping': {
         'activate_nitrogen_pump': 'Pompa A - Nitrogen (N)',
-        'activate_phosphorus_pump': 'Pompa B - Phosphorus (P)',
+        'activate_phosphorus_pump': 'Pompa B - Fosfor (P)',
         'activate_potassium_pump': 'Pompa C - Kalium (K)',
         'activate_water_pump': 'Pompa D - Water (H2O)',
       },
@@ -473,12 +473,12 @@ class GeminiRecommendationService {
     );
     evaluateRange(
       key: 'P',
-      label: 'Phosphorus',
+      label: 'Fosfor',
       unit: 'mg/kg',
       min: thresholds['phosphorus_min']!,
       max: thresholds['phosphorus_max']!,
-      lowTitle: 'Phosphorus Rendah',
-      highTitle: 'Phosphorus Berlebih',
+      lowTitle: 'Fosfor Rendah',
+      highTitle: 'Fosfor Berlebih',
       lowAction:
           'Aktifkan Pump B secara bertahap dan pastikan larutan tercampur sebelum evaluasi ulang. Jaga pH media teh tetap asam karena pH yang tidak sesuai dapat menghambat ketersediaan fosfor.',
       highAction:
@@ -663,7 +663,7 @@ class GeminiRecommendationService {
       relay: 2,
       pumpIndex: 1,
       pumpName: 'Pompa B',
-      nutrient: 'Phosphorus',
+      nutrient: 'Fosfor',
       unit: 'mg/kg',
       minimum: thresholds['phosphorus_min']!.toDouble(),
       maxSeconds: 180,

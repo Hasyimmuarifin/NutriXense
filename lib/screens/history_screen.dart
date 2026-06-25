@@ -21,7 +21,7 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   int _selectedFilter = 0; // 0=Hari ini, 1=7 Hari, 2=30 Hari
-  int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp
+  int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp, 4=EC
   List<SensorDataPoint> _data = [];
   int _pageIndex = 0;
   int _totalRows = 0;
@@ -57,6 +57,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return 100; // Moisture
       case 3:
         return 50; // Temperature
+      case 4:
+        return _ecChartMaxY;
       default:
         return 100;
     }
@@ -72,6 +74,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return 20;
       case 3:
         return 10;
+      case 4:
+        return _ecChartMaxY / 5;
       default:
         return 20;
     }
@@ -93,6 +97,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _gaugeMaxValue('max_potassium', 650, 800),
     ].reduce((a, b) => a > b ? a : b);
   }
+
+  double get _ecChartMaxY => _gaugeMaxValue('max_ec', 2.5, 4);
 
   double _gaugeMaxValue(
     String maxNormalKey,
@@ -339,6 +345,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     {'label': 'pH', 'icon': Icons.science_rounded},
     {'label': 'Moisture', 'icon': Icons.water_drop_rounded},
     {'label': 'Temp', 'icon': Icons.thermostat_rounded},
+    {'label': 'EC', 'icon': Icons.bolt_rounded},
   ];
 
   // Build chart lines based on selected sensor
@@ -402,6 +409,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   _data.map((d) => d.time).toList()),
               AppTheme.statusLow,
               'Temp'),
+        ];
+      case 4: // EC
+        return [
+          _bar(
+              toSpots(_data.map((d) => d.ec).toList(),
+                  _data.map((d) => d.time).toList()),
+              AppTheme.statusNormal,
+              'EC'),
         ];
       default:
         return [];
@@ -496,9 +511,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
         vals = _data.map((d) => d.moisture).toList();
         unit = '%';
         break;
-      default:
+      case 3:
         vals = _data.map((d) => d.temperature).toList();
         unit = '°C';
+        break;
+      default:
+        vals = _data.map((d) => d.ec).toList();
+        unit = 'mS/cm';
     }
 
     final avg = vals.reduce((a, b) => a + b) / vals.length;
@@ -772,7 +791,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                                 showTitles: true,
                                                 reservedSize: 36,
                                                 getTitlesWidget: (v, _) => Text(
-                                                  v.toInt().toString(),
+                                                  _formatYAxisLabel(v),
                                                   style: const TextStyle(
                                                     fontSize: 9,
                                                     color: AppTheme.textLight,
@@ -854,8 +873,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                           _legend('Nitrogen',
                                               AppTheme.primaryGreen),
                                           const SizedBox(width: 16),
-                                          _legend('Phosphorus',
-                                              AppTheme.primaryBlue),
+                                          _legend(
+                                              'Fosfor', AppTheme.primaryBlue),
                                           const SizedBox(width: 16),
                                           _legend(
                                               'Kalium', AppTheme.statusHigh),
@@ -875,6 +894,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ],
       ),
     );
+  }
+
+  String _formatYAxisLabel(double value) {
+    if (_selectedSensor == 4) return value.toStringAsFixed(1);
+    return value.toInt().toString();
   }
 
   Widget _legend(String label, Color color) {

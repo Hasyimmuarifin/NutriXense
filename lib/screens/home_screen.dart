@@ -192,7 +192,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "phosphorus"),
-        label: "Phosphorus",
+        label: "Fosfor",
         unit: "mg/kg",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_phosphorus', 300, 400),
@@ -295,7 +295,7 @@ class _HomeScreenState extends State<HomeScreen>
     switch (reading.label) {
       case 'Nitrogen':
         return 'nitrogen';
-      case 'Phosphorus':
+      case 'Fosfor':
         return 'phosphorus';
       case 'Kalium':
         return 'potassium';
@@ -562,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen>
                           suffix: 'mg/kg',
                         ),
                         _thresholdRangeField(
-                          'Phosphorus',
+                          'Fosfor',
                           minKey: 'min_phosphorus',
                           maxKey: 'max_phosphorus',
                           suffix: 'mg/kg',
@@ -771,7 +771,9 @@ class _HomeScreenState extends State<HomeScreen>
         if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Invalid value for ${entry.key}.'),
+            content: Text(
+              'Nilai ${_thresholdDisplayLabel(entry.key)} tidak valid.',
+            ),
             backgroundColor: AppTheme.statusLow,
             behavior: SnackBarBehavior.floating,
           ),
@@ -783,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     final thresholdPairs = {
       'Nitrogen': ('min_nitrogen', 'max_nitrogen'),
-      'Phosphorus': ('min_phosphorus', 'max_phosphorus'),
+      'Fosfor': ('min_phosphorus', 'max_phosphorus'),
       'Kalium': ('min_potassium', 'max_potassium'),
       'pH': ('min_ph', 'max_ph'),
       'Moisture': ('min_moisture', 'max_moisture'),
@@ -800,7 +802,7 @@ class _HomeScreenState extends State<HomeScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content:
-                Text('${entry.key} min must be less than or equal to max.'),
+                Text('nilai minimal ${entry.key} harus kurang dari atau sama dengan nilai maksimal.'),
             backgroundColor: AppTheme.statusLow,
             behavior: SnackBarBehavior.floating,
           ),
@@ -856,6 +858,27 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
     return true;
+  }
+
+  String _thresholdDisplayLabel(String key) {
+    const labels = {
+      'min_nitrogen': 'minimal Nitrogen',
+      'max_nitrogen': 'maksimal Nitrogen',
+      'min_phosphorus': 'minimal Fosfor',
+      'max_phosphorus': 'maksimal Fosfor',
+      'min_potassium': 'minimal Kalium',
+      'max_potassium': 'maksimal Kalium',
+      'min_ph': 'minimal pH',
+      'max_ph': 'maksimal pH',
+      'min_moisture': 'minimal Moisture',
+      'max_moisture': 'maksimal Moisture',
+      'min_temperature': 'minimal Temperature',
+      'max_temperature': 'maksimal Temperature',
+      'min_ec': 'minimal EC',
+      'max_ec': 'maksimal EC',
+    };
+
+    return labels[key] ?? key;
   }
 
   @override
@@ -1450,7 +1473,7 @@ class _HomeScreenState extends State<HomeScreen>
               runSpacing: 8,
               children: [
                 _legend('Nitrogen', AppTheme.primaryGreen),
-                _legend('Phosphorus', AppTheme.primaryBlue),
+                _legend('Fosfor', AppTheme.primaryBlue),
                 _legend('Kalium', AppTheme.statusHigh),
               ],
             ),

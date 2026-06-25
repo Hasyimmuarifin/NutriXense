@@ -127,7 +127,7 @@ class NutrientAlertService {
     switch (reading.label) {
       case 'Nitrogen':
         return 'nitrogen';
-      case 'Phosphorus':
+      case 'Fosfor':
         return 'phosphorus';
       case 'Kalium':
         return 'potassium';

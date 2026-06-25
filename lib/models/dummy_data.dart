@@ -18,7 +18,7 @@ class DummyData {
           colorHex: 0xFF2E7D52,
         ),
         const SensorReading(
-          label: 'Phosphorus',
+          label: 'Fosfor',
           unit: 'mg/kg',
           value: 55.2,
           minValue: 0,
@@ -93,6 +93,7 @@ class DummyData {
         ph: 5.8 + 0.8 * _wave(t, 0.8),
         moisture: 64.0 + 12 * _wave(t, 1.6),
         temperature: 28.4 + 3.0 * _wave(t, 3.0),
+        ec: 1.8 + 0.4 * _wave(t, 2.0),
       ));
     }
     return data;
@@ -132,9 +133,9 @@ class DummyData {
               'Pause Pump C until K levels normalize. Flush soil with clean water.',
         ),
         const InsightCard(
-          title: 'Phosphorus is Optimal',
+          title: 'Fosfor Optimal',
           description:
-              'Phosphorus at 55.2 mg/kg is within the ideal range. Root development and flowering should be healthy.',
+              'Fosfor 55.2 mg/kg berada dalam rentang ideal. Perkembangan akar dan pembungaan tanaman seharusnya sehat.',
           icon: '✅',
           severity: InsightSeverity.baik,
           action: 'Maintain current Pump B schedule.',
@@ -169,7 +170,7 @@ class DummyData {
         PumpController(
           id: 'pump_b',
           name: 'Pompa B',
-          nutrient: 'Phosphorus (P)',
+          nutrient: 'Fosfor (P)',
           iconPath: 'assets/icons/root.png',
           isOn: false,
         ),
@@ -193,7 +194,7 @@ class DummyData {
   static List<double> getMiniChartData(String sensor) {
     final Map<String, List<double>> charts = {
       'Nitrogen': [42, 40, 37, 35, 38, 36, 38.5],
-      'Phosphorus': [50, 53, 56, 54, 58, 55, 55.2],
+      'Fosfor': [50, 53, 56, 54, 58, 55, 55.2],
       'Kalium': [85, 88, 90, 93, 91, 95, 92.8],
       'pH Level': [6.2, 6.0, 5.9, 5.8, 6.0, 5.7, 5.8],
       'Soil Moisture': [60, 65, 68, 62, 64, 66, 64.0],

@@ -48,6 +48,7 @@ class SensorDataPoint {
   final double ph;
   final double moisture;
   final double temperature;
+  final double ec;
   final DateTime time;
 
   const SensorDataPoint({
@@ -57,6 +58,7 @@ class SensorDataPoint {
     required this.ph,
     required this.moisture,
     required this.temperature,
+    required this.ec,
     required this.time,
   });
 
@@ -70,6 +72,7 @@ class SensorDataPoint {
       ph: _readDouble(data, ['ph', 'pH', 'PH']),
       moisture: _readDouble(data, ['moisture', 'Moisture']),
       temperature: _readDouble(data, ['temperature', 'Temp', 'temp']),
+      ec: _readDouble(data, ['ec', 'EC', 'electrical_conductivity']),
       time: (data['timestamp'] as Timestamp).toDate(),
     );
   }
