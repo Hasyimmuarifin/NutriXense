@@ -1026,7 +1026,7 @@ class _HomeScreenState extends State<HomeScreen>
                                         duration:
                                             const Duration(milliseconds: 300),
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
+                                          horizontal: 9,
                                           vertical: 4,
                                         ),
                                         decoration: BoxDecoration(
@@ -1048,12 +1048,14 @@ class _HomeScreenState extends State<HomeScreen>
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              isMqttConnected ? "LIVE" : "WAIT",
+                                              isMqttConnected
+                                                  ? 'Terhubung'
+                                                  : 'Menunggu',
                                               style: const TextStyle(
                                                 color: Colors.white,
-                                                fontSize: 9,
+                                                fontSize: 8.5,
                                                 fontWeight: FontWeight.w700,
-                                                letterSpacing: 0.3,
+                                                letterSpacing: 0.1,
                                               ),
                                             ),
                                           ],

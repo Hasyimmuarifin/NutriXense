@@ -343,8 +343,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final List<Map<String, dynamic>> _sensors = [
     {'label': 'NPK', 'icon': Icons.eco_rounded},
     {'label': 'pH', 'icon': Icons.science_rounded},
-    {'label': 'Moisture', 'icon': Icons.water_drop_rounded},
-    {'label': 'Temp', 'icon': Icons.thermostat_rounded},
+    {'label': 'Kelembapan', 'icon': Icons.water_drop_rounded},
+    {'label': 'Suhu', 'icon': Icons.thermostat_rounded},
     {'label': 'EC', 'icon': Icons.bolt_rounded},
   ];
 
@@ -931,6 +931,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final recent = [..._pageData]..sort((a, b) => b.time.compareTo(a.time));
 
     final displayed = recent.take(_pageSize).toList();
+    const headers = ['Time', 'N', 'P', 'K', 'pH', 'Kelembapan', 'Suhu', 'EC'];
+    const columnWidths = [76.0, 44.0, 44.0, 44.0, 44.0, 70.0, 46.0, 44.0];
+    const tableHorizontalPadding = 12.0;
+    final tableWidth = columnWidths.fold<double>(
+      tableHorizontalPadding * 2,
+      (total, width) => total + width,
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -958,68 +965,111 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ),
           ),
-          // Header
-          Container(
-            color: AppTheme.bgPrimary,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: ['Time', 'N', 'P', 'K', 'pH']
-                  .map((h) => Expanded(
-                        child: Text(
-                          h,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textLight,
-                          ),
-                          textAlign:
-                              h == 'Time' ? TextAlign.left : TextAlign.center,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              Widget tableCell(
+                String text, {
+                required double width,
+                required TextStyle style,
+                TextAlign textAlign = TextAlign.center,
+              }) {
+                return SizedBox(
+                  width: width,
+                  child: Text(
+                    text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: textAlign,
+                    style: style,
+                  ),
+                );
+              }
+
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: SizedBox(
+                  width: tableWidth,
+                  child: Column(
+                    children: [
+                      Container(
+                        color: AppTheme.bgPrimary,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: tableHorizontalPadding,
+                          vertical: 8,
                         ),
-                      ))
-                  .toList(),
-            ),
-          ),
-          // Rows
-          ...displayed.asMap().entries.map((entry) {
-            final d = entry.value;
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: Colors.grey.withOpacity(0.08),
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      DateFormat('dd/MM HH:mm').format(d.time),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  ...[d.nitrogen, d.phosphorus, d.potassium, d.ph]
-                      .map((v) => Expanded(
-                            child: Text(
-                              v.toStringAsFixed(1),
+                        child: Row(
+                          children: List.generate(headers.length, (index) {
+                            return tableCell(
+                              headers[index],
+                              width: columnWidths[index],
                               textAlign: TextAlign.center,
                               style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textPrimary,
-                                fontWeight: FontWeight.w600,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textLight,
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      ...displayed.map((d) {
+                        final values = [
+                          d.nitrogen,
+                          d.phosphorus,
+                          d.potassium,
+                          d.ph,
+                          d.moisture,
+                          d.temperature,
+                          d.ec,
+                        ];
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: tableHorizontalPadding,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Colors.grey.withOpacity(0.08),
+                                width: 1,
                               ),
                             ),
-                          )),
-                ],
-              ),
-            );
-          }),
+                          ),
+                          child: Row(
+                            children: List.generate(headers.length, (index) {
+                              final texts = [
+                                DateFormat('dd/MM HH:mm').format(d.time),
+                                ...values
+                                    .map((value) => value.toStringAsFixed(1)),
+                              ];
+                              final isTime = index == 0;
+
+                              return tableCell(
+                                texts[index],
+                                width: columnWidths[index],
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isTime
+                                      ? AppTheme.textSecondary
+                                      : AppTheme.textPrimary,
+                                  fontWeight: isTime
+                                      ? FontWeight.w500
+                                      : FontWeight.w600,
+                                ),
+                              );
+                            }),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
