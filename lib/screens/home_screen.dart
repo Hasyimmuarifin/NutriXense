@@ -225,7 +225,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "moisture"),
-        label: "Moisture",
+        label: "Kelembapan",
         unit: "%",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_moisture', 70, 100),
@@ -236,7 +236,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "temperature"),
-        label: "Temp",
+        label: "Suhu",
         unit: "°C",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_temperature', 25, 40),
@@ -301,9 +301,9 @@ class _HomeScreenState extends State<HomeScreen>
         return 'potassium';
       case 'pH Level':
         return 'ph';
-      case 'Moisture':
+      case 'Kelembapan':
         return 'moisture';
-      case 'Temp':
+      case 'Suhu':
         return 'temperature';
       case 'Electrical Conductivity':
         return 'ec';
