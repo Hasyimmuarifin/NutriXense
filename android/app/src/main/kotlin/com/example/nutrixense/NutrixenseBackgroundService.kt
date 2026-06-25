@@ -320,11 +320,11 @@ class NutrixenseBackgroundService : Service() {
         val alertLines = mutableListOf<String>()
 
         addAlertLine(alertLines, "nitrogen", "Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
-        addAlertLine(alertLines, "phosphorus", "Phosphorus", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
+        addAlertLine(alertLines, "phosphorus", "Fosfor", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
         addAlertLine(alertLines, "potassium", "Kalium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
         addAlertLine(alertLines, "ph", "pH", reading.ph, "pH", "min_ph", "max_ph")
-        addAlertLine(alertLines, "moisture", "Moisture", reading.moisture, "%", "min_moisture", "max_moisture")
-        addAlertLine(alertLines, "temperature", "Temperature", reading.temperature, "°C", "min_temperature", "max_temperature")
+        addAlertLine(alertLines, "moisture", "Kelembapan", reading.moisture, "%", "min_moisture", "max_moisture")
+        addAlertLine(alertLines, "temperature", "Suhu", reading.temperature, "°C", "min_temperature", "max_temperature")
         addAlertLine(alertLines, "ec", "EC", reading.ec, "mS/cm", "min_ec", "max_ec")
 
         if (alertLines.isEmpty()) return
@@ -355,8 +355,8 @@ class NutrixenseBackgroundService : Service() {
         val min = thresholds[minKey] ?: return
         val max = thresholds[maxKey] ?: return
         val status = when {
-            value < min -> "below ${formatNumber(min)}"
-            value > max -> "above ${formatNumber(max)}"
+            value < min -> "di bawah batas minimal ${formatNumber(min)} $unit"
+            value > max -> "di atas batas maksimal ${formatNumber(max)} $unit"
             else -> return
         }
 
@@ -366,7 +366,7 @@ class NutrixenseBackgroundService : Service() {
         if (lastAlert != null && now - lastAlert < repeatAlertMillis) return
 
         lastAlertTimes[alertKey] = now
-        lines.add("$label: ${formatNumber(value)} $unit is $status $unit")
+        lines.add("$label: ${formatNumber(value)} $unit $status")
     }
 
     private fun runRuleBasedDecisionSupport() {
@@ -555,10 +555,10 @@ class NutrixenseBackgroundService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 MONITOR_CHANNEL_ID,
-                "NutriXense Background Monitor",
+                "Monitor Latar Belakang NutriXense",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps MQTT monitoring and decision support active."
+                description = "Menjaga pemantauan MQTT dan DSS tetap aktif."
             }
         )
 
@@ -568,7 +568,7 @@ class NutrixenseBackgroundService : Service() {
                 "Peringatan Nutrisi Tanaman",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Alerts when plant nutrition readings leave the configured thresholds."
+                description = "Memberi peringatan saat pembacaan nutrisi tanaman keluar dari ambang yang dikonfigurasi."
                 enableVibration(true)
                 setSound(soundUri, audioAttributes)
             }

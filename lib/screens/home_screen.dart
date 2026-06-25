@@ -396,9 +396,9 @@ class _HomeScreenState extends State<HomeScreen>
         content: Text(
           backendSynced
               ? nextMuted
-                  ? 'Alert ${_sensorLabel(sensorKey)} dinonaktifkan'
-                  : 'Alert ${_sensorLabel(sensorKey)} diaktifkan'
-              : 'Status alert berubah di aplikasi, tetapi gagal sync ke backend.',
+                  ? 'Peringatan ${_sensorLabel(sensorKey)} dinonaktifkan'
+                  : 'Peringatan ${_sensorLabel(sensorKey)} diaktifkan'
+              : 'Status peringatan berubah di aplikasi, tetapi gagal disinkronkan ke backend.',
         ),
         backgroundColor: backendSynced
             ? nextMuted
@@ -418,8 +418,16 @@ class _HomeScreenState extends State<HomeScreen>
         return 'pH';
       case 'ec':
         return 'EC';
+      case 'nitrogen':
+        return 'Nitrogen';
+      case 'phosphorus':
+        return 'Fosfor';
+      case 'potassium':
+        return 'Kalium';
+      case 'moisture':
+        return 'Kelembapan';
       case 'temperature':
-        return 'Temperature';
+        return 'Suhu';
       default:
         return sensorKey[0].toUpperCase() + sensorKey.substring(1);
     }
@@ -507,7 +515,7 @@ class _HomeScreenState extends State<HomeScreen>
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          'Threshold Config',
+                          'Konfigurasi Ambang Batas Normal',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -580,13 +588,13 @@ class _HomeScreenState extends State<HomeScreen>
                           suffix: 'pH',
                         ),
                         _thresholdRangeField(
-                          'Moisture',
+                          'Kelembapan',
                           minKey: 'min_moisture',
                           maxKey: 'max_moisture',
                           suffix: '%',
                         ),
                         _thresholdRangeField(
-                          'Temperature',
+                          'Suhu',
                           minKey: 'min_temperature',
                           maxKey: 'max_temperature',
                           suffix: '°C',
@@ -788,8 +796,8 @@ class _HomeScreenState extends State<HomeScreen>
       'Fosfor': ('min_phosphorus', 'max_phosphorus'),
       'Kalium': ('min_potassium', 'max_potassium'),
       'pH': ('min_ph', 'max_ph'),
-      'Moisture': ('min_moisture', 'max_moisture'),
-      'Temperature': ('min_temperature', 'max_temperature'),
+      'Kelembapan': ('min_moisture', 'max_moisture'),
+      'Suhu': ('min_temperature', 'max_temperature'),
       'EC': ('min_ec', 'max_ec'),
     };
 
@@ -801,8 +809,8 @@ class _HomeScreenState extends State<HomeScreen>
         if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text('nilai minimal ${entry.key} harus kurang dari atau sama dengan nilai maksimal.'),
+            content: Text(
+                'nilai minimal ${entry.key} harus kurang dari atau sama dengan nilai maksimal.'),
             backgroundColor: AppTheme.statusLow,
             behavior: SnackBarBehavior.floating,
           ),
@@ -820,7 +828,7 @@ class _HomeScreenState extends State<HomeScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
-            'Threshold saved locally. MQTT is not connected, so config was not sent.',
+            'Ambang disimpan secara lokal. MQTT belum terhubung, jadi konfigurasi belum dikirim.',
           ),
           backgroundColor: AppTheme.statusLow,
           behavior: SnackBarBehavior.floating,
@@ -851,7 +859,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Threshold successfully updated'),
+        content: const Text('Ambang berhasil diperbarui'),
         backgroundColor: AppTheme.primaryGreen,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -870,10 +878,10 @@ class _HomeScreenState extends State<HomeScreen>
       'max_potassium': 'maksimal Kalium',
       'min_ph': 'minimal pH',
       'max_ph': 'maksimal pH',
-      'min_moisture': 'minimal Moisture',
-      'max_moisture': 'maksimal Moisture',
-      'min_temperature': 'minimal Temperature',
-      'max_temperature': 'maksimal Temperature',
+      'min_moisture': 'minimal Kelembapan',
+      'max_moisture': 'maksimal Kelembapan',
+      'min_temperature': 'minimal Suhu',
+      'max_temperature': 'maksimal Suhu',
       'min_ec': 'minimal EC',
       'max_ec': 'maksimal EC',
     };
@@ -1099,7 +1107,7 @@ class _HomeScreenState extends State<HomeScreen>
                                   ),
                                   const SizedBox(width: 12),
                                   Tooltip(
-                                    message: 'Threshold config',
+                                    message: 'Konfigurasi ambang',
                                     child: InkWell(
                                       onTap: _openThresholdConfigDialog,
                                       borderRadius: BorderRadius.circular(18),
@@ -1143,11 +1151,11 @@ class _HomeScreenState extends State<HomeScreen>
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceEvenly,
                                   children: [
-                                    _statItem('7', 'Sensors'),
+                                    _statItem('7', 'Sensor'),
                                     _divider(),
-                                    _statItem('$totalAlerts', 'Alerts'),
+                                    _statItem('$totalAlerts', 'Peringatan'),
                                     _divider(),
-                                    _statItem('4', 'Pumps'),
+                                    _statItem('4', 'Pompa'),
                                   ],
                                 ),
                               ),

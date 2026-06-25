@@ -41,7 +41,7 @@ class MainActivity : FlutterActivity() {
 
                 "showNutrientAlert" -> {
                     val title = call.argument<String>("title") ?: "Peringatan Nutrisi Tanaman"
-                    val message = call.argument<String>("message") ?: "A sensor reading is out of range."
+                    val message = call.argument<String>("message") ?: "Pembacaan sensor berada di luar ambang batas normal."
 
                     showThresholdAlert(title, message)
                     result.success(null)
@@ -114,7 +114,7 @@ class MainActivity : FlutterActivity() {
             "Peringatan Nutrisi Tanaman",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Alerts when plant nutrition readings leave the configured thresholds."
+            description = "Memberi peringatan saat pembacaan nutrisi tanaman keluar dari ambang batas normal yang dikonfigurasi."
             enableVibration(true)
             setSound(soundUri, audioAttributes)
         }
@@ -134,10 +134,10 @@ class MainActivity : FlutterActivity() {
 
         val channel = NotificationChannel(
             fcmNotificationChannelId,
-            "NutriXense Push Notifications",
+            "Notifikasi Push NutriXense",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Push notifications sent through Firebase Cloud Messaging."
+            description = "Notifikasi push yang dikirim melalui Firebase Cloud Messaging."
             enableVibration(true)
             setSound(soundUri, audioAttributes)
         }

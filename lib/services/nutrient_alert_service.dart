@@ -98,12 +98,32 @@ class NutrientAlertService {
   }
 
   String _formatAlertLine(SensorReading reading) {
-    final direction = reading.status == 'Low' ? 'below' : 'above';
+    final sensorLabel = _alertSensorLabel(reading.label);
+    final direction = reading.status == 'Low'
+        ? 'di bawah batas minimal'
+        : 'di atas batas maksimal';
     final threshold =
         reading.status == 'Low' ? reading.minNormal : reading.maxNormal;
 
-    return '${reading.label}: ${reading.value.toStringAsFixed(1)} ${reading.unit} '
-        'is $direction ${threshold.toStringAsFixed(1)} ${reading.unit}';
+    return '$sensorLabel: ${reading.value.toStringAsFixed(1)} ${reading.unit} '
+        '$direction ${threshold.toStringAsFixed(1)} ${reading.unit}';
+  }
+
+  String _alertSensorLabel(String label) {
+    switch (label) {
+      case 'pH Level':
+        return 'pH';
+      case 'Moisture':
+      case 'Soil Moisture':
+        return 'Kelembapan';
+      case 'Temp':
+      case 'Temperature':
+        return 'Suhu';
+      case 'Electrical Conductivity':
+        return 'EC';
+      default:
+        return label;
+    }
   }
 
   Map<String, dynamic> _backgroundConfig({
