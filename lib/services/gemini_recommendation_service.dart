@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../models/ai_recommendation.dart';
+import '../models/pump_flow_rate.dart';
 
 class GeminiRecommendationService {
   GeminiRecommendationService({
@@ -26,7 +27,7 @@ class GeminiRecommendationService {
       'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
   static const _requestTimeout = Duration(minutes: 1);
 
-  // Threshold target for tea plants grown in pots.
+  // Threshold target for tea plants.
   static const thresholds = {
     'nitrogen_min': 80,
     'nitrogen_max': 180,
@@ -78,9 +79,9 @@ class GeminiRecommendationService {
 
     final payload = jsonEncode({
       'task':
-          'Analyze this condensed IoT sensor history for tea plants grown in pots and return JSON only.',
+          'Analyze this condensed IoT sensor history for tea plants and return JSON only.',
       'crop_context':
-          'Tanaman teh (Camellia sinensis) dalam pot, media tanam asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
+          'Tanaman teh (Camellia sinensis), media tanam asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
       'language': 'id',
       'control_policy':
           'Do not directly activate pumps. Return decision support only; the user must confirm and may adjust pump duration.',
@@ -88,8 +89,9 @@ class GeminiRecommendationService {
         'activate_nitrogen_pump': 'Pompa A - Nitrogen (N)',
         'activate_phosphorus_pump': 'Pompa B - Fosfor (P)',
         'activate_potassium_pump': 'Pompa C - Kalium (K)',
-        'activate_water_pump': 'Pompa D - Water (H2O)',
+        'activate_water_pump': 'Pompa D - Air (H2O)',
       },
+      'pump_flow_rates_ml_per_second': PumpFlowRates.toPromptJson(),
       'output_rules': [
         'Return one complete JSON object only.',
         'Do not use markdown.',
@@ -98,8 +100,10 @@ class GeminiRecommendationService {
         'Return maximum 7 recommendation items total.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
         'For each recommendation item, explanation must explain why the condition happened from the sensor data.',
-        'For each recommendation item, recommendation must explain specific follow-up actions for tea plants grown in pots.',
-        'Recommendations must be practical, safe, and measurable for potted tea plants, such as small-dose pump use, careful irrigation, acidic pH correction, fertilizer adjustment, retesting, drainage, shade, or monitoring frequency.',
+        'For each recommendation item, recommendation must explain specific follow-up actions for tea plants in general cultivation context.',
+        'Do not mention or assume any specific cultivation container unless the input data explicitly states it.',
+        'Recommendations must be practical, safe, and measurable for tea plants, such as small-dose pump use, careful irrigation, acidic pH correction, fertilizer adjustment, retesting, drainage, shade, or monitoring frequency.',
+        'When mentioning pump duration or dosage, consider pump_flow_rates_ml_per_second so slower pumps run longer for comparable target volume.',
         'Set an automation trigger to true only when its matching local_threshold_flag is true.',
         'Mention that pump activation requires user confirmation when nutrient or water correction is recommended.',
       ],
@@ -465,7 +469,7 @@ class GeminiRecommendationService {
       lowTitle: 'Nitrogen Rendah',
       highTitle: 'Nitrogen Berlebih',
       lowAction:
-          'Aktifkan Pompa A dalam dosis kecil sesuai DSS untuk teh pot, lalu pantau ulang NPK setelah larutan merata. Hindari penambahan besar sekaligus karena teh sensitif terhadap lonjakan EC.',
+          'Aktifkan Pompa A dalam dosis kecil sesuai DSS untuk tanaman teh, lalu pantau ulang NPK setelah larutan merata. Hindari penambahan besar sekaligus karena teh sensitif terhadap lonjakan EC.',
       highAction:
           'Tunda penambahan nitrogen dan lakukan pengenceran bertahap bila EC ikut tinggi. Pantau pucuk daun teh dan ulangi pembacaan N serta EC sebelum koreksi berikutnya.',
       normalAction:
@@ -482,7 +486,7 @@ class GeminiRecommendationService {
       lowAction:
           'Aktifkan Pump B secara bertahap dan pastikan larutan tercampur sebelum evaluasi ulang. Jaga pH media teh tetap asam karena pH yang tidak sesuai dapat menghambat ketersediaan fosfor.',
       highAction:
-          'Hentikan sementara suplai fosfor dan pantau EC serta pH media pot. Lakukan pengenceran ringan jika konsentrasi nutrisi keseluruhan meningkat.',
+          'Hentikan sementara suplai fosfor dan pantau EC serta pH media tanam. Lakukan pengenceran ringan jika konsentrasi nutrisi keseluruhan meningkat.',
       normalAction:
           'Pertahankan suplai fosfor dan pantau tren harian untuk mencegah penurunan.',
     );
@@ -499,7 +503,7 @@ class GeminiRecommendationService {
       highAction:
           'Tunda penambahan kalium dan pantau EC. Jika nilai tetap tinggi, kurangi konsentrasi larutan secara bertahap.',
       normalAction:
-          'Kadar kalium sudah memadai untuk teh pot, lanjutkan pemantauan bersama N dan P.',
+          'Kadar kalium sudah memadai untuk tanaman teh, lanjutkan pemantauan bersama N dan P.',
     );
     evaluateRange(
       key: 'pH',
@@ -512,35 +516,35 @@ class GeminiRecommendationService {
       lowAction:
           'Naikkan pH secara sangat bertahap menggunakan korektor pH up dosis kecil. Teh menyukai media asam, jadi hindari koreksi berlebihan melewati rentang 4.5-5.5.',
       highAction:
-          'Turunkan pH secara bertahap menggunakan korektor pH down agar media kembali asam. Hindari koreksi besar sekaligus karena akar teh dalam pot rentan stres.',
+          'Turunkan pH secara bertahap menggunakan korektor pH down agar media kembali asam. Hindari koreksi besar sekaligus karena akar teh rentan stres terhadap perubahan pH mendadak.',
       normalAction:
           'pH berada pada zona asam yang sesuai untuk serapan hara tanaman teh, pertahankan prosedur pemantauan.',
     );
     evaluateRange(
       key: 'Moisture',
-      label: 'Soil Moisture',
+      label: 'Kelembapan',
       unit: '%',
       min: thresholds['moisture_min']!,
       max: thresholds['moisture_max']!,
       lowTitle: 'Kelembapan Media Rendah',
       highTitle: 'Kelembapan Media Tinggi',
       lowAction:
-          'Aktifkan Pump D Water dengan durasi pendek atau gunakan jadwal penyiraman bertahap. Pastikan media teh dalam pot lembap merata tetapi tidak tergenang.',
+          'Aktifkan Pump D Water dengan durasi pendek atau gunakan jadwal penyiraman bertahap. Pastikan media tanam teh lembap merata tetapi tidak tergenang.',
       highAction:
-          'Tunda penyiraman dan periksa drainase pot. Jika kelembapan tetap tinggi, kurangi frekuensi irigasi untuk mencegah akar teh kekurangan oksigen.',
+          'Tunda penyiraman dan periksa drainase media tanam. Jika kelembapan tetap tinggi, kurangi frekuensi irigasi untuk mencegah akar teh kekurangan oksigen.',
       normalAction:
           'Kelembapan media cukup, pertahankan jadwal penyiraman saat ini.',
     );
     evaluateRange(
       key: 'Temp',
-      label: 'Temperature',
+      label: 'Suhu',
       unit: '°C',
       min: thresholds['temperature_min']!,
       max: thresholds['temperature_max']!,
       lowTitle: 'Suhu Terlalu Rendah',
       highTitle: 'Suhu Terlalu Tinggi',
       lowAction:
-          'Kurangi paparan dingin dan tempatkan pot teh pada lingkungan yang stabil. Pantau suhu bersama kelembapan karena perubahan suhu memengaruhi penguapan media.',
+          'Kurangi paparan dingin dan jaga lingkungan tumbuh teh tetap stabil. Pantau suhu bersama kelembapan karena perubahan suhu memengaruhi penguapan media.',
       highAction:
           'Berikan naungan dan tingkatkan ventilasi untuk menurunkan stres panas pada teh. Gunakan Pump D Water seperlunya dengan durasi pendek agar media tidak terlalu basah.',
       normalAction:
@@ -555,11 +559,11 @@ class GeminiRecommendationService {
       lowTitle: 'EC Rendah',
       highTitle: 'EC Tinggi',
       lowAction:
-          'Tambahkan nutrisi secara bertahap melalui pompa NPK yang sesuai dengan unsur rendah. Ukur ulang EC setelah pencampuran karena teh pot lebih aman dengan koreksi kecil dan stabil.',
+          'Tambahkan nutrisi secara bertahap melalui pompa NPK yang sesuai dengan unsur rendah. Ukur ulang EC setelah pencampuran karena tanaman teh lebih aman dengan koreksi kecil dan stabil.',
       highAction:
           'Encerkan larutan dengan air bersih secara bertahap dan tunda penambahan pupuk. Pantau ulang EC serta pH asam setelah larutan stabil.',
       normalAction:
-          'EC stabil untuk tanaman teh dalam pot, pertahankan konsentrasi larutan dan pantau perubahan setelah irigasi.',
+          'EC stabil untuk tanaman teh, pertahankan konsentrasi larutan dan pantau perubahan setelah irigasi.',
     );
 
     final kritis = items
@@ -574,7 +578,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh dalam pot.',
+          'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
@@ -620,15 +624,24 @@ class GeminiRecommendationService {
       required String nutrient,
       required String unit,
       required double minimum,
-      required int maxSeconds,
     }) {
       final current = summary.parameters[key]?.current;
       if (current == null || current >= minimum) return;
 
       final deficit = _roundDouble(minimum - current);
       final deficitPercent = _roundDouble((deficit / minimum) * 100);
-      final recommendedSeconds =
-          _secondsFromDeficit(deficitPercent, maxSeconds: maxSeconds);
+      final baseSeconds = _secondsFromDeficit(deficitPercent);
+      final targetVolumeMl =
+          PumpFlowRates.highestRate.averageMlPerSecond * baseSeconds;
+      final recommendedSeconds = PumpFlowRates.secondsForVolume(
+        pumpIndex: pumpIndex,
+        volumeMl: targetVolumeMl,
+      );
+      final flowRate = PumpFlowRates.byPumpIndex(pumpIndex).averageMlPerSecond;
+      final estimatedVolumeMl = PumpFlowRates.volumeForDuration(
+        pumpIndex: pumpIndex,
+        seconds: recommendedSeconds,
+      );
 
       recommendations.add(
         PumpFertilizationRecommendation(
@@ -643,7 +656,7 @@ class GeminiRecommendationService {
           deficitPercent: deficitPercent,
           recommendedSeconds: recommendedSeconds,
           reason:
-              '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit.',
+              '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Durasi dihitung dengan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -656,7 +669,6 @@ class GeminiRecommendationService {
       nutrient: 'Nitrogen',
       unit: 'mg/kg',
       minimum: thresholds['nitrogen_min']!.toDouble(),
-      maxSeconds: 180,
     );
     addIfLow(
       key: 'P',
@@ -666,7 +678,6 @@ class GeminiRecommendationService {
       nutrient: 'Fosfor',
       unit: 'mg/kg',
       minimum: thresholds['phosphorus_min']!.toDouble(),
-      maxSeconds: 180,
     );
     addIfLow(
       key: 'K',
@@ -676,27 +687,23 @@ class GeminiRecommendationService {
       nutrient: 'Kalium',
       unit: 'mg/kg',
       minimum: thresholds['potassium_min']!.toDouble(),
-      maxSeconds: 180,
     );
     addIfLow(
       key: 'Moisture',
       relay: 4,
       pumpIndex: 3,
       pumpName: 'Pompa D',
-      nutrient: 'Water',
+      nutrient: 'Air',
       unit: '%',
       minimum: thresholds['moisture_min']!.toDouble(),
-      maxSeconds: 120,
     );
 
     return recommendations;
   }
 
-  static int _secondsFromDeficit(
-    double deficitPercent, {
-    required int maxSeconds,
-  }) {
-    return (10 + (deficitPercent * 2.4)).round().clamp(5, maxSeconds).toInt();
+  static int _secondsFromDeficit(double deficitPercent) {
+    final seconds = (10 + (deficitPercent * 2.4)).round();
+    return seconds < 5 ? 5 : seconds;
   }
 
   static double _roundDouble(double value) {
@@ -743,7 +750,7 @@ class AiRecommendationException implements Exception {
 }
 
 const _systemPrompt =
-    'You are an expert AI Agronomist for tea plants (Camellia sinensis), Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC) using target ranges for tea plants. Tea prefers acidic media, stable moisture with good drainage, moderate temperature, and gradual nutrient correction to avoid root stress and EC shock. Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text must be in Indonesian. The explanation field must provide scientific reasons (XAI) for tea plant health status. The recommendation field must provide concrete follow-up actions that a farmer or user can apply safely and practically for tea plants.';
+    'You are an expert AI Agronomist for tea plants (Camellia sinensis), Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC) using target ranges for tea plants in general cultivation context. Tea prefers acidic media, stable moisture with good drainage, moderate temperature, and gradual nutrient correction to avoid root stress and EC shock. Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text must be in Indonesian. The explanation field must provide scientific reasons (XAI) for tea plant health status without assuming a specific cultivation container. The recommendation field must provide concrete follow-up actions that a farmer or user can apply safely and practically for tea plants.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {

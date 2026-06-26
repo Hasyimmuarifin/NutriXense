@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/dummy_data.dart';
+import '../models/pump_flow_rate.dart';
 import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pump_card.dart';
@@ -33,6 +34,7 @@ class _ControlScreenState extends State<ControlScreen> {
   final List<_WateringSchedule> _wateringSchedules = [];
   TimeOfDay _draftScheduleTime = TimeOfDay.now();
   final Set<int> _draftSchedulePumpIndexes = {3};
+  final Map<int, int> _draftScheduleDurationsByPump = {3: 5};
   int _draftScheduleDurationSeconds = 5;
   bool _draftScheduleRepeats = true;
   late bool _isRuleBasedAutomationEnabled;
@@ -146,7 +148,8 @@ class _ControlScreenState extends State<ControlScreen> {
     if (_draftSchedulePumpIndexes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Choose at least one pump for the schedule.'),
+          content:
+              const Text('Pilih setidaknya satu pompa untuk membuat jadwal.'),
           backgroundColor: AppTheme.statusLow,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
@@ -161,13 +164,45 @@ class _ControlScreenState extends State<ControlScreen> {
       id: DateTime.now().microsecondsSinceEpoch,
       time: _draftScheduleTime,
       pumpIndexes: Set<int>.from(_draftSchedulePumpIndexes),
-      durationSeconds: _draftScheduleDurationSeconds,
+      durationSecondsByPump: _draftDurationsForSelectedPumps(),
       repeatsDaily: _draftScheduleRepeats,
     );
 
     setState(() => _wateringSchedules.add(schedule));
     _saveSchedules();
     _scheduleNextRun(schedule, showSnackBar: true);
+  }
+
+  List<int> get _selectedDraftPumpIndexes {
+    return _draftSchedulePumpIndexes.toList()..sort();
+  }
+
+  Map<int, int> _draftDurationsForSelectedPumps() {
+    return {
+      for (final pumpIndex in _selectedDraftPumpIndexes)
+        pumpIndex: _draftDurationForPump(pumpIndex),
+    };
+  }
+
+  int _draftDurationForPump(int pumpIndex) {
+    return _draftScheduleDurationsByPump[pumpIndex] ??
+        _draftScheduleDurationSeconds;
+  }
+
+  void _setDraftPumpDuration(int pumpIndex, int seconds) {
+    setState(() {
+      _draftScheduleDurationsByPump[pumpIndex] = seconds;
+      _syncDraftScheduleDuration();
+    });
+  }
+
+  void _syncDraftScheduleDuration() {
+    final selectedDurations = _draftDurationsForSelectedPumps().values;
+    _draftScheduleDurationSeconds = selectedDurations.isEmpty
+        ? 5
+        : selectedDurations.reduce(
+            (current, next) => current > next ? current : next,
+          );
   }
 
   void _deleteSchedule(_WateringSchedule schedule) {
@@ -997,9 +1032,13 @@ class _ControlScreenState extends State<ControlScreen> {
                   setState(() {
                     if (value) {
                       _draftSchedulePumpIndexes.add(index);
+                      _draftScheduleDurationsByPump[index] =
+                          _draftScheduleDurationSeconds;
                     } else {
                       _draftSchedulePumpIndexes.remove(index);
+                      _draftScheduleDurationsByPump.remove(index);
                     }
+                    _syncDraftScheduleDuration();
                   });
                 },
                 selectedColor: AppTheme.primaryGreen.withOpacity(0.12),
@@ -1017,39 +1056,7 @@ class _ControlScreenState extends State<ControlScreen> {
             }).toList(),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Durasi penyiraman',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Text(
-                '$_draftScheduleDurationSeconds detik',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppTheme.textPrimary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-          Slider(
-            value: _draftScheduleDurationSeconds.toDouble(),
-            min: 5,
-            max: 300,
-            divisions: 59,
-            label: '$_draftScheduleDurationSeconds detik',
-            activeColor: AppTheme.primaryGreen,
-            onChanged: (value) {
-              setState(() => _draftScheduleDurationSeconds = value.round());
-            },
-          ),
+          _buildScheduleDurationControls(),
           const SizedBox(height: 4),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -1106,6 +1113,131 @@ class _ControlScreenState extends State<ControlScreen> {
     );
   }
 
+  Widget _buildScheduleDurationControls() {
+    final selectedPumpIndexes = _selectedDraftPumpIndexes;
+
+    if (selectedPumpIndexes.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Durasi penyiraman',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              selectedPumpIndexes.length > 1
+                  ? '${selectedPumpIndexes.length} pompa'
+                  : '${_draftDurationForPump(selectedPumpIndexes.first)} detik',
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ...selectedPumpIndexes.map(_buildPumpDurationSlider),
+      ],
+    );
+  }
+
+  Widget _buildPumpDurationSlider(int pumpIndex) {
+    final pump = _pumps[pumpIndex];
+    final flowRate = PumpFlowRates.byPumpIndex(pumpIndex);
+    final seconds = _draftDurationForPump(pumpIndex);
+    final estimatedVolume =
+        PumpFlowRates.volumeForDuration(pumpIndex: pumpIndex, seconds: seconds);
+    final sliderMax = _durationSliderMax(seconds);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryGreen.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.14)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${pump.name} • ${PumpFlowRates.formatRate(flowRate.averageMlPerSecond)} ml/detik',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '$seconds detik',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: seconds.toDouble(),
+            min: 5,
+            max: sliderMax.toDouble(),
+            divisions: ((sliderMax - 5) / 5).round(),
+            label:
+                '$seconds detik • ${PumpFlowRates.formatMl(estimatedVolume)} ml',
+            activeColor: AppTheme.primaryGreen,
+            onChanged: (value) {
+              _setDraftPumpDuration(pumpIndex, value.round());
+            },
+          ),
+          Row(
+            children: [
+              const Icon(
+                Icons.water_drop_rounded,
+                size: 14,
+                color: AppTheme.primaryGreen,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Estimasi volume ${PumpFlowRates.formatMl(estimatedVolume)} ml berdasarkan debit ${pump.name}.',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.textSecondary,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _durationSliderMax(int seconds) {
+    if (seconds <= 300) return 300;
+    return (((seconds + 60) / 5).ceil() * 5).toInt();
+  }
+
   Widget _buildScheduleListTile(_WateringSchedule schedule) {
     final nextRunText = schedule.nextRun == null
         ? 'Paused'
@@ -1141,7 +1273,7 @@ class _ControlScreenState extends State<ControlScreen> {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '${_pumpNames(schedule.pumpIndexes)} • ${schedule.durationSeconds}s • ${schedule.repeatsDaily ? 'Daily' : 'Once'}',
+                      '${_pumpNames(schedule.pumpIndexes)} • ${schedule.durationSummary} • ${schedule.repeatsDaily ? 'Daily' : 'Once'}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -1267,7 +1399,7 @@ class _WateringSchedule {
   final int id;
   final TimeOfDay time;
   final Set<int> pumpIndexes;
-  final int durationSeconds;
+  final Map<int, int> durationSecondsByPump;
   final bool repeatsDaily;
   bool enabled = true;
   bool isRunning = false;
@@ -1278,10 +1410,27 @@ class _WateringSchedule {
     required this.id,
     required this.time,
     required this.pumpIndexes,
-    required this.durationSeconds,
+    required this.durationSecondsByPump,
     required this.repeatsDaily,
     this.enabled = true,
   });
+
+  int get durationSeconds {
+    if (durationSecondsByPump.isEmpty) return 5;
+    return durationSecondsByPump.values.reduce(
+      (current, next) => current > next ? current : next,
+    );
+  }
+
+  String get durationSummary {
+    if (durationSecondsByPump.length <= 1) return '${durationSeconds}s';
+    final parts = durationSecondsByPump.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return parts
+        .map(
+            (entry) => '${String.fromCharCode(65 + entry.key)} ${entry.value}s')
+        .join(', ');
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -1290,6 +1439,10 @@ class _WateringSchedule {
       'minute': time.minute,
       'pumpIndexes': pumpIndexes.toList()..sort(),
       'durationSeconds': durationSeconds,
+      'durationSecondsByPump': {
+        for (final entry in durationSecondsByPump.entries)
+          '${entry.key}': entry.value,
+      },
       'repeatsDaily': repeatsDaily,
       'enabled': enabled,
     };
@@ -1300,6 +1453,7 @@ class _WateringSchedule {
     final hour = json['hour'];
     final minute = json['minute'];
     final durationSeconds = json['durationSeconds'];
+    final durationSecondsByPump = json['durationSecondsByPump'];
     final repeatsDaily = json['repeatsDaily'];
     final enabled = json['enabled'];
     final pumpIndexes = json['pumpIndexes'];
@@ -1320,12 +1474,36 @@ class _WateringSchedule {
 
     final parsedPumpIndexes = pumpIndexes.whereType<int>().toSet();
     if (parsedPumpIndexes.isEmpty) return null;
+    final parsedDurations = <int, int>{};
+
+    if (durationSecondsByPump is Map) {
+      for (final entry in durationSecondsByPump.entries) {
+        final pumpIndex = entry.key is int
+            ? entry.key as int
+            : int.tryParse(entry.key.toString());
+        final seconds = entry.value is int
+            ? entry.value as int
+            : int.tryParse(entry.value.toString());
+        if (pumpIndex != null &&
+            seconds != null &&
+            parsedPumpIndexes.contains(pumpIndex)) {
+          parsedDurations[pumpIndex] = seconds < 5 ? 5 : seconds;
+        }
+      }
+    }
+
+    for (final pumpIndex in parsedPumpIndexes) {
+      parsedDurations.putIfAbsent(
+        pumpIndex,
+        () => durationSeconds < 5 ? 5 : durationSeconds,
+      );
+    }
 
     return _WateringSchedule(
       id: id,
       time: TimeOfDay(hour: hour, minute: minute),
       pumpIndexes: parsedPumpIndexes,
-      durationSeconds: durationSeconds,
+      durationSecondsByPump: parsedDurations,
       repeatsDaily: repeatsDaily,
       enabled: enabled,
     );

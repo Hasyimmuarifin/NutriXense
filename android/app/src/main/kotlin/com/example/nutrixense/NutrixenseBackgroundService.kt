@@ -406,7 +406,7 @@ class NutrixenseBackgroundService : Service() {
             if (lastScheduleRunDates[schedule.id] == todayKey) continue
 
             lastScheduleRunDates[schedule.id] = todayKey
-            pulseRelays(schedule.relays, schedule.durationSeconds * 1000L)
+            pulseRelays(schedule.durationMillisByRelay)
 
             if (!schedule.repeatsDaily) {
                 schedule.enabled = false
@@ -449,6 +449,33 @@ class NutrixenseBackgroundService : Service() {
         relays.forEach { relay -> publishRelay(relay, true) }
         Thread.sleep(durationMillis.coerceAtLeast(1_000))
         relays.forEach { relay -> publishRelay(relay, false) }
+    }
+
+    private fun pulseRelays(durationMillisByRelay: Map<Int, Long>) {
+        if (durationMillisByRelay.isEmpty()) return
+
+        durationMillisByRelay.keys.forEach { relay -> publishRelay(relay, true) }
+
+        val startedAt = System.currentTimeMillis()
+        val remainingRelays = durationMillisByRelay.keys.toMutableSet()
+
+        while (remainingRelays.isNotEmpty()) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            val relaysToStop = remainingRelays
+                .filter { relay ->
+                    elapsed >= (durationMillisByRelay[relay] ?: 1_000L)
+                        .coerceAtLeast(1_000L)
+                }
+
+            relaysToStop.forEach { relay ->
+                publishRelay(relay, false)
+                remainingRelays.remove(relay)
+            }
+
+            if (remainingRelays.isNotEmpty()) {
+                Thread.sleep(250)
+            }
+        }
     }
 
     private fun publishRelay(relay: Int, turnOn: Boolean) {
@@ -721,9 +748,16 @@ class NutrixenseBackgroundService : Service() {
         val minute: Int,
         val relays: Set<Int>,
         val durationSeconds: Int,
+        val durationSecondsByRelay: Map<Int, Int>,
         val repeatsDaily: Boolean,
         var enabled: Boolean
     ) {
+        val durationMillisByRelay: Map<Int, Long>
+            get() = relays.associateWith { relay ->
+                ((durationSecondsByRelay[relay] ?: durationSeconds)
+                    .coerceAtLeast(5)) * 1000L
+            }
+
         fun toJson(): JSONObject {
             return JSONObject()
                 .put("id", id)
@@ -731,6 +765,11 @@ class NutrixenseBackgroundService : Service() {
                 .put("minute", minute)
                 .put("pumpIndexes", JSONArray(relays.map { relay -> relay - 1 }))
                 .put("durationSeconds", durationSeconds)
+                .put("durationSecondsByPump", JSONObject().apply {
+                    durationSecondsByRelay.forEach { (relay, seconds) ->
+                        put("${relay - 1}", seconds)
+                    }
+                })
                 .put("repeatsDaily", repeatsDaily)
                 .put("enabled", enabled)
         }
@@ -744,6 +783,7 @@ class NutrixenseBackgroundService : Service() {
                 val repeatsDaily = json.optBoolean("repeatsDaily", true)
                 val enabled = json.optBoolean("enabled", true)
                 val pumpIndexes = json.optJSONArray("pumpIndexes") ?: return null
+                val durationsByPump = json.optJSONObject("durationSecondsByPump")
 
                 if (id < 0 || hour !in 0..23 || minute !in 0..59) return null
 
@@ -754,6 +794,25 @@ class NutrixenseBackgroundService : Service() {
                 }
 
                 if (relays.isEmpty()) return null
+                val durationSecondsByRelay = mutableMapOf<Int, Int>()
+                if (durationsByPump != null) {
+                    durationsByPump.keys().forEach { key ->
+                        val pumpIndex = key.toIntOrNull() ?: return@forEach
+                        val relay = pumpIndex + 1
+                        if (relay in relays) {
+                            durationSecondsByRelay[relay] =
+                                durationsByPump.optInt(key, durationSeconds)
+                                    .coerceAtLeast(5)
+                        }
+                    }
+                }
+
+                relays.forEach { relay ->
+                    durationSecondsByRelay.putIfAbsent(
+                        relay,
+                        durationSeconds.coerceAtLeast(5)
+                    )
+                }
 
                 return WateringSchedule(
                     id = id,
@@ -761,6 +820,7 @@ class NutrixenseBackgroundService : Service() {
                     minute = minute,
                     relays = relays,
                     durationSeconds = durationSeconds,
+                    durationSecondsByRelay = durationSecondsByRelay,
                     repeatsDaily = repeatsDaily,
                     enabled = enabled
                 )

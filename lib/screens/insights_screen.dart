@@ -4,6 +4,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../models/ai_recommendation.dart';
+import '../models/pump_flow_rate.dart';
 import '../models/sensor_data.dart';
 import '../services/ai_pump_automation_service.dart';
 import '../services/alert_count_service.dart';
@@ -204,6 +205,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
         : recommendations
             .map((item) => item.recommendedSeconds)
             .reduce((a, b) => a > b ? a : b);
+    final durationSecondsByPump = {
+      for (final item in recommendations)
+        '${item.pumpIndex}': item.recommendedSeconds,
+    };
     final id = DateTime.now().microsecondsSinceEpoch;
 
     setState(() => _isAddingSchedule = true);
@@ -214,6 +219,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
         'minute': schedule.minute,
         'pumpIndexes': schedule.pumpIndexes.toList()..sort(),
         'durationSeconds': durationSeconds,
+        if (durationSecondsByPump.isNotEmpty)
+          'durationSecondsByPump': durationSecondsByPump,
         'repeatsDaily': true,
         'enabled': true,
         'source': 'gemini_ai_recommendation',
@@ -1027,6 +1034,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
       {VoidCallback? onDurationChanged}) {
     final seconds = _adjustedPumpSeconds[recommendation.relay] ??
         recommendation.recommendedSeconds;
+    final flowRate = recommendation.averageFlowRateMlPerSecond;
+    final estimatedVolumeMl = flowRate * seconds;
+    final sliderMax = _durationSliderMax(seconds);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1071,11 +1081,29 @@ class _InsightsScreenState extends State<InsightsScreen> {
               height: 1.35,
             ),
           ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildFlowInfoChip(
+                icon: Icons.speed_rounded,
+                label:
+                    'Debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik',
+              ),
+              _buildFlowInfoChip(
+                icon: Icons.water_drop_rounded,
+                label:
+                    'Estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml',
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           Slider(
             value: seconds.toDouble(),
             min: 5,
-            max: 300,
-            divisions: 59,
+            max: sliderMax.toDouble(),
+            divisions: ((sliderMax - 5) / 5).round(),
             label: '$seconds detik',
             activeColor: AppTheme.primaryGreen,
             onChanged: (value) {
@@ -1084,6 +1112,40 @@ class _InsightsScreenState extends State<InsightsScreen> {
               });
               onDurationChanged?.call();
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _durationSliderMax(int seconds) {
+    if (seconds <= 300) return 300;
+    return (((seconds + 60) / 5).ceil() * 5).toInt();
+  }
+
+  Widget _buildFlowInfoChip({
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: AppTheme.primaryGreen),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),

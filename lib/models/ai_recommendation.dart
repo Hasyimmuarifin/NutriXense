@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'pump_flow_rate.dart';
 import 'sensor_data.dart';
 
 class AiRecommendationResponse {
@@ -129,8 +130,7 @@ class PumpFertilizationRecommendation {
       targetMinimum: _readDouble(json['target_minimum']),
       deficit: _readDouble(json['deficit']),
       deficitPercent: _readDouble(json['deficit_percent']),
-      recommendedSeconds:
-          _readInt(json['recommended_seconds']).clamp(5, 300).toInt(),
+      recommendedSeconds: _atLeastFive(_readInt(json['recommended_seconds'])),
       reason: (json['reason'] ?? '').toString(),
     );
   }
@@ -155,6 +155,14 @@ class PumpFertilizationRecommendation {
 
   String get formattedDeficitPercent =>
       '${deficitPercent.toStringAsFixed(1).replaceFirst(RegExp(r'\.?0+$'), '')}%';
+
+  double get averageFlowRateMlPerSecond {
+    return PumpFlowRates.byPumpIndex(pumpIndex).averageMlPerSecond;
+  }
+
+  double get estimatedVolumeMl {
+    return averageFlowRateMlPerSecond * recommendedSeconds;
+  }
 }
 
 class DailyFertilizationScheduleRecommendation {
@@ -208,10 +216,8 @@ class DailyFertilizationScheduleRecommendation {
       hour: hour,
       minute: minute,
       pumpIndexes: parsedPumpIndexes,
-      durationSeconds:
-          _readInt(json['duration_seconds'] ?? json['durationSeconds'])
-              .clamp(5, 300)
-              .toInt(),
+      durationSeconds: _atLeastFive(
+          _readInt(json['duration_seconds'] ?? json['durationSeconds'])),
       reason: (json['reason'] ?? '').toString(),
     );
   }
@@ -239,11 +245,16 @@ class RecommendationGroups {
   });
 
   factory RecommendationGroups.fromJson(Map<String, dynamic> json) {
+    final kritis = _readItems(_readFirst(json, ['kritis', 'critical']));
+    final awas = _readItems(_readFirst(json, ['awas', 'warning']));
+    final baik = _readItems(_readFirst(json, ['baik', 'good', 'normal']));
+    final semua = _readItems(_readFirst(json, ['semua', 'all']));
+
     return RecommendationGroups(
-      semua: _readItems(json['semua']),
-      kritis: _readItems(json['kritis']),
-      awas: _readItems(json['awas']),
-      baik: _readItems(json['baik']),
+      semua: semua.isNotEmpty ? semua : [...kritis, ...awas, ...baik],
+      kritis: kritis,
+      awas: awas,
+      baik: baik,
     );
   }
 }
@@ -382,6 +393,13 @@ Map<String, dynamic> _readMap(Object? value) {
   return const {};
 }
 
+Object? _readFirst(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    if (json.containsKey(key)) return json[key];
+  }
+  return null;
+}
+
 List<AiRecommendationItem> _readItems(Object? value) {
   if (value is! List) return const [];
   return value
@@ -396,6 +414,10 @@ int _readInt(Object? value) {
   if (value is int) return value;
   if (value is num) return value.round();
   return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+int _atLeastFive(int value) {
+  return value < 5 ? 5 : value;
 }
 
 double _readDouble(Object? value) {
