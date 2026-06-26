@@ -434,7 +434,7 @@ class _ControlScreenState extends State<ControlScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Automatic watering scheduled at $timeText'),
+        content: Text('Penyiraman otomatis dijadwalkan pada $timeText'),
         backgroundColor: AppTheme.primaryGreen,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
@@ -499,8 +499,8 @@ class _ControlScreenState extends State<ControlScreen> {
           !backendSynced
               ? 'DSS switch saved locally, but backend sync failed. Check Firestore rules or internet connection.'
               : enabled
-                  ? 'Decision Support automation enabled.'
-                  : 'Decision Support automation disabled.',
+                  ? 'Penyiraman Otomatis Diaktifkan.'
+                  : 'Penyiraman Otomatis Dimatikan.',
         ),
         backgroundColor: !backendSynced
             ? AppTheme.statusLow
@@ -510,7 +510,7 @@ class _ControlScreenState extends State<ControlScreen> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 0, milliseconds: 500),
       ),
     );
   }
@@ -529,7 +529,7 @@ class _ControlScreenState extends State<ControlScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            Icons.rule_rounded,
+            Icons.auto_mode_rounded,
             color: _isRuleBasedAutomationEnabled
                 ? const Color(0xFF69F0AE)
                 : Colors.white70,
@@ -537,7 +537,7 @@ class _ControlScreenState extends State<ControlScreen> {
           ),
           const SizedBox(width: 4),
           Text(
-            _isRuleBasedAutomationEnabled ? 'DSS ON' : 'DSS OFF',
+            _isRuleBasedAutomationEnabled ? 'Auto' : 'Auto',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 10,
@@ -1318,7 +1318,7 @@ class _ControlScreenState extends State<ControlScreen> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  schedule.isRunning ? 'Running now' : 'Next run: $nextRunText',
+                  schedule.isRunning ? 'Sedang Berjalan' : 'Berikutnya: $nextRunText',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

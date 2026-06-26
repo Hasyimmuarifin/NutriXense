@@ -154,8 +154,8 @@ class PumpCard extends StatelessWidget {
                               },
                               child: Text(
                                 pump.isLoading
-                                    ? 'Switching...'
-                                    : (isOn ? 'Running' : 'Stopped'),
+                                    ? 'Memuat...'
+                                    : (isOn ? 'Berjalan' : 'Dimatikan'),
                                 key: ValueKey(pump.isLoading
                                     ? 'loading'
                                     : (isOn ? 'on' : 'off')),
