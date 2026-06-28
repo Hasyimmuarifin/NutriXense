@@ -37,6 +37,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   Object? _requestError;
   DateTime? _lastUpdated;
   AiPumpAutomationResult? _lastAutomationResult;
+  double? _lastLandAreaSquareMeters;
   final Map<int, int> _adjustedPumpSeconds = {};
 
   final List<String> _filters = ['All', 'Kritis', 'Awas', 'Baik'];
@@ -104,15 +105,25 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return raw.replaceFirst(RegExp(r'^Exception:\s*'), '');
   }
 
-  Future<void> _requestAiRecommendation() async {
+  Future<void> _promptAndRequestAiRecommendation() async {
+    final landAreaSquareMeters = await _showLandAreaInputDialog();
+    if (landAreaSquareMeters == null || !mounted) return;
+
+    await _requestAiRecommendation(landAreaSquareMeters);
+  }
+
+  Future<void> _requestAiRecommendation(double landAreaSquareMeters) async {
     setState(() {
       _isRequesting = true;
       _requestError = null;
       _expandedIndex = null;
+      _lastLandAreaSquareMeters = landAreaSquareMeters;
     });
 
     try {
-      final response = await _recommendationService.requestRecommendation();
+      final response = await _recommendationService.requestRecommendation(
+        landAreaSquareMeters: landAreaSquareMeters,
+      );
       if (!mounted) return;
       setState(() {
         _aiResponse = response;
@@ -146,6 +157,20 @@ class _InsightsScreenState extends State<InsightsScreen> {
     }
   }
 
+  Future<double?> _showLandAreaInputDialog() async {
+    return showDialog<double>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return _LandAreaInputDialog(
+          initialSquareMeters: _lastLandAreaSquareMeters ?? 0.0044,
+          formatLandArea: _formatLandArea,
+          parseLandAreaNumber: _parseLandAreaSquareMeters,
+        );
+      },
+    );
+  }
+
   List<PumpFertilizationRecommendation> get _adjustedPumpRecommendations {
     final recommendations = _aiResponse?.pumpRecommendations ?? const [];
     return recommendations
@@ -164,6 +189,52 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return recommendations
         .map((item) => item.recommendedSeconds)
         .reduce((a, b) => a > b ? a : b);
+  }
+
+  double? _parseLandAreaSquareMeters(String input) {
+    var text = input
+        .toLowerCase()
+        .replaceAll('m²', '')
+        .replaceAll('m2', '')
+        .replaceAll(RegExp(r'\s+'), '')
+        .trim();
+    if (text.isEmpty) return null;
+
+    text = text.replaceAll(RegExp(r'[^0-9\.,]'), '');
+    if (text.isEmpty) return null;
+
+    final hasComma = text.contains(',');
+    final hasDot = text.contains('.');
+    if (hasComma) {
+      text = text.replaceAll('.', '').replaceAll(',', '.');
+      return double.tryParse(text);
+    }
+
+    if (hasDot) {
+      final parts = text.split('.');
+      final looksLikeThousands = parts.length > 1 &&
+          parts.first != '0' &&
+          parts.skip(1).every((part) => part.length == 3);
+      if (looksLikeThousands) {
+        return double.tryParse(parts.join());
+      }
+    }
+
+    return double.tryParse(text);
+  }
+
+  String _formatLandArea(double value) {
+    if (value >= 1000 && value == value.roundToDouble()) {
+      return value.round().toString().replaceAllMapped(
+            RegExp(r'\B(?=(\d{3})+(?!\d))'),
+            (_) => '.',
+          );
+    }
+
+    final fixed = value >= 100
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(value < 0.01 ? 4 : 2);
+    return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
   Future<void> _confirmPumpRecommendation() async {
@@ -343,6 +414,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
+                            if (_lastLandAreaSquareMeters != null) ...[
+                              const SizedBox(height: 10),
+                              _buildLandAreaInfoBox(
+                                _lastLandAreaSquareMeters!,
+                              ),
+                            ],
                             const SizedBox(height: 14),
                             if (recommendations.isEmpty)
                               _buildNoPumpRecommendationBox()
@@ -616,41 +693,47 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
                             const Text(
                               'Kesehatan Tanaman',
-                              maxLines: 2,
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                            const SizedBox(height: 18),
+                            const SizedBox(height: 12),
                             Row(
                               children: [
                                 _buildScoreCircle(),
-                                const SizedBox(width: 18),
+                                const SizedBox(width: 14),
                                 Expanded(
-                                  child: Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
+                                  child: Row(
                                     children: [
-                                      _buildStatPill(
-                                        Icons.error_outline_rounded,
-                                        '$_criticalCount Kritis',
-                                        AppTheme.statusLow,
+                                      Expanded(
+                                        child: _buildStatPill(
+                                          Icons.error_outline_rounded,
+                                          '$_criticalCount Kritis',
+                                          AppTheme.statusLow,
+                                        ),
                                       ),
-                                      _buildStatPill(
-                                        Icons.warning_amber_rounded,
-                                        '$_warningCount Awas',
-                                        AppTheme.statusHigh,
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: _buildStatPill(
+                                          Icons.warning_amber_rounded,
+                                          '$_warningCount Awas',
+                                          AppTheme.statusHigh,
+                                        ),
                                       ),
-                                      _buildStatPill(
-                                        Icons.check_circle_outline_rounded,
-                                        '$_goodCount Baik',
-                                        const Color(0xFF69F0AE),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: _buildStatPill(
+                                          Icons.check_circle_outline_rounded,
+                                          '$_goodCount Baik',
+                                          const Color(0xFF69F0AE),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -721,7 +804,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                     }).toList(),
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 18),
 
                 // ─── Insight cards ──────────────────────────────────────────
                 if (_isRequesting)
@@ -795,8 +878,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
             : AppTheme.statusLow;
 
     return Container(
-      width: 72,
-      height: 72,
+      width: 88,
+      height: 88,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: Colors.white.withOpacity(0.15),
@@ -811,7 +894,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           Text(
             '$_healthScore',
             style: const TextStyle(
-              fontSize: 26,
+              fontSize: 34,
               fontWeight: FontWeight.w900,
               color: Colors.white,
               height: 1.0,
@@ -820,9 +903,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const Text(
             'Score',
             style: TextStyle(
-              fontSize: 9,
+              fontSize: 12,
               color: Colors.white60,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -832,23 +915,30 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
   Widget _buildStatPill(IconData icon, String label, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
         color: color.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withOpacity(0.55)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ),
         ],
@@ -891,7 +981,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'NutriAI Summary',
+                  'Ringkasan Gemini AI',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -915,6 +1005,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   const SizedBox(height: 12),
                   _buildPumpRecommendationPanel(_aiResponse!),
                 ],
+                if (_lastLandAreaSquareMeters != null) ...[
+                  const SizedBox(height: 10),
+                  _buildLandAreaInfoBox(_lastLandAreaSquareMeters!),
+                ],
                 if (_lastAutomationResult != null) ...[
                   const SizedBox(height: 10),
                   _buildAutomationResult(_lastAutomationResult!),
@@ -927,7 +1021,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             _isApplyingAutomation ||
                             _isAddingSchedule
                         ? null
-                        : _requestAiRecommendation,
+                        : _promptAndRequestAiRecommendation,
                     icon: _isRequesting || _isApplyingAutomation
                         ? const SizedBox(
                             width: 16,
@@ -1025,6 +1119,40 @@ class _InsightsScreenState extends State<InsightsScreen> {
           ),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
         ),
+      ),
+    );
+  }
+
+  Widget _buildLandAreaInfoBox(double landAreaSquareMeters) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryBlue.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.18)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.straighten_rounded,
+            size: 16,
+            color: AppTheme.primaryBlue,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Luas tanah: ${_formatLandArea(landAreaSquareMeters)} m²',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1320,5 +1448,254 @@ class _InsightsScreenState extends State<InsightsScreen> {
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+}
+
+class _LandAreaInputDialog extends StatefulWidget {
+  const _LandAreaInputDialog({
+    required this.initialSquareMeters,
+    required this.formatLandArea,
+    required this.parseLandAreaNumber,
+  });
+
+  final double initialSquareMeters;
+  final String Function(double value) formatLandArea;
+  final double? Function(String input) parseLandAreaNumber;
+
+  @override
+  State<_LandAreaInputDialog> createState() => _LandAreaInputDialogState();
+}
+
+class _LandAreaUnit {
+  const _LandAreaUnit({
+    required this.label,
+    required this.squareMetersPerUnit,
+  });
+
+  final String label;
+  final double squareMetersPerUnit;
+}
+
+const List<_LandAreaUnit> _landAreaUnits = [
+  _LandAreaUnit(label: 'hm² (hektar)', squareMetersPerUnit: 10000),
+  _LandAreaUnit(label: 'dam²', squareMetersPerUnit: 100),
+  _LandAreaUnit(label: 'm²', squareMetersPerUnit: 1),
+  _LandAreaUnit(label: 'dm²', squareMetersPerUnit: 0.01),
+  _LandAreaUnit(label: 'cm²', squareMetersPerUnit: 0.0001),
+];
+
+class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
+  late final TextEditingController _controller;
+  late _LandAreaUnit _selectedUnit;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedUnit = _landAreaUnits[2];
+    _controller = TextEditingController(
+      text: widget.formatLandArea(widget.initialSquareMeters),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _cancel() {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop();
+  }
+
+  void _confirm() {
+    final parsed = widget.parseLandAreaNumber(_controller.text);
+    if (parsed == null || parsed <= 0) {
+      setState(() {
+        _errorText =
+            'Masukkan luas tanah lebih dari 0, contoh 0.0044 atau 10.000.';
+      });
+      return;
+    }
+
+    final squareMeters = parsed * _selectedUnit.squareMetersPerUnit;
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(squareMeters);
+  }
+
+  void _changeUnit(_LandAreaUnit? nextUnit) {
+    if (nextUnit == null || nextUnit == _selectedUnit) return;
+
+    final parsed = widget.parseLandAreaNumber(_controller.text);
+    final squareMeters =
+        parsed == null ? null : parsed * _selectedUnit.squareMetersPerUnit;
+
+    setState(() {
+      _selectedUnit = nextUnit;
+      _errorText = null;
+      if (squareMeters != null) {
+        final converted = squareMeters / nextUnit.squareMetersPerUnit;
+        final text = widget.formatLandArea(converted);
+        _controller.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+      ),
+      titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+      contentPadding: const EdgeInsets.fromLTRB(22, 14, 22, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+      title: const Text(
+        'Luas Tanah',
+        style: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: 18,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Isi luas area tanam untuk menghitung estimasi rekomendasi penyiraman.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: 'Luas tanah',
+                    hintText: '0.0044',
+                    errorText: _errorText,
+                    filled: true,
+                    fillColor: AppTheme.bgPrimary,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: AppTheme.primaryGreen.withOpacity(0.22),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: AppTheme.primaryGreen,
+                        width: 1.4,
+                      ),
+                    ),
+                  ),
+                  onSubmitted: (_) => _confirm(),
+                  onChanged: (_) {
+                    if (_errorText == null) return;
+                    setState(() => _errorText = null);
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 124,
+                child: DropdownButtonFormField<_LandAreaUnit>(
+                  value: _selectedUnit,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Satuan',
+                    filled: true,
+                    fillColor: AppTheme.bgPrimary,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: AppTheme.primaryGreen.withOpacity(0.22),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: AppTheme.primaryGreen,
+                        width: 1.4,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 13,
+                    ),
+                  ),
+                  items: _landAreaUnits.map((unit) {
+                    return DropdownMenuItem<_LandAreaUnit>(
+                      value: unit,
+                      child: Text(
+                        unit.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: _changeUnit,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Contoh: 0.0044 m² untuk pot kecil atau 1 hm² (hektar) untuk lahan 10.000 m².',
+            style: TextStyle(
+              color: AppTheme.textLight,
+              fontSize: 11,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        OutlinedButton(
+          onPressed: _cancel,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.textSecondary,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: const Text('Batal'),
+        ),
+        FilledButton.icon(
+          onPressed: _confirm,
+          icon: const Icon(Icons.check_circle_rounded, size: 18),
+          label: const Text('Konfirmasi'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryGreen,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }

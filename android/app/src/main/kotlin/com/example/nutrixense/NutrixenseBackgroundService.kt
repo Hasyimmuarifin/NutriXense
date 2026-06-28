@@ -623,8 +623,8 @@ class NutrixenseBackgroundService : Service() {
 
         return builder
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
-            .setContentTitle("NutriXense monitoring active")
-            .setContentText("MQTT and Decision Support are running in the background.")
+            .setContentTitle("NutriXense Berjalan di Latar Belakang")
+            .setContentText("Aplikasi NutriXense mendukung berjalan di Latar Belakang untuk tetap memberikan notifikasi dan informasi penting setiap hari dan setiap saat.")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()

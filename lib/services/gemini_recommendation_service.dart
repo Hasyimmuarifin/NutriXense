@@ -49,7 +49,9 @@ class GeminiRecommendationService {
   final String? _apiKeyOverride;
   final String? _modelNameOverride;
 
-  Future<AiRecommendationResponse> requestRecommendation() async {
+  Future<AiRecommendationResponse> requestRecommendation({
+    required double landAreaSquareMeters,
+  }) async {
     final config = await _resolveConfig();
 
     if (config.apiKey.trim().isEmpty) {
@@ -92,6 +94,12 @@ class GeminiRecommendationService {
         'activate_water_pump': 'Pompa D - Air (H2O)',
       },
       'pump_flow_rates_ml_per_second': PumpFlowRates.toPromptJson(),
+      'cultivation_area': {
+        'square_meters': landAreaSquareMeters,
+        'unit': 'm2',
+        'irrigation_estimation_note':
+            'Use this area for water pump estimation. In irrigation, 1 mm water depth equals 1 liter per m2.',
+      },
       'output_rules': [
         'Return one complete JSON object only.',
         'Do not use markdown.',
@@ -104,6 +112,8 @@ class GeminiRecommendationService {
         'Do not mention or assume any specific cultivation container unless the input data explicitly states it.',
         'Recommendations must be practical, safe, and measurable for tea plants, such as small-dose pump use, careful irrigation, acidic pH correction, fertilizer adjustment, retesting, drainage, shade, or monitoring frequency.',
         'When mentioning pump duration or dosage, consider pump_flow_rates_ml_per_second so slower pumps run longer for comparable target volume.',
+        'When recommending N, P, or K nutrient pump dosage, consider cultivation_area.square_meters so smaller areas receive lower volume and larger areas receive higher volume.',
+        'When recommending watering, consider cultivation_area.square_meters and explain the estimated water volume in practical terms.',
         'Set an automation trigger to true only when its matching local_threshold_flag is true.',
         'Mention that pump activation requires user confirmation when nutrient or water correction is recommended.',
       ],
@@ -123,8 +133,13 @@ class GeminiRecommendationService {
           'Gemini unavailable, using local DSS/XAI fallback: $error',
         );
         return _responseWithDecisionPlan(
-          _buildAiUnavailableFallbackResponse(summary, error),
+          _buildAiUnavailableFallbackResponse(
+            summary,
+            error,
+            landAreaSquareMeters,
+          ),
           summary,
+          landAreaSquareMeters,
         );
       }
       rethrow;
@@ -140,13 +155,19 @@ class GeminiRecommendationService {
       rawText: text,
       originalPayload: payload,
       summary: summary,
+      landAreaSquareMeters: landAreaSquareMeters,
     );
-    return _responseWithDecisionPlan(decoded, summary);
+    return _responseWithDecisionPlan(
+      decoded,
+      summary,
+      landAreaSquareMeters,
+    );
   }
 
   static AiRecommendationResponse _responseWithDecisionPlan(
     Map<String, dynamic> decoded,
     _SensorHistorySummary summary,
+    double landAreaSquareMeters,
   ) {
     final guardedResponse =
         AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
@@ -155,7 +176,10 @@ class GeminiRecommendationService {
       canActivatePhosphorusPump: summary.canActivatePhosphorusPump,
       canActivatePotassiumPump: summary.canActivatePotassiumPump,
     );
-    final pumpRecommendations = _buildPumpRecommendations(summary);
+    final pumpRecommendations = _buildPumpRecommendations(
+      summary,
+      landAreaSquareMeters,
+    );
 
     return guardedResponse.copyWith(
       pumpRecommendations: pumpRecommendations,
@@ -164,7 +188,7 @@ class GeminiRecommendationService {
           : DailyFertilizationScheduleRecommendation.fromPlan(
               recommendations: pumpRecommendations,
               reason:
-                  'Jadwal harian direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor.',
+                  'Jadwal harian direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2.',
             ),
     );
   }
@@ -238,6 +262,7 @@ class GeminiRecommendationService {
     required String rawText,
     required String originalPayload,
     required _SensorHistorySummary summary,
+    required double landAreaSquareMeters,
   }) async {
     final cleaned = _stripCodeFence(rawText);
     final decoded = _tryDecodeJsonObject(cleaned);
@@ -282,7 +307,11 @@ class GeminiRecommendationService {
         debugPrint(
           'Gemini repair unavailable, using local DSS/XAI fallback: $error',
         );
-        return _buildAiUnavailableFallbackResponse(summary, error);
+        return _buildAiUnavailableFallbackResponse(
+          summary,
+          error,
+          landAreaSquareMeters,
+        );
       }
       rethrow;
     }
@@ -295,7 +324,7 @@ class GeminiRecommendationService {
       'Gemini returned malformed JSON after repair. Using local fallback. '
       'Preview: ${_shortPreview(cleaned)}',
     );
-    return _buildLocalFallbackResponse(summary);
+    return _buildLocalFallbackResponse(summary, landAreaSquareMeters);
   }
 
   static Map<String, dynamic>? _tryDecodeJsonObject(String text) {
@@ -384,6 +413,7 @@ class GeminiRecommendationService {
 
   static Map<String, dynamic> _buildLocalFallbackResponse(
     _SensorHistorySummary summary,
+    double landAreaSquareMeters,
   ) {
     final items = <Map<String, dynamic>>[];
 
@@ -528,8 +558,7 @@ class GeminiRecommendationService {
       max: thresholds['moisture_max']!,
       lowTitle: 'Kelembapan Media Rendah',
       highTitle: 'Kelembapan Media Tinggi',
-      lowAction:
-          'Aktifkan Pump D Water dengan durasi pendek atau gunakan jadwal penyiraman bertahap. Pastikan media tanam teh lembap merata tetapi tidak tergenang.',
+      lowAction: _buildWateringLowAction(summary, landAreaSquareMeters),
       highAction:
           'Tunda penyiraman dan periksa drainase media tanam. Jika kelembapan tetap tinggi, kurangi frekuensi irigasi untuk mencegah akar teh kekurangan oksigen.',
       normalAction:
@@ -578,7 +607,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh.',
+          'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2 untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
@@ -599,8 +628,12 @@ class GeminiRecommendationService {
   static Map<String, dynamic> _buildAiUnavailableFallbackResponse(
     _SensorHistorySummary summary,
     Object error,
+    double landAreaSquareMeters,
   ) {
-    final fallback = _buildLocalFallbackResponse(summary);
+    final fallback = _buildLocalFallbackResponse(
+      summary,
+      landAreaSquareMeters,
+    );
     final prefix = _isQuotaOrRateLimitError(error)
         ? 'Kuota atau rate limit Gemini API sedang tercapai, sehingga rekomendasi sementara dibuat memakai analisis DSS/XAI lokal.'
         : 'Gemini sedang tidak tersedia sementara, sehingga rekomendasi dibuat memakai analisis DSS/XAI lokal.';
@@ -613,6 +646,7 @@ class GeminiRecommendationService {
 
   static List<PumpFertilizationRecommendation> _buildPumpRecommendations(
     _SensorHistorySummary summary,
+    double landAreaSquareMeters,
   ) {
     final recommendations = <PumpFertilizationRecommendation>[];
 
@@ -631,8 +665,15 @@ class GeminiRecommendationService {
       final deficit = _roundDouble(minimum - current);
       final deficitPercent = _roundDouble((deficit / minimum) * 100);
       final baseSeconds = _secondsFromDeficit(deficitPercent);
-      final targetVolumeMl =
-          PumpFlowRates.highestRate.averageMlPerSecond * baseSeconds;
+      final targetVolumeMl = key == 'Moisture'
+          ? _estimatedWaterVolumeMl(
+              deficitPercent: deficitPercent,
+              landAreaSquareMeters: landAreaSquareMeters,
+            )
+          : _estimatedNutrientVolumeMl(
+              baseSeconds: baseSeconds,
+              landAreaSquareMeters: landAreaSquareMeters,
+            );
       final recommendedSeconds = PumpFlowRates.secondsForVolume(
         pumpIndex: pumpIndex,
         volumeMl: targetVolumeMl,
@@ -655,8 +696,9 @@ class GeminiRecommendationService {
           deficit: deficit,
           deficitPercent: deficitPercent,
           recommendedSeconds: recommendedSeconds,
-          reason:
-              '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Durasi dihitung dengan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+          reason: key == 'Moisture'
+              ? '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi penyiraman memakai luas tanah ${_formatNumber(landAreaSquareMeters)} m2 dengan kebutuhan sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.'
+              : '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi nutrisi memakai luas tanah ${_formatNumber(landAreaSquareMeters)} m2 dengan kebutuhan sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -699,6 +741,51 @@ class GeminiRecommendationService {
     );
 
     return recommendations;
+  }
+
+  static double _estimatedNutrientVolumeMl({
+    required int baseSeconds,
+    required double landAreaSquareMeters,
+  }) {
+    final safeArea = landAreaSquareMeters <= 0 ? 0.0044 : landAreaSquareMeters;
+    final baseVolumePerSquareMeterMl =
+        PumpFlowRates.highestRate.averageMlPerSecond * baseSeconds;
+    final volumeMl = safeArea * baseVolumePerSquareMeterMl;
+    return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
+  }
+
+  static String _buildWateringLowAction(
+    _SensorHistorySummary summary,
+    double landAreaSquareMeters,
+  ) {
+    final current = summary.parameters['Moisture']?.current;
+    final minimum = thresholds['moisture_min']!.toDouble();
+    if (current == null || current >= minimum) {
+      return 'Pertahankan penyiraman bertahap dan pastikan media teh lembap merata tetapi tidak tergenang.';
+    }
+
+    final deficitPercent = _roundDouble(((minimum - current) / minimum) * 100);
+    final waterVolumeMl = _estimatedWaterVolumeMl(
+      deficitPercent: deficitPercent,
+      landAreaSquareMeters: landAreaSquareMeters,
+    );
+    final seconds = PumpFlowRates.secondsForVolume(
+      pumpIndex: 3,
+      volumeMl: waterVolumeMl,
+    );
+
+    return 'Aktifkan Pump D Water sekitar $seconds detik sebagai penyiraman bertahap awal untuk luas ${_formatNumber(landAreaSquareMeters)} m2 dengan estimasi kebutuhan ${PumpFlowRates.formatMl(waterVolumeMl)} ml. Pastikan media tanam teh lembap merata tetapi tidak tergenang, lalu ukur ulang kelembapan.';
+  }
+
+  static double _estimatedWaterVolumeMl({
+    required double deficitPercent,
+    required double landAreaSquareMeters,
+  }) {
+    const waterMlPerSquareMeterPerMoisturePercent = 50.0;
+    final safeArea = landAreaSquareMeters <= 0 ? 0.0044 : landAreaSquareMeters;
+    final volumeMl =
+        safeArea * deficitPercent * waterMlPerSquareMeterPerMoisturePercent;
+    return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
   }
 
   static int _secondsFromDeficit(double deficitPercent) {

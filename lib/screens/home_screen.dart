@@ -1101,7 +1101,7 @@ class _HomeScreenState extends State<HomeScreen>
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.95),
+                                        color: Colors.white,
                                         fontSize: 20,
                                         fontWeight: FontWeight.w600,
                                       ),

@@ -516,47 +516,37 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   Widget _buildDecisionSupportSwitch() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.18),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.25),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.auto_mode_rounded,
+          color: _isRuleBasedAutomationEnabled
+              ? const Color(0xFF69F0AE)
+              : Colors.white70,
+          size: 18,
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.auto_mode_rounded,
-            color: _isRuleBasedAutomationEnabled
-                ? const Color(0xFF69F0AE)
-                : Colors.white70,
-            size: 16,
+        const SizedBox(width: 4),
+        const Text(
+          'Auto',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
           ),
-          const SizedBox(width: 4),
-          Text(
-            _isRuleBasedAutomationEnabled ? 'Auto' : 'Auto',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-            ),
+        ),
+        Transform.scale(
+          scale: 0.72,
+          child: Switch(
+            value: _isRuleBasedAutomationEnabled,
+            onChanged: _toggleRuleBasedAutomation,
+            activeColor: const Color(0xFF69F0AE),
+            inactiveThumbColor: Colors.white,
+            inactiveTrackColor: Colors.white24,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          Transform.scale(
-            scale: 0.72,
-            child: Switch(
-              value: _isRuleBasedAutomationEnabled,
-              onChanged: _toggleRuleBasedAutomation,
-              activeColor: const Color(0xFF69F0AE),
-              inactiveThumbColor: Colors.white,
-              inactiveTrackColor: Colors.white24,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -727,39 +717,43 @@ class _ControlScreenState extends State<ControlScreen> {
 
                             // ─── Title ────────────────────────────────────
                             Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Expanded(
-                                  child: Text(
-                                    'Kontrol Pompa',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Kontrol Pompa',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'Kelola pompa nutrisi dan irigasi Anda',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.9),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(width: 10),
+                                const SizedBox(width: 18),
                                 _buildDecisionSupportSwitch(),
                               ],
                             ),
 
-                            const SizedBox(height: 8),
-
-                            // ─── Subtitle ─────────────────────────────────
-                            Text(
-                              'Kelola pompa nutrisi dan irigasi Anda',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 24),
 
                             // ─── Status Box ───────────────────────────────
                             Container(
@@ -1318,7 +1312,9 @@ class _ControlScreenState extends State<ControlScreen> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  schedule.isRunning ? 'Sedang Berjalan' : 'Berikutnya: $nextRunText',
+                  schedule.isRunning
+                      ? 'Sedang Berjalan'
+                      : 'Berikutnya: $nextRunText',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
