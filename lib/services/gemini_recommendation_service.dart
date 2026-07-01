@@ -206,7 +206,7 @@ class GeminiRecommendationService {
         _modelNameOverride,
         _dartDefineModelName,
         localConfig.modelName,
-      ], fallback: 'gemini-2.5-flash'),
+      ], fallback: 'gemini-3.5-flash'),
     );
   }
 
@@ -607,7 +607,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Ringkasan menggunakan ${summary.rowCount} data sensor terbaru dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2 untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh.',
+          'Analisis menggunakan ${summary.rowCount} baris data sensor terbaru dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2 untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
@@ -636,7 +636,7 @@ class GeminiRecommendationService {
     );
     final prefix = _isQuotaOrRateLimitError(error)
         ? 'Kuota atau rate limit Gemini API sedang tercapai, sehingga rekomendasi sementara dibuat memakai analisis DSS/XAI lokal.'
-        : 'Gemini sedang tidak tersedia sementara, sehingga rekomendasi dibuat memakai analisis DSS/XAI lokal.';
+        : 'Rekomendasi dibuat memakai analisis DSS/XAI lokal.';
 
     return {
       ...fallback,
@@ -803,7 +803,7 @@ class GeminiRecommendationService {
   }
 
   static String _formatNumber(num value) {
-    final rounded = value.toDouble().toStringAsFixed(2);
+    final rounded = value.toDouble().toStringAsFixed(4);
     return rounded.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 

@@ -427,7 +427,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               const Text(
                                 'Rencana Pemupukan',
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: 15,
                                   color: AppTheme.textPrimary,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -1317,7 +1317,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Recommended Daily Schedule',
+            'Jadwal Harian yang Disarankan',
             style: TextStyle(
               fontSize: 13,
               color: AppTheme.textPrimary,
@@ -1326,7 +1326,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Rekomendasi jadwal harian pukul ${schedule.formattedTime} selama $durationSeconds detik. Gunakan tombol di bawah popup untuk menambahkannya ke menu Control.',
+            'Rekomendasi jadwal harian pukul ${schedule.formattedTime} selama $durationSeconds detik. Gunakan tombol di bawah popup untuk menambahkan jadwal ke menu Control.',
             style: const TextStyle(
               fontSize: 11,
               color: AppTheme.textSecondary,

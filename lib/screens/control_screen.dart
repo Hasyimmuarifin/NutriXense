@@ -1089,7 +1089,7 @@ class _ControlScreenState extends State<ControlScreen> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Tidak ada jadwal penyiraman otomatis yang diatur.',
+                      'Belum ada jadwal penyiraman otomatis yang diatur.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
@@ -1234,7 +1234,7 @@ class _ControlScreenState extends State<ControlScreen> {
 
   Widget _buildScheduleListTile(_WateringSchedule schedule) {
     final nextRunText = schedule.nextRun == null
-        ? 'Paused'
+        ? 'Mati'
         : TimeOfDay.fromDateTime(schedule.nextRun!).format(context);
 
     return Container(
