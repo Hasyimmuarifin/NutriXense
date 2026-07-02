@@ -53,7 +53,10 @@ dependencies:
   google_generative_ai: ^0.4.7
 
   # Utils
+  archive: ^4.0.9
   intl: ^0.20.2
+  pdf: ^3.11.3
+  path_provider: ^2.1.5
   shared_preferences: ^2.3.2
 
   # The following adds the Cupertino Icons font to your application.

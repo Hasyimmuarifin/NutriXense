@@ -2,11 +2,18 @@
 // Time-series chart screen – shows historical sensor data with filter tabs
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:archive/archive.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 import '../models/sensor_data.dart';
 import '../services/threshold_config_service.dart';
@@ -19,7 +26,12 @@ class HistoryScreen extends StatefulWidget {
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
+enum _HistoryExportFormat { pdf, csv, excel }
+
 class _HistoryScreenState extends State<HistoryScreen> {
+  static const MethodChannel _downloadsChannel =
+      MethodChannel('com.example.nutrixense/alerts');
+
   int _selectedFilter = 0; // 0=Hari ini, 1=7 Hari, 2=30 Hari
   int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp, 4=EC
   List<SensorDataPoint> _data = [];
@@ -33,6 +45,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final Set<String> _pageDocIds = {};
   StreamSubscription<QuerySnapshot>? _latestSubscription;
   bool _isLoadingHistory = true;
+  bool _isExportingHistory = false;
   Object? _historyError;
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
@@ -340,6 +353,558 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  Future<List<SensorDataPoint>> _loadExportData() async {
+    final query = _historyBaseQuery().orderBy('timestamp', descending: false);
+    QuerySnapshot? snapshot;
+
+    try {
+      snapshot = await query.get(const GetOptions(source: Source.server));
+    } catch (_) {
+      snapshot = await query.get(const GetOptions(source: Source.cache));
+    }
+
+    return snapshot.docs
+        .map((doc) => SensorDataPoint.fromFirestore(doc))
+        .toList()
+      ..sort((a, b) => a.time.compareTo(b.time));
+  }
+
+  Future<void> _exportHistory(_HistoryExportFormat format) async {
+    if (_isExportingHistory) return;
+
+    setState(() => _isExportingHistory = true);
+    try {
+      final exportData = await _loadExportData();
+      if (exportData.isEmpty) {
+        _showExportSnackBar('Tidak ada data historis untuk diekspor.');
+        return;
+      }
+
+      final savedPath = await _writeExportFile(format, exportData);
+      if (!mounted) return;
+
+      _showExportSnackBar('Data historis tersimpan: $savedPath');
+    } catch (e) {
+      if (!mounted) return;
+      _showExportSnackBar('Gagal mengekspor data historis: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isExportingHistory = false);
+      }
+    }
+  }
+
+  Future<String> _writeExportFile(
+    _HistoryExportFormat format,
+    List<SensorDataPoint> exportData,
+  ) async {
+    final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+    final range = _filters[_selectedFilter]
+        .toLowerCase()
+        .replaceAll(' ', '_')
+        .replaceAll(RegExp(r'[^a-z0-9_]'), '');
+    final extension = switch (format) {
+      _HistoryExportFormat.pdf => 'pdf',
+      _HistoryExportFormat.csv => 'csv',
+      _HistoryExportFormat.excel => 'xlsx',
+    };
+    final fileName = 'nutrixense_history_${range}_$timestamp.$extension';
+    final Uint8List bytes;
+    switch (format) {
+      case _HistoryExportFormat.pdf:
+        bytes = await _buildPdfBytes(exportData);
+        break;
+      case _HistoryExportFormat.csv:
+        bytes = Uint8List.fromList(utf8.encode(_buildCsv(exportData)));
+        break;
+      case _HistoryExportFormat.excel:
+        bytes = Uint8List.fromList(_buildXlsx(exportData));
+        break;
+    }
+
+    if (Platform.isAndroid) {
+      final savedPath =
+          await _downloadsChannel.invokeMethod<String>('saveFileToDownloads', {
+        'fileName': fileName,
+        'mimeType': _mimeType(format),
+        'bytes': bytes,
+      });
+
+      if (savedPath != null && savedPath.isNotEmpty) {
+        return savedPath;
+      }
+    }
+
+    final directory = await _exportDirectory();
+    final file = File('${directory.path}/$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  }
+
+  String _mimeType(_HistoryExportFormat format) {
+    return switch (format) {
+      _HistoryExportFormat.pdf => 'application/pdf',
+      _HistoryExportFormat.csv => 'text/csv',
+      _HistoryExportFormat.excel =>
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+  }
+
+  Future<Directory> _exportDirectory() async {
+    final downloads = await getDownloadsDirectory();
+    if (downloads != null) return downloads;
+
+    final external = await getExternalStorageDirectory();
+    if (external != null) return external;
+
+    return getApplicationDocumentsDirectory();
+  }
+
+  String _buildCsv(List<SensorDataPoint> exportData) {
+    final buffer = StringBuffer();
+    buffer.writeln(_historyTableHeaders.map(_csvCell).join(','));
+
+    for (final item in exportData) {
+      buffer.writeln(_exportRow(item).map(_csvCell).join(','));
+    }
+
+    return buffer.toString();
+  }
+
+  List<int> _buildXlsx(List<SensorDataPoint> exportData) {
+    final archive = Archive();
+
+    void addTextFile(String name, String content) {
+      final bytes = utf8.encode(content);
+      archive.addFile(ArchiveFile(name, bytes.length, bytes));
+    }
+
+    addTextFile(
+      '[Content_Types].xml',
+      '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>''',
+    );
+    addTextFile(
+      '_rels/.rels',
+      '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>''',
+    );
+    addTextFile(
+      'xl/_rels/workbook.xml.rels',
+      '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>''',
+    );
+    addTextFile(
+      'xl/workbook.xml',
+      '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="History" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>''',
+    );
+    addTextFile(
+      'xl/styles.xml',
+      '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/></cellXfs>
+</styleSheet>''',
+    );
+
+    final rows = StringBuffer()
+      ..writeln('<row r="1">${_xlsxHeaderCells(_historyTableHeaders)}</row>');
+
+    for (var rowIndex = 0; rowIndex < exportData.length; rowIndex++) {
+      final rowNumber = rowIndex + 2;
+      final row = _exportRow(exportData[rowIndex]);
+      rows.writeln(
+        '<row r="$rowNumber">'
+        '${_xlsxStringCell('A', rowNumber, row[0])}'
+        '${_xlsxNumberCell('B', rowNumber, row[1])}'
+        '${_xlsxNumberCell('C', rowNumber, row[2])}'
+        '${_xlsxNumberCell('D', rowNumber, row[3])}'
+        '${_xlsxNumberCell('E', rowNumber, row[4])}'
+        '${_xlsxNumberCell('F', rowNumber, row[5])}'
+        '${_xlsxNumberCell('G', rowNumber, row[6])}'
+        '${_xlsxNumberCell('H', rowNumber, row[7])}'
+        '</row>',
+      );
+    }
+
+    addTextFile(
+      'xl/worksheets/sheet1.xml',
+      '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="1" max="1" width="18" customWidth="1"/>
+    <col min="2" max="8" width="16" customWidth="1"/>
+  </cols>
+  <sheetData>
+    $rows
+  </sheetData>
+</worksheet>''',
+    );
+
+    return ZipEncoder().encode(archive);
+  }
+
+  String _xlsxHeaderCells(List<String> headers) {
+    const columns = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    return List.generate(
+      headers.length,
+      (index) => _xlsxStringCell(columns[index], 1, headers[index], style: 1),
+    ).join();
+  }
+
+  String _xlsxStringCell(
+    String column,
+    int row,
+    String value, {
+    int style = 0,
+  }) {
+    return '<c r="$column$row" t="inlineStr" s="$style"><is><t>${_xmlEscape(value)}</t></is></c>';
+  }
+
+  String _xlsxNumberCell(String column, int row, String value) {
+    return '<c r="$column$row"><v>$value</v></c>';
+  }
+
+  Future<Uint8List> _buildPdfBytes(List<SensorDataPoint> exportData) async {
+    final document = pw.Document(
+      title: 'NutriXense Historical Sensor Data',
+      author: 'NutriXense',
+    );
+    final chartData = exportData;
+    final logoData = await rootBundle
+        .load('assets/images/New_NutriXense Letter Logo v1.png');
+    final logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
+
+    document.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(28),
+        footer: (context) => pw.Align(
+          alignment: pw.Alignment.centerRight,
+          child: pw.Text(
+            'Halaman ${context.pageNumber} dari ${context.pagesCount}',
+            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+          ),
+        ),
+        build: (context) => [
+          _buildPdfReportHeader(logoImage),
+          pw.SizedBox(height: 18),
+          pw.Text(
+            'Grafik Tren Per Indikator',
+            style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 3),
+          pw.Text(
+            'Setiap indikator ditampilkan pada grafik terpisah dengan skala nilainya masing-masing.',
+            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+          ),
+          pw.SizedBox(height: 8),
+          ..._buildPdfTrendCharts(chartData),
+          pw.SizedBox(height: 20),
+          pw.Text(
+            'Tabel Data Historis',
+            style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 8),
+          pw.TableHelper.fromTextArray(
+            headers: _historyTableHeaders,
+            data: exportData.map(_exportRow).toList(),
+            border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.4),
+            headerDecoration:
+                const pw.BoxDecoration(color: PdfColor(0.14, 0.48, 0.35)),
+            headerStyle: pw.TextStyle(
+              color: PdfColors.white,
+              fontSize: 7,
+              fontWeight: pw.FontWeight.bold,
+            ),
+            cellStyle: const pw.TextStyle(fontSize: 7),
+            cellPadding:
+                const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+            cellAlignments: const {
+              0: pw.Alignment.centerLeft,
+              1: pw.Alignment.centerRight,
+              2: pw.Alignment.centerRight,
+              3: pw.Alignment.centerRight,
+              4: pw.Alignment.centerRight,
+              5: pw.Alignment.centerRight,
+              6: pw.Alignment.centerRight,
+              7: pw.Alignment.centerRight,
+            },
+          ),
+        ],
+      ),
+    );
+
+    return document.save();
+  }
+
+  pw.Widget _buildPdfReportHeader(pw.MemoryImage logoImage) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Image(logoImage, width: 145, fit: pw.BoxFit.contain),
+        pw.SizedBox(width: 18),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              'Historical Sensor Data',
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Filter: ${_filters[_selectedFilter]}',
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+            ),
+            pw.Text(
+              'Dibuat: ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  List<pw.Widget> _buildPdfTrendCharts(List<SensorDataPoint> chartData) {
+    final series = _pdfTrendSeries(chartData);
+    if (chartData.isEmpty || series.isEmpty) {
+      return [
+        pw.Container(
+          height: 120,
+          alignment: pw.Alignment.center,
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey300, width: 0.6),
+          ),
+          child: pw.Text(
+            'Tidak ada data grafik.',
+            style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+          ),
+        ),
+      ];
+    }
+
+    return series.map(_buildPdfTrendChart).toList();
+  }
+
+  pw.Widget _buildPdfTrendChart(
+    _PdfTrendSeries series,
+  ) {
+    return pw.Container(
+      height: 185,
+      margin: const pw.EdgeInsets.only(bottom: 10),
+      padding: const pw.EdgeInsets.fromLTRB(10, 8, 10, 10),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey300, width: 0.6),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              pw.Container(
+                width: 18,
+                height: 4,
+                color: _pdfWidgetColor(series.color),
+              ),
+              pw.SizedBox(width: 6),
+              pw.Text(
+                series.label,
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 8),
+          pw.SizedBox(
+            height: 136,
+            child: pw.SvgImage(svg: _buildTrendSvg(series)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<_PdfTrendSeries> _pdfTrendSeries(List<SensorDataPoint> chartData) {
+    return [
+      _PdfTrendSeries(
+        'Nitrogen (mg/kg)',
+        AppTheme.primaryGreen,
+        chartData.map((item) => item.nitrogen).toList(),
+      ),
+      _PdfTrendSeries(
+        'Fosfor (mg/kg)',
+        AppTheme.primaryBlue,
+        chartData.map((item) => item.phosphorus).toList(),
+      ),
+      _PdfTrendSeries(
+        'Kalium (mg/kg)',
+        AppTheme.statusHigh,
+        chartData.map((item) => item.potassium).toList(),
+      ),
+      _PdfTrendSeries(
+        'pH',
+        const Color(0xFF7B1FA2),
+        chartData.map((item) => item.ph).toList(),
+      ),
+      _PdfTrendSeries(
+        'Kelembapan (%)',
+        AppTheme.lightBlue,
+        chartData.map((item) => item.moisture).toList(),
+      ),
+      _PdfTrendSeries(
+        'Suhu (C)',
+        AppTheme.statusLow,
+        chartData.map((item) => item.temperature).toList(),
+      ),
+      _PdfTrendSeries(
+        'EC (mS/cm)',
+        AppTheme.statusNormal,
+        chartData.map((item) => item.ec).toList(),
+      ),
+    ];
+  }
+
+  List<String> get _historyTableHeaders => const [
+        'Waktu',
+        'Nitrogen (mg/kg)',
+        'Fosfor (mg/kg)',
+        'Kalium (mg/kg)',
+        'pH',
+        'Kelembapan (%)',
+        'Suhu (C)',
+        'EC (mS/cm)',
+      ];
+
+  String _buildTrendSvg(_PdfTrendSeries series) {
+    const width = 760.0;
+    const height = 240.0;
+    const plotX = 52.0;
+    const plotY = 14.0;
+    const plotWidth = 682.0;
+    const plotHeight = 176.0;
+    final maxY =
+        series.values.fold(0.0, (max, value) => value > max ? value : max);
+    final chartMaxY = maxY <= 0 ? 1.0 : maxY * 1.08;
+    final grid = StringBuffer();
+
+    for (var i = 0; i <= 4; i++) {
+      final y = plotY + (plotHeight * i / 4);
+      final labelValue = chartMaxY * (1 - i / 4);
+      grid
+        ..writeln(
+            '<line x1="$plotX" y1="$y" x2="${plotX + plotWidth}" y2="$y" stroke="#E5E7EB" stroke-width="1"/>')
+        ..writeln(
+            '<text x="4" y="${y + 3}" font-size="11" fill="#64748B">${_chartAxisLabel(labelValue)}</text>');
+    }
+
+    return '''
+<svg xmlns="http://www.w3.org/2000/svg" width="$width" height="$height" viewBox="0 0 $width $height">
+  <rect x="0" y="0" width="$width" height="$height" fill="#FFFFFF"/>
+  $grid
+  <line x1="$plotX" y1="${plotY + plotHeight}" x2="${plotX + plotWidth}" y2="${plotY + plotHeight}" stroke="#94A3B8" stroke-width="1.2"/>
+  <line x1="$plotX" y1="$plotY" x2="$plotX" y2="${plotY + plotHeight}" stroke="#94A3B8" stroke-width="1.2"/>
+  ${_svgSeriesPolyline(series, chartMaxY, plotX, plotY, plotWidth, plotHeight)}
+</svg>''';
+  }
+
+  String _svgSeriesPolyline(
+    _PdfTrendSeries series,
+    double maxY,
+    double plotX,
+    double plotY,
+    double plotWidth,
+    double plotHeight,
+  ) {
+    final values = series.values;
+    if (values.isEmpty) return '';
+    final safeMax = maxY <= 0 ? 1.0 : maxY;
+    final color = _svgColor(series.color);
+
+    if (values.length == 1) {
+      final y = plotY + plotHeight - ((values.first / safeMax) * plotHeight);
+      return '<circle cx="$plotX" cy="$y" r="4" fill="$color"/>';
+    }
+
+    final points = List.generate(values.length, (index) {
+      final x = plotX + (plotWidth * index / (values.length - 1));
+      final y = plotY + plotHeight - ((values[index] / safeMax) * plotHeight);
+      return '${x.toStringAsFixed(1)},${y.toStringAsFixed(1)}';
+    }).join(' ');
+
+    return '<polyline points="$points" fill="none" stroke="$color" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>';
+  }
+
+  String _chartAxisLabel(double value) {
+    if (value >= 100) return value.toStringAsFixed(0);
+    if (value >= 10) return value.toStringAsFixed(1);
+    return value.toStringAsFixed(2);
+  }
+
+  List<String> _exportRow(SensorDataPoint item) {
+    return [
+      DateFormat('yyyy-MM-dd HH:mm').format(item.time),
+      item.nitrogen.toStringAsFixed(1),
+      item.phosphorus.toStringAsFixed(1),
+      item.potassium.toStringAsFixed(1),
+      item.ph.toStringAsFixed(1),
+      item.moisture.toStringAsFixed(1),
+      item.temperature.toStringAsFixed(1),
+      item.ec.toStringAsFixed(2),
+    ];
+  }
+
+  String _csvCell(String value) {
+    return '"${value.replaceAll('"', '""')}"';
+  }
+
+  String _xmlEscape(String value) {
+    return const HtmlEscape().convert(value);
+  }
+
+  String _svgColor(Color color) {
+    return '#${color.value.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+  }
+
+  PdfColor _pdfWidgetColor(Color color) {
+    return PdfColor(color.red / 255, color.green / 255, color.blue / 255);
+  }
+
+  void _showExportSnackBar(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppTheme.primaryGreen,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
   final List<Map<String, dynamic>> _sensors = [
     {'label': 'NPK', 'icon': Icons.eco_rounded},
     {'label': 'pH', 'icon': Icons.science_rounded},
@@ -532,6 +1097,63 @@ class _HistoryScreenState extends State<HistoryScreen> {
     ];
   }
 
+  Widget _buildExportMenu() {
+    if (_isExportingHistory) {
+      return const SizedBox(
+        width: 48,
+        height: 48,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return PopupMenuButton<_HistoryExportFormat>(
+      tooltip: 'Download data historis',
+      icon: const Icon(
+        Icons.download_rounded,
+        color: AppTheme.primaryGreen,
+      ),
+      onSelected: _exportHistory,
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: _HistoryExportFormat.pdf,
+          child: Row(
+            children: [
+              Icon(Icons.picture_as_pdf_rounded, size: 18),
+              SizedBox(width: 10),
+              Text('PDF'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: _HistoryExportFormat.csv,
+          child: Row(
+            children: [
+              Icon(Icons.table_chart_rounded, size: 18),
+              SizedBox(width: 10),
+              Text('CSV'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: _HistoryExportFormat.excel,
+          child: Row(
+            children: [
+              Icon(Icons.grid_on_rounded, size: 18),
+              SizedBox(width: 10),
+              Text('Excel (.xlsx)'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -551,6 +1173,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 color: AppTheme.textPrimary,
               ),
             ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _buildExportMenu(),
+              ),
+            ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(56),
               child: Padding(
@@ -1116,4 +1744,12 @@ class _StatItem {
   final String value;
   final Color color;
   const _StatItem(this.label, this.value, this.color);
+}
+
+class _PdfTrendSeries {
+  final String label;
+  final Color color;
+  final List<double> values;
+
+  const _PdfTrendSeries(this.label, this.color, this.values);
 }

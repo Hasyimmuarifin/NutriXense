@@ -4,15 +4,19 @@ import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.example.nutrixense/alerts"
@@ -85,9 +89,69 @@ class MainActivity : FlutterActivity() {
                     result.success(NutrixenseBackgroundService.isServiceRunning)
                 }
 
+                "saveFileToDownloads" -> {
+                    val fileName = call.argument<String>("fileName")
+                    val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
+                    val bytes = call.argument<ByteArray>("bytes")
+
+                    if (fileName.isNullOrBlank() || bytes == null) {
+                        result.error("INVALID_ARGUMENT", "fileName and bytes are required.", null)
+                        return@setMethodCallHandler
+                    }
+
+                    try {
+                        result.success(saveFileToDownloads(fileName, mimeType, bytes))
+                    } catch (error: Exception) {
+                        result.error("SAVE_FAILED", error.message, null)
+                    }
+                }
+
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun saveFileToDownloads(
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray
+    ): String {
+        val publicPath = "/storage/emulated/0/Download/$fileName"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException("Unable to create Downloads file.")
+
+            resolver.openOutputStream(uri)?.use { output ->
+                output.write(bytes)
+            } ?: throw IllegalStateException("Unable to open Downloads file.")
+
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+
+            return publicPath
+        }
+
+        @Suppress("DEPRECATION")
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS
+        )
+        if (!downloadsDir.exists()) {
+            downloadsDir.mkdirs()
+        }
+
+        val file = File(downloadsDir, fileName)
+        file.writeBytes(bytes)
+        return file.absolutePath
     }
 
     private fun requestNotificationPermissionIfNeeded() {
