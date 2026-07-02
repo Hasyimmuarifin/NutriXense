@@ -26,6 +26,8 @@ class GeminiRecommendationService {
   static const _busyMessage =
       'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
   static const _requestTimeout = Duration(minutes: 1);
+  static const _responseCacheTtl = Duration(minutes: 2);
+  static _CachedAiRecommendation? _cachedRecommendation;
 
   // Threshold target for tea plants.
   static const thresholds = {
@@ -67,6 +69,17 @@ class GeminiRecommendationService {
     }
 
     final summary = _SensorHistorySummary.fromReadings(readings);
+    final requestFingerprint = _buildRequestFingerprint(
+      summary,
+      landAreaSquareMeters,
+    );
+    final cachedResponse = _readCachedRecommendation(requestFingerprint);
+    if (cachedResponse != null) return cachedResponse;
+
+    final deterministicPlan = _buildDeterministicDecisionPlan(
+      summary,
+      landAreaSquareMeters,
+    );
     final model = GenerativeModel(
       model: config.modelName,
       apiKey: config.apiKey,
@@ -81,7 +94,7 @@ class GeminiRecommendationService {
 
     final payload = jsonEncode({
       'task':
-          'Analyze this condensed IoT sensor history for tea plants and return JSON only.',
+          'Polish this deterministic DSS/XAI decision plan for tea plants and return JSON only.',
       'crop_context':
           'Tanaman teh (Camellia sinensis), media tanam asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
       'language': 'id',
@@ -93,32 +106,34 @@ class GeminiRecommendationService {
         'activate_potassium_pump': 'Pompa C - Kalium (K)',
         'activate_water_pump': 'Pompa D - Air (H2O)',
       },
-      'pump_flow_rates_ml_per_second': PumpFlowRates.toPromptJson(),
       'cultivation_area': {
         'square_meters': landAreaSquareMeters,
         'unit': 'm2',
-        'irrigation_estimation_note':
-            'Use this area for water pump estimation. In irrigation, 1 mm water depth equals 1 liter per m2.',
+        'calculation_note':
+            'Area has already been used by the app to calculate deterministic pump volume and duration.',
       },
       'output_rules': [
         'Return one complete JSON object only.',
         'Do not use markdown.',
         'Keep every string concise and close all quotes.',
+        'Use deterministic_decision_plan as the single source of truth.',
+        'Do not change plant_health_percentage.',
+        'Do not change recommendation item id or status.',
+        'Do not change recommendation group membership.',
+        'Do not change automation trigger booleans.',
+        'Do not invent pump duration, pump volume, deficit, threshold, or status values.',
+        'If mentioning pump duration or dosage, use only values from deterministic_decision_plan.pump_recommendations.',
+        'Only improve Indonesian wording for sensor_summary, message, explanation, and recommendation.',
         'sensor_summary maximum 2 sentences.',
-        'Return maximum 7 recommendation items total.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
-        'For each recommendation item, explanation must explain why the condition happened from the sensor data.',
-        'For each recommendation item, recommendation must explain specific follow-up actions for tea plants in general cultivation context.',
+        'For each recommendation item, explanation must explain the deterministic status from current value, threshold, average, and trend.',
+        'For each recommendation item, recommendation must explain practical follow-up actions for tea plants based on the deterministic plan.',
         'Do not mention or assume any specific cultivation container unless the input data explicitly states it.',
-        'Recommendations must be practical, safe, and measurable for tea plants, such as small-dose pump use, careful irrigation, acidic pH correction, fertilizer adjustment, retesting, drainage, shade, or monitoring frequency.',
-        'When mentioning pump duration or dosage, consider pump_flow_rates_ml_per_second so slower pumps run longer for comparable target volume.',
-        'When recommending N, P, or K nutrient pump dosage, consider cultivation_area.square_meters so smaller areas receive lower volume and larger areas receive higher volume.',
-        'When recommending watering, consider cultivation_area.square_meters and explain the estimated water volume in practical terms.',
-        'Set an automation trigger to true only when its matching local_threshold_flag is true.',
         'Mention that pump activation requires user confirmation when nutrient or water correction is recommended.',
       ],
       'thresholds': thresholds,
       'history_summary': summary.toJson(),
+      'deterministic_decision_plan': deterministicPlan,
     });
 
     dynamic response;
@@ -132,7 +147,7 @@ class GeminiRecommendationService {
         debugPrint(
           'Gemini unavailable, using local DSS/XAI fallback: $error',
         );
-        return _responseWithDecisionPlan(
+        final fallbackResponse = _responseWithDecisionPlan(
           _buildAiUnavailableFallbackResponse(
             summary,
             error,
@@ -140,6 +155,10 @@ class GeminiRecommendationService {
           ),
           summary,
           landAreaSquareMeters,
+        );
+        return _cacheRecommendation(
+          requestFingerprint,
+          fallbackResponse,
         );
       }
       rethrow;
@@ -156,11 +175,21 @@ class GeminiRecommendationService {
       originalPayload: payload,
       summary: summary,
       landAreaSquareMeters: landAreaSquareMeters,
+      deterministicPlan: deterministicPlan,
     );
-    return _responseWithDecisionPlan(
+    final merged = _mergeGeminiNarrativeWithDecisionPlan(
+      deterministicPlan,
+      summary,
       decoded,
+    );
+    final responseWithDecisionPlan = _responseWithDecisionPlan(
+      merged,
       summary,
       landAreaSquareMeters,
+    );
+    return _cacheRecommendation(
+      requestFingerprint,
+      responseWithDecisionPlan,
     );
   }
 
@@ -248,6 +277,41 @@ class GeminiRecommendationService {
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
   }
 
+  static String _buildRequestFingerprint(
+    _SensorHistorySummary summary,
+    double landAreaSquareMeters,
+  ) {
+    return jsonEncode({
+      'land_area_square_meters': _roundDouble(landAreaSquareMeters),
+      'thresholds': thresholds,
+      'summary': summary.toJson(),
+    });
+  }
+
+  static AiRecommendationResponse? _readCachedRecommendation(
+    String fingerprint,
+  ) {
+    final cached = _cachedRecommendation;
+    if (cached == null || cached.fingerprint != fingerprint) return null;
+
+    final age = DateTime.now().difference(cached.createdAt);
+    if (age > _responseCacheTtl) return null;
+
+    return cached.response;
+  }
+
+  static AiRecommendationResponse _cacheRecommendation(
+    String fingerprint,
+    AiRecommendationResponse response,
+  ) {
+    _cachedRecommendation = _CachedAiRecommendation(
+      fingerprint: fingerprint,
+      response: response,
+      createdAt: DateTime.now(),
+    );
+    return response;
+  }
+
   static String _stripCodeFence(String text) {
     final trimmed = text.trim();
     if (!trimmed.startsWith('```')) return trimmed;
@@ -263,6 +327,7 @@ class GeminiRecommendationService {
     required String originalPayload,
     required _SensorHistorySummary summary,
     required double landAreaSquareMeters,
+    required Map<String, dynamic> deterministicPlan,
   }) async {
     final cleaned = _stripCodeFence(rawText);
     final decoded = _tryDecodeJsonObject(cleaned);
@@ -324,7 +389,169 @@ class GeminiRecommendationService {
       'Gemini returned malformed JSON after repair. Using local fallback. '
       'Preview: ${_shortPreview(cleaned)}',
     );
-    return _buildLocalFallbackResponse(summary, landAreaSquareMeters);
+    return deterministicPlan;
+  }
+
+  static Map<String, dynamic> _buildDeterministicDecisionPlan(
+    _SensorHistorySummary summary,
+    double landAreaSquareMeters,
+  ) {
+    final pumpRecommendations = _buildPumpRecommendations(
+      summary,
+      landAreaSquareMeters,
+    );
+    final dailyScheduleRecommendation = pumpRecommendations.isEmpty
+        ? null
+        : DailyFertilizationScheduleRecommendation.fromPlan(
+            recommendations: pumpRecommendations,
+            reason:
+                'Jadwal harian direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2.',
+          );
+
+    return {
+      ..._buildLocalFallbackResponse(summary, landAreaSquareMeters),
+      'pump_recommendations': _pumpRecommendationsToJson(pumpRecommendations),
+      if (dailyScheduleRecommendation != null)
+        'daily_schedule_recommendation':
+            _dailyScheduleRecommendationToJson(dailyScheduleRecommendation),
+    };
+  }
+
+  static Map<String, dynamic> _mergeGeminiNarrativeWithDecisionPlan(
+    Map<String, dynamic> deterministicPlan,
+    _SensorHistorySummary summary,
+    Map<String, dynamic> geminiResponse,
+  ) {
+    final deterministicRecommendations =
+        _asMap(deterministicPlan['recommendations']);
+    final geminiRecommendations = _asMap(geminiResponse['recommendations']);
+    final geminiItemsById = <String, Map<String, dynamic>>{};
+    final geminiItems = [
+      ..._asMapList(geminiRecommendations['all']),
+      ..._asMapList(geminiRecommendations['kritis']),
+      ..._asMapList(geminiRecommendations['awas']),
+      ..._asMapList(geminiRecommendations['baik']),
+    ];
+
+    for (final item in geminiItems) {
+      final id = _nonEmptyText(item['id']);
+      if (id != null) geminiItemsById[id] = item;
+    }
+
+    Map<String, dynamic> mergeItem(Map<String, dynamic> deterministicItem) {
+      final id = _nonEmptyText(deterministicItem['id']);
+      final geminiItem = id == null ? null : geminiItemsById[id];
+
+      String textField(String key) {
+        return _nonEmptyText(geminiItem?[key]) ??
+            _nonEmptyText(deterministicItem[key]) ??
+            '';
+      }
+
+      return {
+        ...deterministicItem,
+        'id': deterministicItem['id'],
+        'title': deterministicItem['title'],
+        'status': deterministicItem['status'],
+        'message': textField('message'),
+        'explanation': textField('explanation'),
+        'recommendation': textField('recommendation'),
+      };
+    }
+
+    final allItems = _asMapList(deterministicRecommendations['all'])
+        .map(mergeItem)
+        .toList(growable: false);
+
+    List<Map<String, dynamic>> itemsWithStatus(String status) {
+      return allItems
+          .where((item) => item['status']?.toString() == status)
+          .toList(growable: false);
+    }
+
+    return {
+      ...deterministicPlan,
+      'plant_health_percentage': deterministicPlan['plant_health_percentage'],
+      'sensor_summary': _nonEmptyText(geminiResponse['sensor_summary']) ??
+          _nonEmptyText(deterministicPlan['sensor_summary']) ??
+          'Analisis dibuat dari perhitungan DSS lokal berdasarkan data sensor terbaru.',
+      'recommendations': {
+        'all': allItems,
+        'kritis': itemsWithStatus('kritis'),
+        'awas': itemsWithStatus('awas'),
+        'baik': itemsWithStatus('baik'),
+      },
+      'automation_triggers': deterministicPlan['automation_triggers'],
+      'deterministic_guard': {
+        'source': 'local_app_calculation',
+        'history_end': summary.endTime.toIso8601String(),
+        'locked_fields': [
+          'plant_health_percentage',
+          'recommendation_status',
+          'recommendation_groups',
+          'automation_triggers',
+          'pump_recommendations',
+          'daily_schedule_recommendation',
+        ],
+      },
+    };
+  }
+
+  static List<Map<String, dynamic>> _pumpRecommendationsToJson(
+    List<PumpFertilizationRecommendation> recommendations,
+  ) {
+    return recommendations
+        .map(
+          (item) => {
+            'relay': item.relay,
+            'pump_index': item.pumpIndex,
+            'pump_name': item.pumpName,
+            'nutrient': item.nutrient,
+            'unit': item.unit,
+            'current_value': item.currentValue,
+            'target_minimum': item.targetMinimum,
+            'deficit': item.deficit,
+            'deficit_percent': item.deficitPercent,
+            'recommended_seconds': item.recommendedSeconds,
+            'average_flow_rate_ml_per_second': item.averageFlowRateMlPerSecond,
+            'estimated_volume_ml': _roundDouble(item.estimatedVolumeMl),
+            'reason': item.reason,
+          },
+        )
+        .toList(growable: false);
+  }
+
+  static Map<String, dynamic> _dailyScheduleRecommendationToJson(
+    DailyFertilizationScheduleRecommendation recommendation,
+  ) {
+    final pumpIndexes = recommendation.pumpIndexes.toList()..sort();
+    return {
+      'hour': recommendation.hour,
+      'minute': recommendation.minute,
+      'pump_indexes': pumpIndexes,
+      'duration_seconds': recommendation.durationSeconds,
+      'reason': recommendation.reason,
+    };
+  }
+
+  static Map<String, dynamic> _asMap(Object? value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return <String, dynamic>{};
+  }
+
+  static List<Map<String, dynamic>> _asMapList(Object? value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+  }
+
+  static String? _nonEmptyText(Object? value) {
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty) return null;
+    return text;
   }
 
   static Map<String, dynamic>? _tryDecodeJsonObject(String text) {
@@ -747,7 +974,7 @@ class GeminiRecommendationService {
     required int baseSeconds,
     required double landAreaSquareMeters,
   }) {
-    final safeArea = landAreaSquareMeters <= 0 ? 0.0044 : landAreaSquareMeters;
+    final safeArea = landAreaSquareMeters <= 0 ? 0 : landAreaSquareMeters;
     final baseVolumePerSquareMeterMl =
         PumpFlowRates.highestRate.averageMlPerSecond * baseSeconds;
     final volumeMl = safeArea * baseVolumePerSquareMeterMl;
@@ -782,7 +1009,7 @@ class GeminiRecommendationService {
     required double landAreaSquareMeters,
   }) {
     const waterMlPerSquareMeterPerMoisturePercent = 50.0;
-    final safeArea = landAreaSquareMeters <= 0 ? 0.0044 : landAreaSquareMeters;
+    final safeArea = landAreaSquareMeters <= 0 ? 0 : landAreaSquareMeters;
     final volumeMl =
         safeArea * deficitPercent * waterMlPerSquareMeterPerMoisturePercent;
     return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
@@ -790,7 +1017,7 @@ class GeminiRecommendationService {
 
   static int _secondsFromDeficit(double deficitPercent) {
     final seconds = (10 + (deficitPercent * 2.4)).round();
-    return seconds < 5 ? 5 : seconds;
+    return seconds < 1 ? 1 : seconds;
   }
 
   static double _roundDouble(double value) {
@@ -836,8 +1063,20 @@ class AiRecommendationException implements Exception {
   String toString() => message;
 }
 
+class _CachedAiRecommendation {
+  const _CachedAiRecommendation({
+    required this.fingerprint,
+    required this.response,
+    required this.createdAt,
+  });
+
+  final String fingerprint;
+  final AiRecommendationResponse response;
+  final DateTime createdAt;
+}
+
 const _systemPrompt =
-    'You are an expert AI Agronomist for tea plants (Camellia sinensis), Decision Support System, and Explainable AI (XAI) engine. Analyze the provided historical sensor data summaries (N, P, K, pH, Temp, Moisture, EC) using target ranges for tea plants in general cultivation context. Tea prefers acidic media, stable moisture with good drainage, moderate temperature, and gradual nutrient correction to avoid root stress and EC shock. Output your entire analysis STRICTLY as a single, minified JSON object matching the requested schema. All text must be in Indonesian. The explanation field must provide scientific reasons (XAI) for tea plant health status without assuming a specific cultivation container. The recommendation field must provide concrete follow-up actions that a farmer or user can apply safely and practically for tea plants.';
+    'You are an expert agronomist editor for tea plants (Camellia sinensis) and an Explainable AI (XAI) narrator. The application has already performed deterministic DSS calculations for status, threshold gap, pump volume, pump duration, plant health score, and automation triggers. Treat deterministic_decision_plan as the single source of truth. Do not recalculate, override, or invent decision values. Only rewrite the Indonesian summary, explanation, and recommendation text so the deterministic decisions are clear, scientifically reasonable, concise, and practical. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {

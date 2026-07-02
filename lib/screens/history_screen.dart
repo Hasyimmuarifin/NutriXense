@@ -614,7 +614,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         ? const SliverFillRemaining(
                             child: Center(
                               child: Text(
-                                'No history data',
+                                'Tidak ada data riwayat tersedia',
                                 style: TextStyle(
                                   color: AppTheme.textSecondary,
                                 ),

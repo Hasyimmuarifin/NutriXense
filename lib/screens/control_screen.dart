@@ -34,8 +34,8 @@ class _ControlScreenState extends State<ControlScreen> {
   final List<_WateringSchedule> _wateringSchedules = [];
   TimeOfDay _draftScheduleTime = TimeOfDay.now();
   final Set<int> _draftSchedulePumpIndexes = {3};
-  final Map<int, int> _draftScheduleDurationsByPump = {3: 5};
-  int _draftScheduleDurationSeconds = 5;
+  final Map<int, int> _draftScheduleDurationsByPump = {3: 1};
+  int _draftScheduleDurationSeconds = 1;
   bool _draftScheduleRepeats = true;
   late bool _isRuleBasedAutomationEnabled;
   StreamSubscription<Map<String, dynamic>>? _controlSub;
@@ -199,7 +199,7 @@ class _ControlScreenState extends State<ControlScreen> {
   void _syncDraftScheduleDuration() {
     final selectedDurations = _draftDurationsForSelectedPumps().values;
     _draftScheduleDurationSeconds = selectedDurations.isEmpty
-        ? 5
+        ? 1
         : selectedDurations.reduce(
             (current, next) => current > next ? current : next,
           );
@@ -866,14 +866,14 @@ class _ControlScreenState extends State<ControlScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppTheme.bgCard,
+        color: AppTheme.primaryBlue.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: AppTheme.primaryGreen.withOpacity(0.12),
+          color: AppTheme.primaryBlue.withOpacity(0.18),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: AppTheme.primaryBlue.withOpacity(0.08),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -907,7 +907,7 @@ class _ControlScreenState extends State<ControlScreen> {
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.primaryGreen,
                       ),
                     ),
                     SizedBox(height: 3),
@@ -928,10 +928,10 @@ class _ControlScreenState extends State<ControlScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppTheme.primaryGreen.withOpacity(0.04),
+              color: AppTheme.bgCard,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: AppTheme.primaryGreen.withOpacity(0.12),
+                color: AppTheme.primaryBlue.withOpacity(0.14),
               ),
             ),
             child: LayoutBuilder(
@@ -1069,15 +1069,17 @@ class _ControlScreenState extends State<ControlScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          const Divider(height: 1),
           const SizedBox(height: 12),
           if (_wateringSchedules.isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTheme.bgPrimary,
+                color: AppTheme.bgCard.withOpacity(0.82),
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.primaryBlue.withOpacity(0.1),
+                ),
               ),
               child: const Row(
                 children: [
@@ -1132,7 +1134,7 @@ class _ControlScreenState extends State<ControlScreen> {
             Text(
               selectedPumpIndexes.length > 1
                   ? '${selectedPumpIndexes.length} pompa'
-                  : '${_draftDurationForPump(selectedPumpIndexes.first)} detik',
+                  : '${selectedPumpIndexes.length} pompa',
               style: const TextStyle(
                 fontSize: 13,
                 color: AppTheme.textPrimary,
@@ -1161,7 +1163,7 @@ class _ControlScreenState extends State<ControlScreen> {
       decoration: BoxDecoration(
         color: AppTheme.primaryGreen.withOpacity(0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.14)),
+        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.75)),
       ),
       child: Column(
         children: [
@@ -1191,9 +1193,9 @@ class _ControlScreenState extends State<ControlScreen> {
           ),
           Slider(
             value: seconds.toDouble(),
-            min: 5,
+            min: 1,
             max: sliderMax.toDouble(),
-            divisions: ((sliderMax - 5) / 5).round(),
+            divisions: sliderMax - 1,
             label:
                 '$seconds detik • ${PumpFlowRates.formatMl(estimatedVolume)} ml',
             activeColor: AppTheme.primaryGreen,
@@ -1229,23 +1231,24 @@ class _ControlScreenState extends State<ControlScreen> {
 
   int _durationSliderMax(int seconds) {
     if (seconds <= 300) return 300;
-    return (((seconds + 60) / 5).ceil() * 5).toInt();
+    return seconds + 60;
   }
 
   Widget _buildScheduleListTile(_WateringSchedule schedule) {
     final nextRunText = schedule.nextRun == null
         ? 'Mati'
         : TimeOfDay.fromDateTime(schedule.nextRun!).format(context);
+    final pumpDetails = schedule.durationEntries;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.bgPrimary,
+        color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: schedule.enabled
-              ? AppTheme.primaryGreen.withOpacity(0.3)
+              ? AppTheme.primaryBlue.withOpacity(0.24)
               : Colors.grey.shade300,
         ),
       ),
@@ -1267,8 +1270,8 @@ class _ControlScreenState extends State<ControlScreen> {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '${_pumpNames(schedule.pumpIndexes)} • ${schedule.durationSummary} • ${schedule.repeatsDaily ? 'Daily' : 'Once'}',
-                      maxLines: 2,
+                      '${schedule.repeatsDaily ? 'Setiap hari' : 'Sekali jalan'} • ${pumpDetails.length} pompa',
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 12,
@@ -1297,7 +1300,86 @@ class _ControlScreenState extends State<ControlScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          ...pumpDetails.map((entry) {
+            final pump = _pumps[entry.key];
+            final flowRate = PumpFlowRates.byPumpIndex(entry.key);
+            final estimatedVolume = PumpFlowRates.volumeForDuration(
+              pumpIndex: entry.key,
+              seconds: entry.value,
+            );
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryBlue.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.primaryBlue.withOpacity(0.1),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryGreen.withOpacity(0.11),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      String.fromCharCode(65 + entry.key),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.primaryGreen,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${pump.name} (${pump.nutrient})',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textPrimary,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${PumpFlowRates.formatRate(flowRate.averageMlPerSecond)} ml/detik • estimasi ${PumpFlowRates.formatMl(estimatedVolume)} ml',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${entry.value} detik',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.primaryBlue,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
           Row(
             children: [
               Icon(
@@ -1331,11 +1413,6 @@ class _ControlScreenState extends State<ControlScreen> {
         ],
       ),
     );
-  }
-
-  String _pumpNames(Set<int> indexes) {
-    final sortedIndexes = indexes.toList()..sort();
-    return sortedIndexes.map((index) => _pumps[index].name).join(', ');
   }
 
   Widget _buildEmergencyStop() {
@@ -1412,20 +1489,15 @@ class _WateringSchedule {
   });
 
   int get durationSeconds {
-    if (durationSecondsByPump.isEmpty) return 5;
+    if (durationSecondsByPump.isEmpty) return 1;
     return durationSecondsByPump.values.reduce(
       (current, next) => current > next ? current : next,
     );
   }
 
-  String get durationSummary {
-    if (durationSecondsByPump.length <= 1) return '${durationSeconds}s';
-    final parts = durationSecondsByPump.entries.toList()
+  List<MapEntry<int, int>> get durationEntries {
+    return durationSecondsByPump.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
-    return parts
-        .map(
-            (entry) => '${String.fromCharCode(65 + entry.key)} ${entry.value}s')
-        .join(', ');
   }
 
   Map<String, dynamic> toJson() {
@@ -1468,7 +1540,10 @@ class _WateringSchedule {
       return null;
     }
 
-    final parsedPumpIndexes = pumpIndexes.whereType<int>().toSet();
+    final parsedPumpIndexes = pumpIndexes
+        .whereType<int>()
+        .where((index) => index >= 0 && index <= 3)
+        .toSet();
     if (parsedPumpIndexes.isEmpty) return null;
     final parsedDurations = <int, int>{};
 
@@ -1483,7 +1558,7 @@ class _WateringSchedule {
         if (pumpIndex != null &&
             seconds != null &&
             parsedPumpIndexes.contains(pumpIndex)) {
-          parsedDurations[pumpIndex] = seconds < 5 ? 5 : seconds;
+          parsedDurations[pumpIndex] = seconds < 1 ? 1 : seconds;
         }
       }
     }
@@ -1491,7 +1566,7 @@ class _WateringSchedule {
     for (final pumpIndex in parsedPumpIndexes) {
       parsedDurations.putIfAbsent(
         pumpIndex,
-        () => durationSeconds < 5 ? 5 : durationSeconds,
+        () => durationSeconds < 1 ? 1 : durationSeconds,
       );
     }
 

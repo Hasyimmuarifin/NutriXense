@@ -163,7 +163,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return _LandAreaInputDialog(
-          initialSquareMeters: _lastLandAreaSquareMeters ?? 0.0044,
+          initialSquareMeters: _lastLandAreaSquareMeters ?? 0,
           formatLandArea: _formatLandArea,
           parseLandAreaNumber: _parseLandAreaSquareMeters,
         );
@@ -1229,9 +1229,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(height: 4),
           Slider(
             value: seconds.toDouble(),
-            min: 5,
+            min: 1,
             max: sliderMax.toDouble(),
-            divisions: ((sliderMax - 5) / 5).round(),
+            divisions: sliderMax - 1,
             label: '$seconds detik',
             activeColor: AppTheme.primaryGreen,
             onChanged: (value) {
@@ -1248,7 +1248,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
   int _durationSliderMax(int seconds) {
     if (seconds <= 300) return 300;
-    return (((seconds + 60) / 5).ceil() * 5).toInt();
+    return seconds + 60;
   }
 
   Widget _buildFlowInfoChip({
@@ -1588,7 +1588,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
                   ),
                   decoration: InputDecoration(
                     labelText: 'Luas tanah',
-                    hintText: '0.0044',
+                    hintText: '0',
                     errorText: _errorText,
                     filled: true,
                     fillColor: AppTheme.bgPrimary,

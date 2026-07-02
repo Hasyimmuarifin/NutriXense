@@ -130,7 +130,7 @@ class PumpFertilizationRecommendation {
       targetMinimum: _readDouble(json['target_minimum']),
       deficit: _readDouble(json['deficit']),
       deficitPercent: _readDouble(json['deficit_percent']),
-      recommendedSeconds: _atLeastFive(_readInt(json['recommended_seconds'])),
+      recommendedSeconds: _atLeastOne(_readInt(json['recommended_seconds'])),
       reason: (json['reason'] ?? '').toString(),
     );
   }
@@ -216,7 +216,7 @@ class DailyFertilizationScheduleRecommendation {
       hour: hour,
       minute: minute,
       pumpIndexes: parsedPumpIndexes,
-      durationSeconds: _atLeastFive(
+      durationSeconds: _atLeastOne(
           _readInt(json['duration_seconds'] ?? json['durationSeconds'])),
       reason: (json['reason'] ?? '').toString(),
     );
@@ -416,8 +416,8 @@ int _readInt(Object? value) {
   return int.tryParse(value?.toString() ?? '') ?? 0;
 }
 
-int _atLeastFive(int value) {
-  return value < 5 ? 5 : value;
+int _atLeastOne(int value) {
+  return value < 1 ? 1 : value;
 }
 
 double _readDouble(Object? value) {

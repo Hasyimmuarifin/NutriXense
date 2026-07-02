@@ -76,9 +76,9 @@ class PumpFlowRates {
     required double volumeMl,
   }) {
     final rate = byPumpIndex(pumpIndex).averageMlPerSecond;
-    if (rate <= 0) return 5;
+    if (rate <= 0) return 1;
     final seconds = (volumeMl / rate).round();
-    return seconds < 5 ? 5 : seconds;
+    return seconds < 1 ? 1 : seconds;
   }
 
   static String formatMl(double value) {

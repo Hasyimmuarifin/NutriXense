@@ -1566,6 +1566,7 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
     );
+    final showStatusBelowUnit = compact || isEcCard;
     final muteButtonSize = compact ? 30.0 : 34.0;
     final buzzerMuteButton = Tooltip(
       message: isBuzzerMuted
@@ -1594,15 +1595,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       ),
-    );
-    final ecStatusControls = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        statusBadge,
-        const SizedBox(height: 6),
-        buzzerMuteButton,
-      ],
     );
 
     return Container(
@@ -1678,30 +1670,19 @@ class _HomeScreenState extends State<HomeScreen>
                         color: Colors.black54,
                       ),
                     ),
-                    if (compact) ...[
+                    if (showStatusBelowUnit) ...[
                       const SizedBox(height: 5),
-                      if (isEcCard)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: ecStatusControls,
-                        )
-                      else
-                        statusBadge,
+                      statusBadge,
                     ],
                   ],
                 ),
               ),
 
               // STATUS BADGE (tetap konsisten)
-              if (!compact)
-                isEcCard ? ecStatusControls : statusBadge
-              else if (!isEcCard)
-                buzzerMuteButton,
+              if (!showStatusBelowUnit) statusBadge,
 
-              if (!compact && !isEcCard) ...[
-                const SizedBox(width: 8),
-                buzzerMuteButton,
-              ],
+              if (!showStatusBelowUnit) const SizedBox(width: 8),
+              buzzerMuteButton,
             ],
           ),
 
