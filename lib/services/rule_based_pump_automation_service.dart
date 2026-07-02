@@ -57,7 +57,10 @@ class RuleBasedPumpAutomationService {
     if (persist) {
       await setEnabledPreference(true);
     }
-    stopInAppChecks();
+    await syncBackendDssConfig(enabled: true);
+    await _backgroundChannel.invokeMethod<void>('startBackgroundMonitor', {
+      'thresholdsJson': jsonEncode(_thresholdConfigService.all()),
+    }).catchError((_) {});
   }
 
   Future<void> stop({bool persist = true}) async {
@@ -93,6 +96,15 @@ class RuleBasedPumpAutomationService {
     final payload = {
       if (enabled != null) 'enabled': enabled,
       'thresholds': _thresholdConfigService.all(),
+      'automationMode': 'fuzzy_logic',
+      'fuzzyLogic': {
+        'minPulseSeconds': 5,
+        'mediumPulseSeconds': 12,
+        'maxPulseSeconds': 30,
+        'checkIntervalSeconds': checkInterval.inSeconds,
+        'description':
+            'Durasi pompa dihitung dari rasio kekurangan nutrisi terhadap ambang minimum menggunakan membership tipis, sedang, dan parah.',
+      },
       'updatedAt': FieldValue.serverTimestamp(),
     };
 

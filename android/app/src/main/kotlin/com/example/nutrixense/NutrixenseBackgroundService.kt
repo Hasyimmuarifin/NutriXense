@@ -141,6 +141,9 @@ class NutrixenseBackgroundService : Service() {
     private val lastScheduleRunDates = mutableMapOf<Long, String>()
     private val repeatAlertMillis = TimeUnit.MINUTES.toMillis(5)
     private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(1)
+    private val fuzzyMinPulseMillis = 1_000L
+    private val fuzzyMediumPulseMillis = 5_000L
+    private val fuzzyMaxPulseMillis = 10_000L
 
     override fun onCreate() {
         super.onCreate()
@@ -372,19 +375,19 @@ class NutrixenseBackgroundService : Service() {
     private fun runRuleBasedDecisionSupport() {
         if (!isEnabled(this)) return
         val reading = latestReading ?: return
-        val relays = relaysForRule(reading)
-        if (relays.isEmpty()) return
+        val durationsByRelay = fuzzyDurationsByRelay(reading)
+        if (durationsByRelay.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        val allowedRelays = relays.filter { relay ->
+        val allowedDurations = durationsByRelay.filter { (relay, _) ->
             val lastActivation = lastRelayActivationTimes[relay]
             lastActivation == null || now - lastActivation >= ruleIntervalMillis
-        }.toSet()
+        }
 
-        if (allowedRelays.isEmpty()) return
+        if (allowedDurations.isEmpty()) return
 
-        pulseRelays(allowedRelays)
-        allowedRelays.forEach { relay -> lastRelayActivationTimes[relay] = now }
+        pulseRelays(allowedDurations)
+        allowedDurations.keys.forEach { relay -> lastRelayActivationTimes[relay] = now }
     }
 
     private fun runDueSchedules() {
@@ -401,6 +404,8 @@ class NutrixenseBackgroundService : Service() {
         var changed = false
 
         for (schedule in enabledSchedules) {
+            if (!schedule.isActiveOn(todayKey)) continue
+
             val scheduleMinute = schedule.hour * 60 + schedule.minute
             if (currentMinute != scheduleMinute) continue
             if (lastScheduleRunDates[schedule.id] == todayKey) continue
@@ -417,6 +422,128 @@ class NutrixenseBackgroundService : Service() {
         if (changed) {
             persistSchedules()
         }
+    }
+
+    private fun fuzzyDurationsByRelay(reading: SensorReading): Map<Int, Long> {
+        val durationsByRelay = mutableMapOf<Int, Long>()
+
+        addFuzzyLowDuration(
+            durationsByRelay,
+            relay = 1,
+            value = reading.nitrogen,
+            minKey = "min_nitrogen"
+        )
+        addFuzzyLowDuration(
+            durationsByRelay,
+            relay = 2,
+            value = reading.phosphorus,
+            minKey = "min_phosphorus"
+        )
+        addFuzzyLowDuration(
+            durationsByRelay,
+            relay = 3,
+            value = reading.potassium,
+            minKey = "min_potassium"
+        )
+        addFuzzyLowDuration(
+            durationsByRelay,
+            relay = 4,
+            value = reading.moisture,
+            minKey = "min_moisture"
+        )
+        addFuzzyHighDuration(
+            durationsByRelay,
+            relay = 4,
+            value = reading.temperature,
+            maxKey = "max_temperature"
+        )
+
+        val ecDuration = fuzzyLowDurationMillis(reading.ec, "min_ec")
+        if (ecDuration != null) {
+            listOf(1, 2, 3).forEach { relay ->
+                durationsByRelay[relay] = maxOf(durationsByRelay[relay] ?: 0L, ecDuration)
+            }
+        }
+
+        return durationsByRelay
+    }
+
+    private fun addFuzzyLowDuration(
+        durationsByRelay: MutableMap<Int, Long>,
+        relay: Int,
+        value: Double?,
+        minKey: String
+    ) {
+        val duration = fuzzyLowDurationMillis(value, minKey) ?: return
+        durationsByRelay[relay] = maxOf(durationsByRelay[relay] ?: 0L, duration)
+    }
+
+    private fun addFuzzyHighDuration(
+        durationsByRelay: MutableMap<Int, Long>,
+        relay: Int,
+        value: Double?,
+        maxKey: String
+    ) {
+        val duration = fuzzyHighDurationMillis(value, maxKey) ?: return
+        durationsByRelay[relay] = maxOf(durationsByRelay[relay] ?: 0L, duration)
+    }
+
+    private fun fuzzyLowDurationMillis(value: Double?, minKey: String): Long? {
+        val min = thresholds[minKey] ?: return null
+        if (value == null || min <= 0.0 || value >= min) return null
+
+        val deficitRatio = ((min - value) / min).coerceIn(0.0, 1.0)
+        return defuzzifyDuration(deficitRatio)
+    }
+
+    private fun fuzzyHighDurationMillis(value: Double?, maxKey: String): Long? {
+        val max = thresholds[maxKey] ?: return null
+        if (value == null || max <= 0.0 || value <= max) return null
+
+        val excessRatio = ((value - max) / max).coerceIn(0.0, 1.0)
+        return defuzzifyDuration(excessRatio)
+    }
+
+    private fun defuzzifyDuration(gapRatio: Double): Long {
+        val slight = descendingMembership(gapRatio, 0.0, 0.30)
+        val medium = triangularMembership(gapRatio, 0.12, 0.38, 0.64)
+        val severe = ascendingMembership(gapRatio, 0.45, 0.85)
+        val totalWeight = slight + medium + severe
+
+        if (totalWeight <= 0.0) return fuzzyMinPulseMillis
+
+        val crispMillis = (
+            (slight * fuzzyMinPulseMillis) +
+                (medium * fuzzyMediumPulseMillis) +
+                (severe * fuzzyMaxPulseMillis)
+            ) / totalWeight
+
+        return crispMillis.toLong().coerceIn(fuzzyMinPulseMillis, fuzzyMaxPulseMillis)
+    }
+
+    private fun descendingMembership(value: Double, fullUntil: Double, zeroAt: Double): Double {
+        return when {
+            value <= fullUntil -> 1.0
+            value >= zeroAt -> 0.0
+            else -> (zeroAt - value) / (zeroAt - fullUntil)
+        }.coerceIn(0.0, 1.0)
+    }
+
+    private fun ascendingMembership(value: Double, zeroUntil: Double, fullAt: Double): Double {
+        return when {
+            value <= zeroUntil -> 0.0
+            value >= fullAt -> 1.0
+            else -> (value - zeroUntil) / (fullAt - zeroUntil)
+        }.coerceIn(0.0, 1.0)
+    }
+
+    private fun triangularMembership(value: Double, left: Double, peak: Double, right: Double): Double {
+        return when {
+            value <= left || value >= right -> 0.0
+            value == peak -> 1.0
+            value < peak -> (value - left) / (peak - left)
+            else -> (right - value) / (right - peak)
+        }.coerceIn(0.0, 1.0)
     }
 
     private fun relaysForRule(reading: SensorReading): Set<Int> {
@@ -750,6 +877,8 @@ class NutrixenseBackgroundService : Service() {
         val durationSeconds: Int,
         val durationSecondsByRelay: Map<Int, Int>,
         val repeatsDaily: Boolean,
+        val startDate: String,
+        val endDate: String,
         var enabled: Boolean
     ) {
         val durationMillisByRelay: Map<Int, Long>
@@ -757,6 +886,10 @@ class NutrixenseBackgroundService : Service() {
                 ((durationSecondsByRelay[relay] ?: durationSeconds)
                     .coerceAtLeast(5)) * 1000L
             }
+
+        fun isActiveOn(todayKey: String): Boolean {
+            return todayKey >= startDate && todayKey <= endDate
+        }
 
         fun toJson(): JSONObject {
             return JSONObject()
@@ -771,6 +904,8 @@ class NutrixenseBackgroundService : Service() {
                     }
                 })
                 .put("repeatsDaily", repeatsDaily)
+                .put("startDate", startDate)
+                .put("endDate", endDate)
                 .put("enabled", enabled)
         }
 
@@ -782,10 +917,18 @@ class NutrixenseBackgroundService : Service() {
                 val durationSeconds = json.optInt("durationSeconds", 5)
                 val repeatsDaily = json.optBoolean("repeatsDaily", true)
                 val enabled = json.optBoolean("enabled", true)
+                val startDate = readDate(json, "startDate", "start_date")
+                    ?: if (repeatsDaily) "1970-01-01" else currentDateKey()
+                val endDate = readDate(json, "endDate", "end_date")
+                    ?: if (repeatsDaily) "2099-12-31" else startDate
                 val pumpIndexes = json.optJSONArray("pumpIndexes") ?: return null
                 val durationsByPump = json.optJSONObject("durationSecondsByPump")
 
-                if (id < 0 || hour !in 0..23 || minute !in 0..59) return null
+                if (id < 0 ||
+                    hour !in 0..23 ||
+                    minute !in 0..59 ||
+                    startDate > endDate
+                ) return null
 
                 val relays = mutableSetOf<Int>()
                 for (index in 0 until pumpIndexes.length()) {
@@ -822,7 +965,28 @@ class NutrixenseBackgroundService : Service() {
                     durationSeconds = durationSeconds,
                     durationSecondsByRelay = durationSecondsByRelay,
                     repeatsDaily = repeatsDaily,
+                    startDate = startDate,
+                    endDate = endDate,
                     enabled = enabled
+                )
+            }
+
+            private fun readDate(json: JSONObject, vararg keys: String): String? {
+                for (key in keys) {
+                    val value = json.optString(key, "")
+                    if (Regex("\\d{4}-\\d{2}-\\d{2}").matches(value)) {
+                        return value
+                    }
+                }
+                return null
+            }
+
+            private fun currentDateKey(): String {
+                val now = Calendar.getInstance()
+                return "%04d-%02d-%02d".format(
+                    now.get(Calendar.YEAR),
+                    now.get(Calendar.MONTH) + 1,
+                    now.get(Calendar.DAY_OF_MONTH)
                 )
             }
         }

@@ -1,5 +1,5 @@
 import '../models/ai_recommendation.dart';
-import 'mqtt_service.dart';
+import 'pump_state_service.dart';
 
 class AiPumpAutomationResult {
   const AiPumpAutomationResult({
@@ -15,11 +15,11 @@ class AiPumpAutomationResult {
 
 class AiPumpAutomationService {
   AiPumpAutomationService({
-    MQTTService? mqttService,
+    PumpStateService? pumpStateService,
     this.pulseDuration = const Duration(seconds: 5),
-  }) : _mqttService = mqttService ?? MQTTService();
+  }) : _pumpStateService = pumpStateService ?? PumpStateService.instance;
 
-  final MQTTService _mqttService;
+  final PumpStateService _pumpStateService;
   final Duration pulseDuration;
 
   Future<AiPumpAutomationResult> apply(
@@ -80,15 +80,15 @@ class AiPumpAutomationService {
       );
     }
 
-    await _mqttService.init();
-    if (!_mqttService.isConnected) {
+    await _pumpStateService.start();
+    if (!_pumpStateService.isConnected) {
       throw StateError(
           'MQTT is not connected, so AI pump automation was not applied.');
     }
 
     try {
       for (final command in pumpCommands) {
-        _mqttService.setRelay(command.relay, true);
+        await _pumpStateService.setRelay(command.relay, true);
       }
 
       final startedAt = DateTime.now();
@@ -100,11 +100,11 @@ class AiPumpAutomationService {
         if (remaining > Duration.zero) {
           await Future.delayed(remaining);
         }
-        _mqttService.setRelay(command.relay, false);
+        await _pumpStateService.setRelay(command.relay, false);
       }
     } finally {
       for (final command in pumpCommands) {
-        _mqttService.setRelay(command.relay, false);
+        await _pumpStateService.setRelay(command.relay, false);
       }
     }
 

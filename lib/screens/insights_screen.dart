@@ -582,7 +582,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Confirmed: ${result.activatedPumps.join(', ')} applied with adjusted duration.',
+          'Berhasil: Pompa ${result.activatedPumps.join(', ')} telah dijalankan dengan durasi yang telah disesuaikan.',
         ),
         backgroundColor: AppTheme.primaryGreen,
         behavior: SnackBarBehavior.floating,

@@ -8,6 +8,8 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 class MQTTService {
   late MqttServerClient client;
   bool _initialized = false;
+  StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _updatesSub;
+  final Set<String> _subscribedTopics = {};
   final _sensorStreamController =
       StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get sensorStream =>
@@ -73,9 +75,11 @@ class MQTTService {
   void subscribe(String topic) {
     if (!isConnected) return;
 
-    client.subscribe(topic, MqttQos.atMostOnce);
+    if (_subscribedTopics.add(topic)) {
+      client.subscribe(topic, MqttQos.atMostOnce);
+    }
 
-    client.updates!.listen((event) {
+    _updatesSub ??= client.updates!.listen((event) {
       final recMess = event[0].payload as MqttPublishMessage;
       final msg = MqttPublishPayload.bytesToStringAsString(
         recMess.payload.message,

@@ -13,6 +13,7 @@ import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pump_card.dart';
 import '../services/mqtt_service.dart';
+import '../services/pump_state_service.dart';
 import '../services/rule_based_pump_automation_service.dart';
 
 class ControlScreen extends StatefulWidget {
@@ -29,16 +30,17 @@ class _ControlScreenState extends State<ControlScreen> {
   late List<PumpController> _pumps;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final MQTTService mqttService = MQTTService();
+  final PumpStateService _pumpStateService = PumpStateService.instance;
   final RuleBasedPumpAutomationService _ruleBasedPumpAutomationService =
       RuleBasedPumpAutomationService.instance;
   final List<_WateringSchedule> _wateringSchedules = [];
+  DateTime _draftScheduleDate = DateTime.now();
   TimeOfDay _draftScheduleTime = TimeOfDay.now();
   final Set<int> _draftSchedulePumpIndexes = {3};
   final Map<int, int> _draftScheduleDurationsByPump = {3: 1};
   int _draftScheduleDurationSeconds = 1;
   bool _draftScheduleRepeats = true;
   late bool _isRuleBasedAutomationEnabled;
-  StreamSubscription<Map<String, dynamic>>? _controlSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _scheduleSub;
 
   @override
@@ -46,9 +48,10 @@ class _ControlScreenState extends State<ControlScreen> {
     super.initState();
     _pumps = DummyData.getPumps();
     _isRuleBasedAutomationEnabled = _ruleBasedPumpAutomationService.isRunning;
+    _pumpStateService.relayStates.addListener(_syncPumpStatesFromSharedState);
     _ruleBasedPumpAutomationService.activeRelays.addListener(_syncDssRelays);
     _restoreDssSwitchState();
-    _initControlMqtt();
+    _initPumpStateSync();
     _loadSchedules();
     _listenBackendSchedules();
   }
@@ -58,32 +61,27 @@ class _ControlScreenState extends State<ControlScreen> {
     for (final schedule in _wateringSchedules) {
       schedule.timer?.cancel();
     }
-    _controlSub?.cancel();
     _scheduleSub?.cancel();
+    _pumpStateService.relayStates
+        .removeListener(_syncPumpStatesFromSharedState);
     _ruleBasedPumpAutomationService.activeRelays.removeListener(_syncDssRelays);
     super.dispose();
   }
 
-  Future<void> _initControlMqtt() async {
-    await mqttService.init();
-    mqttService.subscribe('nutrixense/control');
-    _controlSub = mqttService.sensorStream.listen(_syncPumpStatesFromMqtt);
+  Future<void> _initPumpStateSync() async {
+    await _pumpStateService.start();
+    _syncPumpStatesFromSharedState();
   }
 
-  void _syncPumpStatesFromMqtt(Map<String, dynamic> data) {
+  void _syncPumpStatesFromSharedState() {
     if (!mounted) return;
 
+    final relayStates = _pumpStateService.relayStates.value;
     var changed = false;
     for (var i = 0; i < _pumps.length; i++) {
-      final rawState = data['relay${i + 1}'];
-      if (rawState == null) continue;
-
-      final relayState = rawState is num
-          ? rawState.toInt()
-          : int.tryParse(rawState.toString());
-      if (relayState == null) continue;
-
-      _pumps[i].isOn = relayState == 1;
+      final isOn = relayStates[i + 1] ?? false;
+      if (_pumps[i].isOn == isOn && !_pumps[i].isLoading) continue;
+      _pumps[i].isOn = isOn;
       _pumps[i].isLoading = false;
       changed = true;
     }
@@ -119,17 +117,26 @@ class _ControlScreenState extends State<ControlScreen> {
 
     // Relay 1-4
     final relayNumber = index + 1;
-    // Publish MQTT Command
-    mqttService.setRelay(relayNumber, value);
-    // Small delay for animation
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      await _pumpStateService.setRelay(relayNumber, value);
+      // Small delay for animation
+      await Future.delayed(const Duration(milliseconds: 500));
 
-    if (mounted) {
+      if (mounted) {
+        setState(() {
+          _pumps[index].isLoading = false;
+          _pumps[index].isOn = value;
+        });
+        _showSnackBar(_pumps[index]);
+      }
+    } catch (_) {
+      if (!mounted) return;
+
+      final relayStates = _pumpStateService.relayStates.value;
       setState(() {
         _pumps[index].isLoading = false;
-        _pumps[index].isOn = value;
+        _pumps[index].isOn = relayStates[relayNumber] ?? _pumps[index].isOn;
       });
-      _showSnackBar(_pumps[index]);
     }
   }
 
@@ -142,6 +149,22 @@ class _ControlScreenState extends State<ControlScreen> {
     if (!mounted || picked == null) return;
 
     setState(() => _draftScheduleTime = picked);
+  }
+
+  Future<void> _pickScheduleDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _draftScheduleDate.isBefore(_dateOnly(now))
+          ? _dateOnly(now)
+          : _draftScheduleDate,
+      firstDate: _dateOnly(now),
+      lastDate: DateTime(now.year + 5, 12, 31),
+    );
+
+    if (!mounted || picked == null) return;
+
+    setState(() => _draftScheduleDate = _dateOnly(picked));
   }
 
   void _addSchedule() {
@@ -160,8 +183,28 @@ class _ControlScreenState extends State<ControlScreen> {
       return;
     }
 
+    final selectedRun = DateTime(
+      _draftScheduleDate.year,
+      _draftScheduleDate.month,
+      _draftScheduleDate.day,
+      _draftScheduleTime.hour,
+      _draftScheduleTime.minute,
+    );
+
+    if (!_draftScheduleRepeats && !selectedRun.isAfter(DateTime.now())) {
+      _showPlainSnackBar(
+        'Jadwal sekali jalan harus memakai tanggal dan jam yang belum lewat.',
+        AppTheme.statusLow,
+      );
+      return;
+    }
+
     final schedule = _WateringSchedule(
       id: DateTime.now().microsecondsSinceEpoch,
+      startDate: _dateOnly(_draftScheduleDate),
+      endDate: _draftScheduleRepeats
+          ? DateTime(_draftScheduleDate.year + 5, 12, 31)
+          : _dateOnly(_draftScheduleDate),
       time: _draftScheduleTime,
       pumpIndexes: Set<int>.from(_draftSchedulePumpIndexes),
       durationSecondsByPump: _draftDurationsForSelectedPumps(),
@@ -286,6 +329,7 @@ class _ControlScreenState extends State<ControlScreen> {
     await prefs.setString(_scheduleStorageKey, schedulesJson);
     await _syncSchedulesToBackend(schedules);
     _ruleBasedPumpAutomationService.syncNativeSchedules(schedulesJson);
+    unawaited(_publishScheduleConfigToDevice());
   }
 
   Future<List<_WateringSchedule>> _loadBackendSchedules() async {
@@ -301,6 +345,8 @@ class _ControlScreenState extends State<ControlScreen> {
           .whereType<_WateringSchedule>()
           .toList()
         ..sort((a, b) {
+          final dateCompare = a.startDate.compareTo(b.startDate);
+          if (dateCompare != 0) return dateCompare;
           final hourCompare = a.time.hour.compareTo(b.time.hour);
           if (hourCompare != 0) return hourCompare;
           return a.time.minute.compareTo(b.time.minute);
@@ -323,6 +369,8 @@ class _ControlScreenState extends State<ControlScreen> {
           .whereType<_WateringSchedule>()
           .toList()
         ..sort((a, b) {
+          final dateCompare = a.startDate.compareTo(b.startDate);
+          if (dateCompare != 0) return dateCompare;
           final hourCompare = a.time.hour.compareTo(b.time.hour);
           if (hourCompare != 0) return hourCompare;
           return a.time.minute.compareTo(b.time.minute);
@@ -392,6 +440,54 @@ class _ControlScreenState extends State<ControlScreen> {
           .toList(growable: false),
     );
     _ruleBasedPumpAutomationService.syncNativeSchedules(schedulesJson);
+    unawaited(_publishScheduleConfigToDevice());
+  }
+
+  Future<bool> _publishScheduleConfigToDevice() async {
+    await mqttService.init();
+    if (!mqttService.isConnected) return false;
+
+    final now = DateTime.now();
+    final payload = {
+      'rtc': _rtcPayload(now),
+      'schedules': _espSchedulePayloads(),
+    };
+
+    mqttService.publish('nutrixense/schedule', jsonEncode(payload),
+        retain: true);
+    return true;
+  }
+
+  List<Map<String, dynamic>> _espSchedulePayloads() {
+    return _wateringSchedules
+        .where((schedule) => schedule.enabled)
+        .expand((schedule) => schedule.durationEntries.map((entry) {
+              return {
+                'enabled': schedule.enabled,
+                'relay': entry.key + 1,
+                'start_date': _formatIsoDate(schedule.startDate),
+                'end_date': _formatIsoDate(schedule.endDate),
+                'time':
+                    '${_twoDigits(schedule.time.hour)}:${_twoDigits(schedule.time.minute)}',
+                'duration_seconds': entry.value,
+                'days': schedule.repeatsDaily
+                    ? [1, 2, 3, 4, 5, 6, 7]
+                    : [_espDayOfWeek(schedule.startDate)],
+              };
+            }))
+        .toList(growable: false);
+  }
+
+  Map<String, dynamic> _rtcPayload(DateTime dateTime) {
+    return {
+      'year': dateTime.year,
+      'month': dateTime.month,
+      'day': dateTime.day,
+      'hour': dateTime.hour,
+      'minute': dateTime.minute,
+      'second': dateTime.second,
+      'day_of_week': _espDayOfWeek(dateTime),
+    };
   }
 
   void _scheduleNextRun(
@@ -403,15 +499,41 @@ class _ControlScreenState extends State<ControlScreen> {
 
     final now = DateTime.now();
     var nextRun = DateTime(
-      now.year,
-      now.month,
-      now.day,
+      schedule.startDate.year,
+      schedule.startDate.month,
+      schedule.startDate.day,
       schedule.time.hour,
       schedule.time.minute,
     );
 
-    if (!nextRun.isAfter(now)) {
-      nextRun = nextRun.add(const Duration(days: 1));
+    if (schedule.repeatsDaily) {
+      final todayRun = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        schedule.time.hour,
+        schedule.time.minute,
+      );
+
+      if (todayRun.isAfter(now) && !todayRun.isBefore(nextRun)) {
+        nextRun = todayRun;
+      }
+
+      while (!nextRun.isAfter(now)) {
+        nextRun = nextRun.add(const Duration(days: 1));
+      }
+    }
+
+    if (nextRun.isAfter(schedule.endDate.add(const Duration(days: 1))) ||
+        !nextRun.isAfter(now)) {
+      setState(() {
+        schedule.enabled = false;
+        schedule.nextRun = null;
+      });
+      if (persist) {
+        _saveSchedules();
+      }
+      return;
     }
 
     setState(() {
@@ -430,7 +552,7 @@ class _ControlScreenState extends State<ControlScreen> {
   void _showScheduleSnackBar(_WateringSchedule schedule) {
     if (!mounted || schedule.nextRun == null) return;
 
-    final timeText = TimeOfDay.fromDateTime(schedule.nextRun!).format(context);
+    final timeText = _formatDateTime(schedule.nextRun!);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -440,8 +562,50 @@ class _ControlScreenState extends State<ControlScreen> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
+        duration: const Duration(milliseconds: 500),
       ),
     );
+  }
+
+  void _showPlainSnackBar(
+    String message,
+    Color backgroundColor, {
+    Duration? duration,
+  }) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        duration: duration ?? const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    final dateText =
+        '${_twoDigits(dateTime.day)}/${_twoDigits(dateTime.month)}/${dateTime.year}';
+    final timeText = TimeOfDay.fromDateTime(dateTime).format(context);
+    return '$dateText $timeText';
+  }
+
+  static DateTime _dateOnly(DateTime value) {
+    return DateTime(value.year, value.month, value.day);
+  }
+
+  static String _formatIsoDate(DateTime value) {
+    return '${value.year}-${_twoDigits(value.month)}-${_twoDigits(value.day)}';
+  }
+
+  static String _twoDigits(int value) {
+    return value < 10 ? '0$value' : '$value';
+  }
+
+  static int _espDayOfWeek(DateTime value) {
+    return value.weekday == DateTime.sunday ? 1 : value.weekday + 1;
   }
 
   void _showSnackBar(PumpController pump) {
@@ -912,7 +1076,7 @@ class _ControlScreenState extends State<ControlScreen> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'Atur waktu, pilih pompa, dan durasi penyiraman.',
+                      'Atur tanggal, waktu, pompa, dan durasi penyiraman.',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,
@@ -937,6 +1101,25 @@ class _ControlScreenState extends State<ControlScreen> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final narrow = constraints.maxWidth < 330;
+                final dateButton = OutlinedButton.icon(
+                  onPressed: _pickScheduleDate,
+                  icon: const Icon(Icons.event_rounded, size: 18),
+                  label: Text(
+                    '${_twoDigits(_draftScheduleDate.day)}/${_twoDigits(_draftScheduleDate.month)}/${_draftScheduleDate.year}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppTheme.primaryBlue,
+                    side: BorderSide(
+                      color: AppTheme.primaryBlue.withOpacity(0.35),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                );
                 final timeButton = OutlinedButton.icon(
                   onPressed: _pickScheduleTime,
                   icon: const Icon(Icons.access_time_rounded, size: 18),
@@ -956,38 +1139,21 @@ class _ControlScreenState extends State<ControlScreen> {
                     ),
                   ),
                 );
-                final addButton = FilledButton.icon(
-                  onPressed: _addSchedule,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text(
-                    'Tambahkan Jadwal',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryGreen,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                );
-
                 if (narrow) {
                   return Column(
                     children: [
-                      SizedBox(width: double.infinity, child: timeButton),
+                      SizedBox(width: double.infinity, child: dateButton),
                       const SizedBox(height: 8),
-                      SizedBox(width: double.infinity, child: addButton),
+                      SizedBox(width: double.infinity, child: timeButton),
                     ],
                   );
                 }
 
                 return Row(
                   children: [
-                    Expanded(child: timeButton),
+                    Expanded(child: dateButton),
                     const SizedBox(width: 10),
-                    Expanded(child: addButton),
+                    Expanded(child: timeButton),
                   ],
                 );
               },
@@ -1052,23 +1218,9 @@ class _ControlScreenState extends State<ControlScreen> {
           const SizedBox(height: 16),
           _buildScheduleDurationControls(),
           const SizedBox(height: 4),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _draftScheduleRepeats,
-            onChanged: (value) {
-              setState(() => _draftScheduleRepeats = value);
-            },
-            activeColor: AppTheme.primaryGreen,
-            title: const Text(
-              'Ulangi setiap hari',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-          ),
+          _buildRepeatScheduleToggle(),
           const SizedBox(height: 12),
+          _buildAddScheduleButton(),
           const SizedBox(height: 12),
           if (_wateringSchedules.isEmpty)
             Container(
@@ -1105,6 +1257,108 @@ class _ControlScreenState extends State<ControlScreen> {
           else
             ..._wateringSchedules.map(_buildScheduleListTile),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAddScheduleButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: _addSchedule,
+        icon: const Icon(Icons.add_rounded, size: 18),
+        label: const Text(
+          'Tambahkan Jadwal',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        style: FilledButton.styleFrom(
+          backgroundColor: AppTheme.primaryGreen,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRepeatScheduleToggle() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {
+        setState(() => _draftScheduleRepeats = !_draftScheduleRepeats);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _draftScheduleRepeats
+                ? AppTheme.primaryGreen.withOpacity(0.32)
+                : Colors.grey.shade300,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _draftScheduleRepeats
+                    ? AppTheme.primaryGreen.withOpacity(0.10)
+                    : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.repeat_rounded,
+                size: 18,
+                color: _draftScheduleRepeats
+                    ? AppTheme.primaryGreen
+                    : AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Ulangi setiap hari',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ),
+            Switch(
+              value: _draftScheduleRepeats,
+              onChanged: (value) {
+                setState(() => _draftScheduleRepeats = value);
+              },
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              thumbColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return AppTheme.primaryGreen;
+                }
+                return Colors.white;
+              }),
+              trackColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return AppTheme.primaryGreen.withOpacity(0.22);
+                }
+                return Colors.grey.shade300;
+              }),
+              trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return AppTheme.primaryGreen.withOpacity(0.35);
+                }
+                return Colors.grey.shade400;
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1235,10 +1489,12 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   Widget _buildScheduleListTile(_WateringSchedule schedule) {
-    final nextRunText = schedule.nextRun == null
-        ? 'Mati'
-        : TimeOfDay.fromDateTime(schedule.nextRun!).format(context);
+    final nextRunText =
+        schedule.nextRun == null ? 'Mati' : _formatDateTime(schedule.nextRun!);
     final pumpDetails = schedule.durationEntries;
+    final scheduleDateText = schedule.repeatsDaily
+        ? 'Mulai ${_twoDigits(schedule.startDate.day)}/${_twoDigits(schedule.startDate.month)}/${schedule.startDate.year}'
+        : '${_twoDigits(schedule.startDate.day)}/${_twoDigits(schedule.startDate.month)}/${schedule.startDate.year}';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1261,7 +1517,9 @@ class _ControlScreenState extends State<ControlScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      schedule.time.format(context),
+                      '$scheduleDateText • ${schedule.time.format(context)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 16,
                         color: AppTheme.textPrimary,
@@ -1470,6 +1728,8 @@ class _ControlScreenState extends State<ControlScreen> {
 
 class _WateringSchedule {
   final int id;
+  final DateTime startDate;
+  final DateTime endDate;
   final TimeOfDay time;
   final Set<int> pumpIndexes;
   final Map<int, int> durationSecondsByPump;
@@ -1481,6 +1741,8 @@ class _WateringSchedule {
 
   _WateringSchedule({
     required this.id,
+    required this.startDate,
+    required this.endDate,
     required this.time,
     required this.pumpIndexes,
     required this.durationSecondsByPump,
@@ -1503,6 +1765,8 @@ class _WateringSchedule {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'startDate': _ControlScreenState._formatIsoDate(startDate),
+      'endDate': _ControlScreenState._formatIsoDate(endDate),
       'hour': time.hour,
       'minute': time.minute,
       'pumpIndexes': pumpIndexes.toList()..sort(),
@@ -1518,6 +1782,8 @@ class _WateringSchedule {
 
   static _WateringSchedule? fromJson(Map<String, dynamic> json) {
     final id = json['id'];
+    final startDate = _readDate(json['startDate'] ?? json['start_date']);
+    final endDate = _readDate(json['endDate'] ?? json['end_date']);
     final hour = json['hour'];
     final minute = json['minute'];
     final durationSeconds = json['durationSeconds'];
@@ -1539,6 +1805,14 @@ class _WateringSchedule {
         minute > 59) {
       return null;
     }
+
+    final effectiveStartDate =
+        startDate ?? _ControlScreenState._dateOnly(DateTime.now());
+    final effectiveEndDate = endDate ??
+        (repeatsDaily
+            ? DateTime(effectiveStartDate.year + 5, 12, 31)
+            : effectiveStartDate);
+    if (effectiveStartDate.isAfter(effectiveEndDate)) return null;
 
     final parsedPumpIndexes = pumpIndexes
         .whereType<int>()
@@ -1572,11 +1846,24 @@ class _WateringSchedule {
 
     return _WateringSchedule(
       id: id,
+      startDate: effectiveStartDate,
+      endDate: effectiveEndDate,
       time: TimeOfDay(hour: hour, minute: minute),
       pumpIndexes: parsedPumpIndexes,
       durationSecondsByPump: parsedDurations,
       repeatsDaily: repeatsDaily,
       enabled: enabled,
     );
+  }
+
+  static DateTime? _readDate(Object? value) {
+    if (value is Timestamp) {
+      return _ControlScreenState._dateOnly(value.toDate());
+    }
+    if (value == null) return null;
+
+    final parsed = DateTime.tryParse(value.toString());
+    if (parsed == null) return null;
+    return _ControlScreenState._dateOnly(parsed);
   }
 }
