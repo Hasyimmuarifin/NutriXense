@@ -316,7 +316,9 @@ class NutrixenseBackgroundService : Service() {
     private fun handleSensorMessage(payload: String) {
         val reading = SensorReading.fromJson(payload) ?: return
         latestReading = reading
-        handleThresholdAlerts(reading)
+        if (isAlertMonitorEnabled(this)) {
+            handleThresholdAlerts(reading)
+        }
     }
 
     private fun handleThresholdAlerts(reading: SensorReading) {

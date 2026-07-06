@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models/sensor_data.dart';
 import 'threshold_config_service.dart';
+import 'threshold_notification_cooldown_service.dart';
 
 class NutrientAlertService {
   NutrientAlertService._();
@@ -21,9 +22,7 @@ class NutrientAlertService {
   Future<void> initialize() async {
     try {
       await _channel.invokeMethod<void>('initializeAlerts');
-      await _channel.invokeMethod<void>('startBackgroundAlertMonitor', {
-        'thresholdsJson': jsonEncode(_backgroundConfig()),
-      });
+      await _channel.invokeMethod<void>('stopBackgroundAlertMonitor');
     } on PlatformException catch (error) {
       // Alerts should never interrupt sensor monitoring if Android rejects setup.
       debugPrint('Alert initialization failed: ${error.message}');
@@ -86,6 +85,16 @@ class NutrientAlertService {
     }
 
     final message = readingsToAlert.map(_formatAlertLine).join('\n');
+    final canShowNotification = await ThresholdNotificationCooldownService
+        .instance
+        .tryAcquireNotificationSlot();
+
+    if (!canShowNotification) {
+      debugPrint(
+        'Threshold alert notification suppressed by shared 5-minute cooldown.',
+      );
+      return;
+    }
 
     try {
       await _channel.invokeMethod<void>('showNutrientAlert', {

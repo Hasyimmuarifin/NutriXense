@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../firebase_options.dart';
+import 'threshold_notification_cooldown_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -84,6 +85,19 @@ class FcmNotificationService {
     debugPrint('FCM foreground message received: ${message.messageId}');
 
     try {
+      if (_isThresholdAlert(message, title)) {
+        final canShowNotification = await ThresholdNotificationCooldownService
+            .instance
+            .tryAcquireNotificationSlot();
+
+        if (!canShowNotification) {
+          debugPrint(
+            'FCM threshold notification suppressed by shared 5-minute cooldown.',
+          );
+          return;
+        }
+      }
+
       await _alertsChannel.invokeMethod<void>('showNutrientAlert', {
         'title': title,
         'message': body,
@@ -95,5 +109,10 @@ class FcmNotificationService {
 
   void _handleOpenedMessage(RemoteMessage message) {
     debugPrint('FCM notification opened: ${message.messageId}');
+  }
+
+  bool _isThresholdAlert(RemoteMessage message, String title) {
+    return message.data['type']?.toString() == 'threshold_alert' ||
+        title == 'Peringatan Nutrisi Tanaman';
   }
 }

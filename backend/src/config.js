@@ -89,11 +89,11 @@ const config = {
       (process.env.THRESHOLD_NOTIFICATION_ENABLED || 'true') !== 'false',
     thresholdNotificationIntervalMs: readNumberEnv(
       'THRESHOLD_NOTIFICATION_INTERVAL_MS',
-      60 * 1000,
+      5 * 60 * 1000,
     ),
     thresholdNotificationRepeatMs: readNumberEnv(
       'THRESHOLD_NOTIFICATION_REPEAT_MS',
-      60 * 1000,
+      5 * 60 * 1000,
     ),
     thresholdNotificationMaxSensorAgeMs: readNumberEnv(
       'THRESHOLD_NOTIFICATION_MAX_SENSOR_AGE_MS',

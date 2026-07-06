@@ -135,7 +135,7 @@ Contoh dokumen opsional `automation_config/threshold_notifications`:
 ```json
 {
   "enabled": true,
-  "repeatMs": 60000
+  "repeatMs": 300000
 }
 ```
 
