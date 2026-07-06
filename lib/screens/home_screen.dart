@@ -16,6 +16,7 @@ import '../services/nutrient_alert_service.dart';
 import '../services/rule_based_pump_automation_service.dart';
 import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 
 import '../widgets/section_header.dart';
 
@@ -391,24 +392,18 @@ class _HomeScreenState extends State<HomeScreen>
     );
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          backendSynced
-              ? nextMuted
-                  ? 'Peringatan ${_sensorLabel(sensorKey)} dinonaktifkan'
-                  : 'Peringatan ${_sensorLabel(sensorKey)} diaktifkan'
-              : 'Status peringatan berubah di aplikasi, tetapi gagal disinkronkan ke backend.',
-        ),
-        backgroundColor: backendSynced
-            ? nextMuted
-                ? Colors.grey.shade700
-                : AppTheme.primaryGreen
-            : AppTheme.statusLow,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(milliseconds: 500),
-      ),
+    showAppTextSnackBar(
+      context,
+      backendSynced
+          ? nextMuted
+              ? 'Peringatan ${_sensorLabel(sensorKey)} dinonaktifkan'
+              : 'Peringatan ${_sensorLabel(sensorKey)} diaktifkan'
+          : 'Status peringatan berubah di aplikasi, tetapi gagal disinkronkan ke backend.',
+      backendSynced
+          ? nextMuted
+              ? Colors.grey.shade700
+              : AppTheme.primaryGreen
+          : AppTheme.statusLow,
     );
   }
 
@@ -777,14 +772,10 @@ class _HomeScreenState extends State<HomeScreen>
       final value = double.tryParse(entry.value.text.trim());
       if (value == null) {
         if (!mounted) return false;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Nilai ${_thresholdDisplayLabel(entry.key)} tidak valid.',
-            ),
-            backgroundColor: AppTheme.statusLow,
-            behavior: SnackBarBehavior.floating,
-          ),
+        showAppTextSnackBar(
+          context,
+          'Nilai ${_thresholdDisplayLabel(entry.key)} tidak valid.',
+          AppTheme.statusLow,
         );
         return false;
       }
@@ -807,13 +798,10 @@ class _HomeScreenState extends State<HomeScreen>
 
       if (minValue > maxValue) {
         if (!mounted) return false;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'nilai minimal ${entry.key} harus kurang dari atau sama dengan nilai maksimal.'),
-            backgroundColor: AppTheme.statusLow,
-            behavior: SnackBarBehavior.floating,
-          ),
+        showAppTextSnackBar(
+          context,
+          'nilai minimal ${entry.key} harus kurang dari atau sama dengan nilai maksimal.',
+          AppTheme.statusLow,
         );
         return false;
       }
@@ -825,16 +813,10 @@ class _HomeScreenState extends State<HomeScreen>
     await mqttService.init();
     if (!mqttService.isConnected) {
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Ambang disimpan secara lokal. MQTT belum terhubung, jadi konfigurasi belum dikirim.',
-          ),
-          backgroundColor: AppTheme.statusLow,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
+      showAppTextSnackBar(
+        context,
+        'Ambang disimpan secara lokal. MQTT belum terhubung, jadi konfigurasi belum dikirim.',
+        AppTheme.statusLow,
       );
       setState(() {
         _readings = _buildReadingsFromData(_latestSensorData);
@@ -857,13 +839,10 @@ class _HomeScreenState extends State<HomeScreen>
       _readings = _buildReadingsFromData(_latestSensorData);
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Ambang berhasil diperbarui'),
-        backgroundColor: AppTheme.primaryGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+    showAppTextSnackBar(
+      context,
+      'Ambang berhasil diperbarui',
+      AppTheme.primaryGreen,
     );
     return true;
   }

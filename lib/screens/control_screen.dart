@@ -11,6 +11,7 @@ import '../models/dummy_data.dart';
 import '../models/pump_flow_rate.dart';
 import '../models/sensor_data.dart';
 import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/pump_card.dart';
 import '../services/mqtt_service.dart';
 import '../services/pump_state_service.dart';
@@ -170,16 +171,10 @@ class _ControlScreenState extends State<ControlScreen> {
 
   void _addSchedule() {
     if (_draftSchedulePumpIndexes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content:
-              const Text('Pilih setidaknya satu pompa untuk membuat jadwal.'),
-          backgroundColor: AppTheme.statusLow,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
+      showAppTextSnackBar(
+        context,
+        'Pilih setidaknya satu pompa untuk membuat jadwal.',
+        AppTheme.statusLow,
       );
       return;
     }
@@ -489,7 +484,6 @@ class _ControlScreenState extends State<ControlScreen> {
       _showPlainSnackBar(
         'Perintah sinkron RTC terkirim: ${_formatDateTime(now)}.',
         AppTheme.primaryGreen,
-        duration: const Duration(seconds: 2),
       );
     } finally {
       if (mounted) {
@@ -594,34 +588,21 @@ class _ControlScreenState extends State<ControlScreen> {
 
     final timeText = _formatDateTime(schedule.nextRun!);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Penyiraman otomatis dijadwalkan pada $timeText'),
-        backgroundColor: AppTheme.primaryGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        duration: const Duration(milliseconds: 500),
-      ),
+    showAppTextSnackBar(
+      context,
+      'Penyiraman otomatis dijadwalkan pada $timeText',
+      AppTheme.primaryGreen,
     );
   }
 
   void _showPlainSnackBar(
     String message,
-    Color backgroundColor, {
-    Duration? duration,
-  }) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: backgroundColor,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        duration: duration ?? const Duration(seconds: 4),
-      ),
+    Color backgroundColor,
+  ) {
+    showAppTextSnackBar(
+      context,
+      message,
+      backgroundColor,
     );
   }
 
@@ -649,33 +630,28 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   void _showSnackBar(PumpController pump) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(
-              pump.isOn ? Icons.play_circle_rounded : Icons.stop_circle_rounded,
-              color: Colors.white,
-              size: 18,
+    showAppSnackBar(
+      context,
+      content: Row(
+        children: [
+          Icon(
+            pump.isOn ? Icons.play_circle_rounded : Icons.stop_circle_rounded,
+            color: Colors.white,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${pump.name} (${pump.nutrient}) ${pump.isOn ? 'aktif' : 'nonaktif'}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w500),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '${pump.name} (${pump.nutrient}) ${pump.isOn ? 'aktif' : 'nonaktif'}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor:
-            pump.isOn ? AppTheme.primaryGreen : Colors.grey.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 0, milliseconds: 500),
+          ),
+        ],
       ),
+      backgroundColor: pump.isOn ? AppTheme.primaryGreen : Colors.grey.shade700,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
     );
   }
 
@@ -697,25 +673,19 @@ class _ControlScreenState extends State<ControlScreen> {
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          !backendSynced
-              ? 'DSS switch saved locally, but backend sync failed. Check Firestore rules or internet connection.'
-              : enabled
-                  ? 'Penyiraman Otomatis Diaktifkan.'
-                  : 'Penyiraman Otomatis Dimatikan.',
-        ),
-        backgroundColor: !backendSynced
-            ? AppTheme.statusLow
-            : enabled
-                ? AppTheme.primaryGreen
-                : Colors.grey.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 0, milliseconds: 500),
-      ),
+    showAppTextSnackBar(
+      context,
+      !backendSynced
+          ? 'DSS switch saved locally, but backend sync failed. Check Firestore rules or internet connection.'
+          : enabled
+              ? 'Penyiraman Otomatis Diaktifkan.'
+              : 'Penyiraman Otomatis Dimatikan.',
+      !backendSynced
+          ? AppTheme.statusLow
+          : enabled
+              ? AppTheme.primaryGreen
+              : Colors.grey.shade700,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
     );
   }
 

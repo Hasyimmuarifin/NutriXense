@@ -18,6 +18,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/sensor_data.dart';
 import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -46,6 +47,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   StreamSubscription<QuerySnapshot>? _latestSubscription;
   bool _isLoadingHistory = true;
   bool _isExportingHistory = false;
+  bool _isDeletingHistory = false;
   Object? _historyError;
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
@@ -369,6 +371,74 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ..sort((a, b) => a.time.compareTo(b.time));
   }
 
+  Future<void> _confirmDeleteCurrentHistoryRange() async {
+    if (_isDeletingHistory) return;
+
+    final rangeLabel = _filters[_selectedFilter];
+    final confirmed = await _showDeleteConfirmation(
+      title: 'Hapus histori $rangeLabel?',
+      message:
+          'Semua data historis sensor pada $rangeLabel akan dihapus permanen. Aksi ini tidak bisa dibatalkan.',
+      confirmLabel: 'Hapus Histori',
+    );
+
+    if (!confirmed || !mounted) return;
+
+    setState(() => _isDeletingHistory = true);
+
+    try {
+      await _latestSubscription?.cancel();
+      _latestSubscription = null;
+
+      final deletedCount = await _deleteHistoryRange();
+      if (!mounted) return;
+
+      await _refreshHistory();
+      if (!mounted) return;
+
+      _showHistorySnackBar(
+        deletedCount == 0
+            ? 'Tidak ada histori $rangeLabel yang perlu dihapus.'
+            : '$deletedCount histori $rangeLabel berhasil dihapus.',
+        backgroundColor: AppTheme.primaryGreen,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showHistorySnackBar(
+        'Gagal menghapus histori: $e',
+        backgroundColor: AppTheme.statusHigh,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isDeletingHistory = false);
+      }
+    }
+  }
+
+  Future<int> _deleteHistoryRange() async {
+    var deletedCount = 0;
+
+    while (true) {
+      final snapshot = await _historyBaseQuery()
+          .orderBy('timestamp', descending: false)
+          .limit(500)
+          .get();
+
+      if (snapshot.docs.isEmpty) break;
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      deletedCount += snapshot.docs.length;
+      if (snapshot.docs.length < 500) break;
+    }
+
+    return deletedCount;
+  }
+
   Future<void> _exportHistory(_HistoryExportFormat format) async {
     if (_isExportingHistory) return;
 
@@ -376,17 +446,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
     try {
       final exportData = await _loadExportData();
       if (exportData.isEmpty) {
-        _showExportSnackBar('Tidak ada data historis untuk diekspor.');
+        _showHistorySnackBar('Tidak ada data historis untuk diekspor.');
         return;
       }
 
       final savedPath = await _writeExportFile(format, exportData);
       if (!mounted) return;
 
-      _showExportSnackBar('Data historis tersimpan: $savedPath');
+      _showHistorySnackBar(
+        'Data historis tersimpan: $savedPath',
+      );
     } catch (e) {
       if (!mounted) return;
-      _showExportSnackBar('Gagal mengekspor data historis: $e');
+      _showHistorySnackBar(
+        'Gagal mengekspor data historis: $e',
+        backgroundColor: AppTheme.statusHigh,
+      );
     } finally {
       if (mounted) {
         setState(() => _isExportingHistory = false);
@@ -892,16 +967,48 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return PdfColor(color.red / 255, color.green / 255, color.blue / 255);
   }
 
-  void _showExportSnackBar(String message) {
+  Future<bool> _showDeleteConfirmation({
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.statusHigh,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(confirmLabel),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result == true;
+  }
+
+  void _showHistorySnackBar(
+    String message, {
+    Color backgroundColor = AppTheme.primaryGreen,
+  }) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppTheme.primaryGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+    showAppTextSnackBar(
+      context,
+      message,
+      backgroundColor,
     );
   }
 
@@ -1154,6 +1261,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  Widget _buildDeleteHistoryButton() {
+    if (_isDeletingHistory) {
+      return const SizedBox(
+        width: 48,
+        height: 48,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return IconButton(
+      tooltip: 'Hapus histori ${_filters[_selectedFilter]}',
+      onPressed: _isLoadingHistory ? null : _confirmDeleteCurrentHistoryRange,
+      icon: const Icon(
+        Icons.delete_sweep_outlined,
+        color: AppTheme.statusHigh,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1174,6 +1306,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ),
             actions: [
+              _buildDeleteHistoryButton(),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: _buildExportMenu(),

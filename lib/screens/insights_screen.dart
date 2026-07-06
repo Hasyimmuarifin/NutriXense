@@ -10,6 +10,7 @@ import '../services/ai_pump_automation_service.dart';
 import '../services/alert_count_service.dart';
 import '../services/gemini_recommendation_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/insight_card_widget.dart';
 
 class InsightsScreen extends StatefulWidget {
@@ -301,16 +302,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
       if (!mounted) return;
       setState(() => _scheduleAdded = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'AI daily schedule added to Control at ${schedule.formattedTime}.',
-          ),
-          backgroundColor: AppTheme.primaryGreen,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
+      showAppTextSnackBar(
+        context,
+        'AI daily schedule added to Control at ${schedule.formattedTime}.',
+        AppTheme.primaryGreen,
       );
     } catch (e) {
       if (!mounted) return;
@@ -579,15 +574,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
   void _showAutomationSnackBar(AiPumpAutomationResult result) {
     if (!result.hasActivatedPump) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Berhasil: Pompa ${result.activatedPumps.join(', ')} telah dijalankan dengan durasi yang telah disesuaikan.',
-        ),
-        backgroundColor: AppTheme.primaryGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+    showAppTextSnackBar(
+      context,
+      'Berhasil: Pompa ${result.activatedPumps.join(', ')} telah dijalankan dengan durasi yang telah disesuaikan.',
+      AppTheme.primaryGreen,
     );
   }
 

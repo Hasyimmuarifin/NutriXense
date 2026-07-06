@@ -10,7 +10,7 @@ import 'package:intl/intl.dart';
 
 import '../services/log_alert_badge_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/section_header.dart';
+import '../utils/snackbar_helper.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key});
@@ -25,6 +25,7 @@ class _LogsScreenState extends State<LogsScreen> {
   final DateFormat _dateFormat = DateFormat('dd/MM/yyyy HH:mm');
 
   int _selectedLogType = 0;
+  bool _isDeletingLogs = false;
   final LogAlertBadgeService _badgeService = LogAlertBadgeService.instance;
 
   Stream<QuerySnapshot<Map<String, dynamic>>> get _pumpLogsStream => _firestore
@@ -107,11 +108,7 @@ class _LogsScreenState extends State<LogsScreen> {
               delegate: SliverChildListDelegate([
                 _buildSummaryCards(),
                 const SizedBox(height: 18),
-                SectionHeader(
-                  title: _selectedLogType == 0
-                      ? 'Aktivitas Pompa'
-                      : 'Peringatan Ambang Batas',
-                ),
+                _buildLogsHeader(),
                 const SizedBox(height: 12),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
@@ -124,6 +121,49 @@ class _LogsScreenState extends State<LogsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLogsHeader() {
+    final isPumpTab = _selectedLogType == 0;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            isPumpTab ? 'Aktivitas Pompa' : 'Peringatan Ambang Batas',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF37909D),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        TextButton.icon(
+          onPressed: _isDeletingLogs ? null : _confirmDeleteCurrentLogType,
+          style: TextButton.styleFrom(
+            foregroundColor: AppTheme.statusHigh,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+          icon: _isDeletingLogs
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.delete_sweep_outlined, size: 18),
+          label: Text(
+            _isDeletingLogs ? 'Menghapus' : 'Hapus Semua',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -378,6 +418,10 @@ class _LogsScreenState extends State<LogsScreen> {
             subtitle: _formatDateTime(log.time),
             badge: log.badgeText,
             badgeColor: AppTheme.primaryBlue,
+            onDelete: () => _confirmDeleteSingleLog(
+              reference: log.reference,
+              successMessage: 'Log aktivitas pompa berhasil dihapus.',
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -414,6 +458,10 @@ class _LogsScreenState extends State<LogsScreen> {
             subtitle: _formatDateTime(log.time),
             badge: '${log.alerts.length} peringatan',
             badgeColor: AppTheme.statusHigh,
+            onDelete: () => _confirmDeleteSingleLog(
+              reference: log.reference,
+              successMessage: 'Log peringatan berhasil dihapus.',
+            ),
           ),
           const SizedBox(height: 12),
           if (log.alerts.isEmpty)
@@ -440,6 +488,7 @@ class _LogsScreenState extends State<LogsScreen> {
     required String subtitle,
     required String badge,
     required Color badgeColor,
+    VoidCallback? onDelete,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -483,6 +532,19 @@ class _LogsScreenState extends State<LogsScreen> {
         ),
         const SizedBox(width: 8),
         _buildInfoChip(badge, badgeColor),
+        const SizedBox(width: 4),
+        IconButton(
+          onPressed: onDelete,
+          tooltip: 'Hapus log',
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(
+            Icons.delete_outline_rounded,
+            size: 19,
+            color: AppTheme.statusHigh,
+          ),
+        ),
       ],
     );
   }
@@ -609,6 +671,126 @@ class _LogsScreenState extends State<LogsScreen> {
     if (dateTime == null) return 'Waktu belum tersedia';
     return _dateFormat.format(dateTime);
   }
+
+  Future<void> _confirmDeleteSingleLog({
+    required DocumentReference<Map<String, dynamic>> reference,
+    required String successMessage,
+  }) async {
+    try {
+      await reference.delete();
+      if (!mounted) return;
+      _showSnackBar(successMessage, AppTheme.primaryGreen);
+    } catch (error) {
+      if (!mounted) return;
+      _showSnackBar(
+        'Gagal menghapus log: $error',
+        AppTheme.statusHigh,
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteCurrentLogType() async {
+    final isPumpTab = _selectedLogType == 0;
+    final collectionPath =
+        isPumpTab ? 'pump_activity_logs' : 'threshold_alert_logs';
+    final label = isPumpTab ? 'Aktivitas Pompa' : 'Peringatan';
+
+    final confirmed = await _showDeleteConfirmation(
+      title: 'Hapus semua log $label?',
+      message:
+          'Semua Log $label akan dihapus secara permanen. Aksi ini tidak bisa dibatalkan.',
+      confirmLabel: 'Hapus Semua',
+    );
+
+    if (!confirmed) return;
+
+    setState(() => _isDeletingLogs = true);
+
+    try {
+      final deletedCount = await _deleteCollection(collectionPath);
+      if (!mounted) return;
+      _showSnackBar(
+        deletedCount == 0
+            ? 'Tidak ada log $label yang perlu dihapus.'
+            : '$deletedCount log $label berhasil dihapus.',
+        AppTheme.primaryGreen,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showSnackBar(
+        'Gagal menghapus semua log: $error',
+        AppTheme.statusHigh,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isDeletingLogs = false);
+      }
+    }
+  }
+
+  Future<int> _deleteCollection(String collectionPath) async {
+    var deletedCount = 0;
+
+    while (true) {
+      final snapshot =
+          await _firestore.collection(collectionPath).limit(500).get();
+      if (snapshot.docs.isEmpty) break;
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      deletedCount += snapshot.docs.length;
+      if (snapshot.docs.length < 500) break;
+    }
+
+    return deletedCount;
+  }
+
+  Future<bool> _showDeleteConfirmation({
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.statusHigh,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(confirmLabel),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result == true;
+  }
+
+  void _showSnackBar(
+    String message,
+    Color backgroundColor,
+  ) {
+    showAppTextSnackBar(
+      context,
+      message,
+      backgroundColor,
+    );
+  }
 }
 
 class _LogLoadingState extends StatelessWidget {
@@ -724,6 +906,7 @@ class _BadgeBubble extends StatelessWidget {
 
 class _PumpActivityLog {
   const _PumpActivityLog({
+    required this.reference,
     required this.reason,
     required this.pumpLabels,
     required this.durationSeconds,
@@ -732,6 +915,7 @@ class _PumpActivityLog {
     required this.action,
   });
 
+  final DocumentReference<Map<String, dynamic>> reference;
   final String reason;
   final List<String> pumpLabels;
   final int durationSeconds;
@@ -763,6 +947,7 @@ class _PumpActivityLog {
             .toLowerCase();
 
     return _PumpActivityLog(
+      reference: doc.reference,
       reason: _readString(data['reason'], fallback: 'Aktivitas Pompa'),
       pumpLabels: pumpLabels.isEmpty ? ['Pompa tidak diketahui'] : pumpLabels,
       durationSeconds: durationMs <= 0 ? 0 : (durationMs / 1000).round(),
@@ -792,6 +977,7 @@ class _PumpActivityLog {
 
 class _ThresholdAlertLog {
   const _ThresholdAlertLog({
+    required this.reference,
     required this.title,
     required this.body,
     required this.alerts,
@@ -799,6 +985,7 @@ class _ThresholdAlertLog {
     this.sensorReadingId,
   });
 
+  final DocumentReference<Map<String, dynamic>> reference;
   final String title;
   final String body;
   final List<_ThresholdAlert> alerts;
@@ -812,6 +999,7 @@ class _ThresholdAlertLog {
     final rawAlerts = data['alerts'];
 
     return _ThresholdAlertLog(
+      reference: doc.reference,
       title: _readString(data['title'], fallback: 'Peringatan Nutrisi Tanaman'),
       body: _readString(data['body']),
       alerts: rawAlerts is List
