@@ -1545,7 +1545,25 @@ class _ControlScreenState extends State<ControlScreen> {
                 onChanged: schedule.isRunning
                     ? null
                     : (value) => _toggleSchedule(schedule, value),
-                activeColor: AppTheme.primaryGreen,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                thumbColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.selected)) {
+                    return AppTheme.primaryGreen;
+                  }
+                  return Colors.white;
+                }),
+                trackColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.selected)) {
+                    return AppTheme.primaryGreen.withOpacity(0.22);
+                  }
+                  return Colors.grey.shade300;
+                }),
+                trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.selected)) {
+                    return AppTheme.primaryGreen.withOpacity(0.35);
+                  }
+                  return Colors.grey.shade400;
+                }),
               ),
               IconButton(
                 tooltip: 'Delete schedule',
