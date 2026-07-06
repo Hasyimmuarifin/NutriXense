@@ -15,7 +15,9 @@ import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/control_screen.dart';
+import 'screens/logs_screen.dart';
 import 'services/fcm_notification_service.dart';
+import 'services/log_alert_badge_service.dart';
 import 'services/nutrient_alert_service.dart';
 import 'services/rule_based_pump_automation_service.dart';
 import 'services/threshold_config_service.dart';
@@ -61,6 +63,15 @@ class _MyAppState extends State<MyApp> {
     await ThresholdConfigService.instance
         .load()
         .timeout(const Duration(seconds: 5));
+
+    unawaited(
+      LogAlertBadgeService.instance
+          .initialize()
+          .timeout(const Duration(seconds: 8))
+          .catchError((error) {
+        debugPrint('Log alert badge startup skipped: $error');
+      }),
+    );
 
     unawaited(
       NutrientAlertService.instance
@@ -183,6 +194,7 @@ class _MainNavigationState extends State<MainNavigation>
     HistoryScreen(),
     InsightsScreen(),
     ControlScreen(),
+    LogsScreen(),
   ];
 
   final List<NavigationDestination> _destinations = const [
@@ -197,6 +209,10 @@ class _MainNavigationState extends State<MainNavigation>
         icon: Icon(Icons.toggle_off_outlined),
         selectedIcon: Icon(Icons.toggle_on_rounded),
         label: 'Control'),
+    NavigationDestination(
+        icon: _LogAlertBadgeIcon(icon: Icons.receipt_long_outlined),
+        selectedIcon: _LogAlertBadgeIcon(icon: Icons.receipt_long_rounded),
+        label: 'Logs'),
   ];
 
   @override
@@ -239,6 +255,33 @@ class _MainNavigationState extends State<MainNavigation>
         animationDuration: const Duration(milliseconds: 400),
         destinations: _destinations,
       ),
+    );
+  }
+}
+
+class _LogAlertBadgeIcon extends StatelessWidget {
+  const _LogAlertBadgeIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: LogAlertBadgeService.instance.unreadLogCount,
+      builder: (context, unreadLogCount, _) {
+        if (unreadLogCount <= 0) return Icon(icon);
+
+        return Badge.count(
+          count: unreadLogCount,
+          backgroundColor: AppTheme.statusLow,
+          textColor: Colors.white,
+          textStyle: const TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+          ),
+          child: Icon(icon),
+        );
+      },
     );
   }
 }
