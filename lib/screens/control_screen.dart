@@ -40,6 +40,7 @@ class _ControlScreenState extends State<ControlScreen> {
   final Map<int, int> _draftScheduleDurationsByPump = {3: 1};
   int _draftScheduleDurationSeconds = 1;
   bool _draftScheduleRepeats = true;
+  bool _isSyncingRtc = false;
   late bool _isRuleBasedAutomationEnabled;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _scheduleSub;
 
@@ -456,6 +457,45 @@ class _ControlScreenState extends State<ControlScreen> {
     mqttService.publish('nutrixense/schedule', jsonEncode(payload),
         retain: true);
     return true;
+  }
+
+  Future<void> _syncRtcToCurrentTime() async {
+    if (_isSyncingRtc) return;
+
+    setState(() => _isSyncingRtc = true);
+
+    try {
+      await mqttService.init();
+      if (!mqttService.isConnected) {
+        if (!mounted) return;
+        _showPlainSnackBar(
+          'Gagal sinkron RTC: MQTT belum terhubung.',
+          AppTheme.statusLow,
+        );
+        return;
+      }
+
+      final now = DateTime.now();
+      final payload = {
+        'rtc': {
+          ..._rtcPayload(now),
+          'force_update': true,
+        },
+      };
+
+      mqttService.publish('nutrixense/schedule', jsonEncode(payload));
+
+      if (!mounted) return;
+      _showPlainSnackBar(
+        'Perintah sinkron RTC terkirim: ${_formatDateTime(now)}.',
+        AppTheme.primaryGreen,
+        duration: const Duration(seconds: 2),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncingRtc = false);
+      }
+    }
   }
 
   List<Map<String, dynamic>> _espSchedulePayloads() {
@@ -1086,6 +1126,8 @@ class _ControlScreenState extends State<ControlScreen> {
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              _buildRtcSyncButton(),
             ],
           ),
           const SizedBox(height: 16),
@@ -1257,6 +1299,46 @@ class _ControlScreenState extends State<ControlScreen> {
           else
             ..._wateringSchedules.map(_buildScheduleListTile),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRtcSyncButton() {
+    return Tooltip(
+      message: 'Sinkronkan RTC',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: _isSyncingRtc ? null : _syncRtcToCurrentTime,
+        child: AnimatedOpacity(
+          opacity: _isSyncingRtc ? 0.9 : 0.42,
+          duration: const Duration(milliseconds: 180),
+          child: Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.72),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppTheme.primaryGreen.withOpacity(0.18),
+              ),
+            ),
+            child: _isSyncingRtc
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.primaryGreen,
+                    ),
+                  )
+                : const Icon(
+                    Icons.watch_later_outlined,
+                    size: 16,
+                    color: AppTheme.primaryGreen,
+                  ),
+          ),
+        ),
       ),
     );
   }
