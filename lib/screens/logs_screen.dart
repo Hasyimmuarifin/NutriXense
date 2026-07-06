@@ -740,6 +740,8 @@ class _PumpActivityLog {
   final String action;
 
   String get badgeText {
+    if (action == 'running') return 'Berjalan';
+    if (action == 'completed') return '$durationSeconds detik';
     if (action == 'on') return 'ON';
     if (action == 'off') return 'OFF';
     return '$durationSeconds detik';

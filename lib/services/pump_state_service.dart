@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'mqtt_service.dart';
@@ -37,19 +36,23 @@ class PumpStateService {
     _mqttSub = _mqttService.sensorStream.listen(_syncRelayStates);
   }
 
-  Future<void> setRelay(int relay, bool isOn) async {
+  Future<void> setRelay(
+    int relay,
+    bool isOn, {
+    String source = 'manual_control',
+    String? reason,
+  }) async {
     await start();
     if (!_mqttService.isConnected) {
       throw StateError('MQTT is not connected.');
     }
 
-    _mqttService.setRelay(relay, isOn);
+    _mqttService.setRelay(relay, isOn, source: source);
     _pendingRelayCommands[relay] = _PendingRelayCommand(
       expectedState: isOn,
       sentAt: DateTime.now(),
     );
     _setRelayState(relay, isOn);
-    unawaited(_writeManualPumpLog(relay, isOn));
   }
 
   void _syncRelayStates(Map<String, dynamic> data) {
@@ -95,55 +98,16 @@ class PumpStateService {
     }
   }
 
-  void _setRelayState(int relay, bool isOn) {
+  bool _setRelayState(int relay, bool isOn) {
     if (relay < 1 || relay > 4 || relayStates.value[relay] == isOn) {
-      return;
+      return false;
     }
 
     relayStates.value = {
       ...relayStates.value,
       relay: isOn,
     };
-  }
-
-  Future<void> _writeManualPumpLog(int relay, bool isOn) async {
-    try {
-      final timestamp = FieldValue.serverTimestamp();
-      await FirebaseFirestore.instance.collection('pump_activity_logs').add({
-        'relays': [relay],
-        'pumpLabels': [_relayLabel(relay)],
-        'durationMs': 0,
-        'reason': isOn
-            ? 'Kontrol manual pompa dinyalakan'
-            : 'Kontrol manual pompa dimatikan',
-        'action': isOn ? 'on' : 'off',
-        'metadata': {
-          'source': 'manual_control',
-          'relay': relay,
-          'state': isOn ? 'on' : 'off',
-        },
-        'startedAt': timestamp,
-        'finishedAt': timestamp,
-        'createdAt': timestamp,
-      });
-    } catch (error) {
-      debugPrint('Manual pump log write failed: $error');
-    }
-  }
-
-  String _relayLabel(int relay) {
-    switch (relay) {
-      case 1:
-        return 'Pompa A (N)';
-      case 2:
-        return 'Pompa B (P)';
-      case 3:
-        return 'Pompa C (K)';
-      case 4:
-        return 'Pompa D (Air)';
-      default:
-        return 'Relay $relay';
-    }
+    return true;
   }
 
   Future<void> dispose() async {

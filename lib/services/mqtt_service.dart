@@ -114,14 +114,22 @@ class MQTTService {
     );
   }
 
-  void setRelay(int relay, bool isOn) {
-    publishRelay(relay, isOn);
+  void setRelay(
+    int relay,
+    bool isOn, {
+    String source = 'manual_control',
+  }) {
+    publishRelay(relay, isOn, source: source);
   }
 
-  void publishRelay(int relay, bool state) {
+  void publishRelay(
+    int relay,
+    bool state, {
+    String source = 'manual_control',
+  }) {
     final payload = jsonEncode({
-      "source": "manual",
-      "manual_override": state ? 1 : 0,
+      "source": source,
+      if (source == 'manual_control') "manual_override": state ? 1 : 0,
       "relay$relay": state ? 1 : 0,
     });
 

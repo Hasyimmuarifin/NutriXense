@@ -88,7 +88,11 @@ class AiPumpAutomationService {
 
     try {
       for (final command in pumpCommands) {
-        await _pumpStateService.setRelay(command.relay, true);
+        await _pumpStateService.setRelay(
+          command.relay,
+          true,
+          source: 'ai_automation',
+        );
       }
 
       final startedAt = DateTime.now();
@@ -100,11 +104,19 @@ class AiPumpAutomationService {
         if (remaining > Duration.zero) {
           await Future.delayed(remaining);
         }
-        await _pumpStateService.setRelay(command.relay, false);
+        await _pumpStateService.setRelay(
+          command.relay,
+          false,
+          source: 'ai_automation',
+        );
       }
     } finally {
       for (final command in pumpCommands) {
-        await _pumpStateService.setRelay(command.relay, false);
+        await _pumpStateService.setRelay(
+          command.relay,
+          false,
+          source: 'ai_automation',
+        );
       }
     }
 
