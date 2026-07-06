@@ -70,7 +70,7 @@ function startScheduleWorker(mqttClient) {
           mqttClient,
           relays,
           durationSeconds * 1000,
-          'Automatic watering schedule',
+          'Penjadwalan Otomatis',
           {
             source: 'schedule_worker',
             scheduleId: doc.id,

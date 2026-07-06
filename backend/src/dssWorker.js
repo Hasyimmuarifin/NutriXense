@@ -162,7 +162,7 @@ function startDssWorker(mqttClient) {
         mqttClient,
         allowedRelays,
         dssConfig.pulseDurationMs,
-        'Rule-based DSS automatic pump control',
+        'Pompa Otomatis',
         {
           source: 'dss_worker',
           sensorReadingId: reading.id,
