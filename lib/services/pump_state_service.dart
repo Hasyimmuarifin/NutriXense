@@ -8,6 +8,7 @@ class PumpStateService {
   PumpStateService._();
 
   static final PumpStateService instance = PumpStateService._();
+  static const Duration _manualCommandGracePeriod = Duration(seconds: 4);
 
   final MQTTService _mqttService = MQTTService();
   final ValueNotifier<Map<int, bool>> relayStates =
@@ -19,6 +20,7 @@ class PumpStateService {
   });
 
   StreamSubscription<Map<String, dynamic>>? _mqttSub;
+  final Map<int, _PendingRelayCommand> _pendingRelayCommands = {};
   bool _started = false;
 
   bool get isConnected => _mqttService.isConnected;
@@ -27,7 +29,6 @@ class PumpStateService {
     await _mqttService.init();
     if (!_mqttService.isConnected) return;
 
-    _mqttService.subscribe('nutrixense/control');
     _mqttService.subscribe('nutrixense/sensor');
 
     if (_started) return;
@@ -42,12 +43,17 @@ class PumpStateService {
     }
 
     _mqttService.setRelay(relay, isOn);
+    _pendingRelayCommands[relay] = _PendingRelayCommand(
+      expectedState: isOn,
+      sentAt: DateTime.now(),
+    );
     _setRelayState(relay, isOn);
   }
 
   void _syncRelayStates(Map<String, dynamic> data) {
     var nextStates = relayStates.value;
     var changed = false;
+    final now = DateTime.now();
 
     for (var relay = 1; relay <= 4; relay++) {
       final rawState = data['relay$relay'];
@@ -59,6 +65,20 @@ class PumpStateService {
       if (parsedState == null) continue;
 
       final isOn = parsedState == 1;
+      final pendingCommand = _pendingRelayCommands[relay];
+      if (pendingCommand != null) {
+        final isStillFresh =
+            now.difference(pendingCommand.sentAt) <= _manualCommandGracePeriod;
+
+        if (isOn == pendingCommand.expectedState) {
+          _pendingRelayCommands.remove(relay);
+        } else if (isStillFresh) {
+          continue;
+        } else {
+          _pendingRelayCommands.remove(relay);
+        }
+      }
+
       if (nextStates[relay] == isOn) continue;
 
       if (!changed) {
@@ -87,6 +107,17 @@ class PumpStateService {
   Future<void> dispose() async {
     await _mqttSub?.cancel();
     _mqttSub = null;
+    _pendingRelayCommands.clear();
     _started = false;
   }
+}
+
+class _PendingRelayCommand {
+  const _PendingRelayCommand({
+    required this.expectedState,
+    required this.sentAt,
+  });
+
+  final bool expectedState;
+  final DateTime sentAt;
 }

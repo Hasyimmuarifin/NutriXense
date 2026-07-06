@@ -85,11 +85,13 @@ class MQTTService {
         recMess.payload.message,
       );
 
-      debugPrint('MQTT Message: $msg');
+      final topic = event[0].topic;
+
+      debugPrint('MQTT Message [$topic]: $msg');
       try {
         final data = jsonDecode(msg);
 
-        if (data is Map<String, dynamic>) {
+        if (topic == 'nutrixense/sensor' && data is Map<String, dynamic>) {
           _sensorStreamController.add(data);
         }
       } catch (e) {
@@ -117,7 +119,11 @@ class MQTTService {
   }
 
   void publishRelay(int relay, bool state) {
-    final payload = jsonEncode({"relay$relay": state ? 1 : 0});
+    final payload = jsonEncode({
+      "source": "manual",
+      "manual_override": state ? 1 : 0,
+      "relay$relay": state ? 1 : 0,
+    });
 
     publish("nutrixense/control", payload);
 
