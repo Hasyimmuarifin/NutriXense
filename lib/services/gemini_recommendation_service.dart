@@ -9,6 +9,229 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/ai_recommendation.dart';
 import '../models/pump_flow_rate.dart';
 
+class FertilizerSolutionConcentration {
+  const FertilizerSolutionConcentration({
+    required this.nitrogenMgPerMl,
+    required this.phosphorusMgPerMl,
+    required this.potassiumMgPerMl,
+  });
+
+  final double nitrogenMgPerMl;
+  final double phosphorusMgPerMl;
+  final double potassiumMgPerMl;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'nitrogen_mg_per_ml': nitrogenMgPerMl,
+      'phosphorus_mg_per_ml': phosphorusMgPerMl,
+      'potassium_mg_per_ml': potassiumMgPerMl,
+    };
+  }
+}
+
+class PlantingMediumProfile {
+  const PlantingMediumProfile({
+    required this.id,
+    required this.label,
+    required this.assumedDepthCm,
+    required this.bulkDensityKgPerM3,
+    required this.note,
+  });
+
+  final String id;
+  final String label;
+  final double assumedDepthCm;
+  final double bulkDensityKgPerM3;
+  final String note;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'label': label,
+      'assumed_depth_cm': assumedDepthCm,
+      'bulk_density_kg_per_m3': bulkDensityKgPerM3,
+      'note': note,
+    };
+  }
+}
+
+class PlantTypeProfile {
+  const PlantTypeProfile({
+    required this.id,
+    required this.label,
+    required this.scientificName,
+    required this.contextNote,
+    required this.thresholds,
+  });
+
+  final String id;
+  final String label;
+  final String scientificName;
+  final String contextNote;
+  final Map<String, num> thresholds;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'label': label,
+      'scientific_name': scientificName,
+      'context_note': contextNote,
+      'thresholds': thresholds,
+    };
+  }
+}
+
+class AiRecommendationAgronomicInput {
+  const AiRecommendationAgronomicInput({
+    required this.plantType,
+    required this.landAreaSquareMeters,
+    required this.fertilizerConcentration,
+    required this.plantingMedium,
+  });
+
+  final PlantTypeProfile plantType;
+  final double landAreaSquareMeters;
+  final FertilizerSolutionConcentration fertilizerConcentration;
+  final PlantingMediumProfile plantingMedium;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'plant_type': plantType.toJson(),
+      'land_area_square_meters': landAreaSquareMeters,
+      'fertilizer_solution_concentration': fertilizerConcentration.toJson(),
+      'planting_medium': plantingMedium.toJson(),
+      'calculation_note':
+          'Media depth is an assumption from the selected planting medium because actual depth is not measured by the app.',
+    };
+  }
+}
+
+const List<PlantTypeProfile> plantTypeProfiles = [
+  PlantTypeProfile(
+    id: 'tea',
+    label: 'Teh',
+    scientificName: 'Camellia sinensis',
+    contextNote:
+        'Tanaman teh menyukai media asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
+    thresholds: {
+      'nitrogen_min': 80,
+      'nitrogen_max': 180,
+      'phosphorus_min': 100,
+      'phosphorus_max': 300,
+      'potassium_min': 250,
+      'potassium_max': 650,
+      'moisture_min': 40,
+      'moisture_max': 70,
+      'ph_min': 4.5,
+      'ph_max': 5.5,
+      'temperature_min': 18,
+      'temperature_max': 25,
+      'ec_min': 1.2,
+      'ec_max': 2.5,
+    },
+  ),
+  PlantTypeProfile(
+    id: 'chili',
+    label: 'Cabai',
+    scientificName: 'Capsicum annuum',
+    contextNote:
+        'Cabai membutuhkan kelembapan stabil, pH agak asam-netral, dan koreksi K bertahap untuk mendukung pembungaan dan buah.',
+    thresholds: {
+      'nitrogen_min': 70,
+      'nitrogen_max': 160,
+      'phosphorus_min': 60,
+      'phosphorus_max': 180,
+      'potassium_min': 180,
+      'potassium_max': 450,
+      'moisture_min': 45,
+      'moisture_max': 75,
+      'ph_min': 5.8,
+      'ph_max': 6.8,
+      'temperature_min': 22,
+      'temperature_max': 30,
+      'ec_min': 1.5,
+      'ec_max': 2.8,
+    },
+  ),
+  PlantTypeProfile(
+    id: 'tomato',
+    label: 'Tomat',
+    scientificName: 'Solanum lycopersicum',
+    contextNote:
+        'Tomat membutuhkan K cukup tinggi saat generatif, kelembapan merata, dan pH agak asam-netral.',
+    thresholds: {
+      'nitrogen_min': 80,
+      'nitrogen_max': 170,
+      'phosphorus_min': 70,
+      'phosphorus_max': 200,
+      'potassium_min': 220,
+      'potassium_max': 550,
+      'moisture_min': 50,
+      'moisture_max': 80,
+      'ph_min': 5.8,
+      'ph_max': 6.8,
+      'temperature_min': 20,
+      'temperature_max': 28,
+      'ec_min': 2.0,
+      'ec_max': 3.5,
+    },
+  ),
+  PlantTypeProfile(
+    id: 'lettuce',
+    label: 'Selada',
+    scientificName: 'Lactuca sativa',
+    contextNote:
+        'Selada sensitif terhadap EC tinggi dan panas, sehingga koreksi nutrisi sebaiknya ringan serta kelembapan dijaga stabil.',
+    thresholds: {
+      'nitrogen_min': 50,
+      'nitrogen_max': 120,
+      'phosphorus_min': 40,
+      'phosphorus_max': 140,
+      'potassium_min': 120,
+      'potassium_max': 320,
+      'moisture_min': 55,
+      'moisture_max': 80,
+      'ph_min': 5.5,
+      'ph_max': 6.5,
+      'temperature_min': 16,
+      'temperature_max': 24,
+      'ec_min': 0.8,
+      'ec_max': 1.8,
+    },
+  ),
+];
+
+const List<PlantingMediumProfile> plantingMediumProfiles = [
+  PlantingMediumProfile(
+    id: 'potting_mix',
+    label: 'Media pot ringan',
+    assumedDepthCm: 18,
+    bulkDensityKgPerM3: 650,
+    note: 'Campuran kompos/cocopeat/sekam; asumsi ringan dan poros.',
+  ),
+  PlantingMediumProfile(
+    id: 'loam_soil',
+    label: 'Tanah gembur',
+    assumedDepthCm: 20,
+    bulkDensityKgPerM3: 900,
+    note: 'Tanah mineral gembur dengan drainase cukup baik.',
+  ),
+  PlantingMediumProfile(
+    id: 'clay_soil',
+    label: 'Tanah liat/padat',
+    assumedDepthCm: 15,
+    bulkDensityKgPerM3: 1200,
+    note: 'Media lebih padat; koreksi dibuat lebih bertahap.',
+  ),
+  PlantingMediumProfile(
+    id: 'raised_bed',
+    label: 'Bedengan/lahan teh',
+    assumedDepthCm: 25,
+    bulkDensityKgPerM3: 850,
+    note: 'Profil akar dangkal-menengah untuk koreksi permukaan bertahap.',
+  ),
+];
+
 class GeminiRecommendationService {
   GeminiRecommendationService({
     FirebaseFirestore? firestore,
@@ -27,32 +250,19 @@ class GeminiRecommendationService {
       'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
   static const _requestTimeout = Duration(minutes: 1);
   static const _responseCacheTtl = Duration(minutes: 2);
+  static const _gradualCorrectionFraction = 0.25;
+  static const _maxPumpRunSeconds = 300;
   static _CachedAiRecommendation? _cachedRecommendation;
 
-  // Threshold target for tea plants.
-  static const thresholds = {
-    'nitrogen_min': 80,
-    'nitrogen_max': 180,
-    'phosphorus_min': 100,
-    'phosphorus_max': 300,
-    'potassium_min': 250,
-    'potassium_max': 650,
-    'moisture_min': 40,
-    'moisture_max': 70,
-    'ph_min': 4.5,
-    'ph_max': 5.5,
-    'temperature_min': 18,
-    'temperature_max': 25,
-    'ec_min': 1.2,
-    'ec_max': 2.5,
-  };
+  // Default threshold target keeps the original tea-plant behavior.
+  static final Map<String, num> thresholds = plantTypeProfiles.first.thresholds;
 
   final FirebaseFirestore _firestore;
   final String? _apiKeyOverride;
   final String? _modelNameOverride;
 
   Future<AiRecommendationResponse> requestRecommendation({
-    required double landAreaSquareMeters,
+    required AiRecommendationAgronomicInput input,
   }) async {
     final config = await _resolveConfig();
 
@@ -69,16 +279,19 @@ class GeminiRecommendationService {
     }
 
     final summary = _SensorHistorySummary.fromReadings(readings);
+    final activeThresholds = _thresholdsFor(input);
     final requestFingerprint = _buildRequestFingerprint(
       summary,
-      landAreaSquareMeters,
+      input,
+      activeThresholds,
     );
     final cachedResponse = _readCachedRecommendation(requestFingerprint);
     if (cachedResponse != null) return cachedResponse;
 
     final deterministicPlan = _buildDeterministicDecisionPlan(
       summary,
-      landAreaSquareMeters,
+      input,
+      activeThresholds,
     );
     final model = GenerativeModel(
       model: config.modelName,
@@ -94,9 +307,9 @@ class GeminiRecommendationService {
 
     final payload = jsonEncode({
       'task':
-          'Polish this deterministic DSS/XAI decision plan for tea plants and return JSON only.',
+          'Calculate hybrid Gemini dose recommendations for tea plants and return JSON only.',
       'crop_context':
-          'Tanaman teh (Camellia sinensis), media tanam asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
+          '${input.plantType.label} (${input.plantType.scientificName}). ${input.plantType.contextNote}',
       'language': 'id',
       'control_policy':
           'Do not directly activate pumps. Return decision support only; the user must confirm and may adjust pump duration.',
@@ -107,32 +320,41 @@ class GeminiRecommendationService {
         'activate_water_pump': 'Pompa D - Air (H2O)',
       },
       'cultivation_area': {
-        'square_meters': landAreaSquareMeters,
+        'square_meters': input.landAreaSquareMeters,
         'unit': 'm2',
         'calculation_note':
-            'Area has already been used by the app to calculate deterministic pump volume and duration.',
+            'Use this area with the selected planting medium assumption to estimate soil mass.',
       },
+      'agronomic_input': input.toJson(),
+      'pump_flow_rates_ml_per_second': PumpFlowRates.toPromptJson(),
       'output_rules': [
         'Return one complete JSON object only.',
         'Do not use markdown.',
         'Keep every string concise and close all quotes.',
-        'Use deterministic_decision_plan as the single source of truth.',
+        'Use history_summary, agronomic_input, pump_flow_rates_ml_per_second, thresholds, and local_safety_bounds to calculate pump_recommendations.',
+        'Use deterministic_decision_plan only as the local fallback context and status baseline.',
         'Do not change plant_health_percentage.',
         'Do not change recommendation item id or status.',
         'Do not change recommendation group membership.',
         'Do not change automation trigger booleans.',
-        'Do not invent pump duration, pump volume, deficit, threshold, or status values.',
-        'If mentioning pump duration or dosage, use only values from deterministic_decision_plan.pump_recommendations.',
-        'Only improve Indonesian wording for sensor_summary, message, explanation, and recommendation.',
+        'Only recommend a pump when the matching current parameter is below its minimum threshold.',
+        'For N, P, and K, estimate soil mass as area_m2 * assumed_depth_m * bulk_density_kg_per_m3.',
+        'For N, P, and K, estimate element deficit as threshold_gap_mg_per_kg * soil_mass_kg, then apply gradual_correction_fraction before converting to ml using fertilizer concentration.',
+        'For moisture, estimate water volume from moisture deficit percentage, land area, and safe gradual correction.',
+        'Calculate recommended_seconds as recommended_volume_ml / pump_flow_rate_ml_per_second rounded to nearest whole second.',
+        'Do not exceed local_safety_bounds.max_seconds_per_pump or local_safety_bounds.max_volume_ml_per_pump.',
+        'If a calculation is uncertain, recommend a smaller gradual dose and explain the assumption.',
+        'Narasi XAI must explain that depth/media values are estimates from selected planting medium because actual media depth is not measured.',
         'sensor_summary maximum 2 sentences.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
-        'For each recommendation item, explanation must explain the deterministic status from current value, threshold, average, and trend.',
-        'For each recommendation item, recommendation must explain practical follow-up actions for tea plants based on the deterministic plan.',
+        'For each recommendation item, explanation must explain current value, threshold, average, trend, and the dose basis when correction is needed.',
+        'For each recommendation item, recommendation must explain practical follow-up actions for tea plants and require user confirmation before pump activation.',
         'Do not mention or assume any specific cultivation container unless the input data explicitly states it.',
-        'Mention that pump activation requires user confirmation when nutrient or water correction is recommended.',
+        'Return pump_recommendations and daily_schedule_recommendation when pump correction is needed.',
       ],
-      'thresholds': thresholds,
-      'history_summary': summary.toJson(),
+      'thresholds': activeThresholds,
+      'history_summary': summary.toJson(activeThresholds),
+      'local_safety_bounds': _safetyBoundsToJson(input),
       'deterministic_decision_plan': deterministicPlan,
     });
 
@@ -151,10 +373,13 @@ class GeminiRecommendationService {
           _buildAiUnavailableFallbackResponse(
             summary,
             error,
-            landAreaSquareMeters,
+            input,
+            activeThresholds,
           ),
           summary,
-          landAreaSquareMeters,
+          input,
+          activeThresholds: activeThresholds,
+          useGeminiPumpRecommendations: false,
         );
         return _cacheRecommendation(
           requestFingerprint,
@@ -174,7 +399,8 @@ class GeminiRecommendationService {
       rawText: text,
       originalPayload: payload,
       summary: summary,
-      landAreaSquareMeters: landAreaSquareMeters,
+      input: input,
+      activeThresholds: activeThresholds,
       deterministicPlan: deterministicPlan,
     );
     final merged = _mergeGeminiNarrativeWithDecisionPlan(
@@ -185,7 +411,9 @@ class GeminiRecommendationService {
     final responseWithDecisionPlan = _responseWithDecisionPlan(
       merged,
       summary,
-      landAreaSquareMeters,
+      input,
+      activeThresholds: activeThresholds,
+      useGeminiPumpRecommendations: true,
     );
     return _cacheRecommendation(
       requestFingerprint,
@@ -196,29 +424,49 @@ class GeminiRecommendationService {
   static AiRecommendationResponse _responseWithDecisionPlan(
     Map<String, dynamic> decoded,
     _SensorHistorySummary summary,
-    double landAreaSquareMeters,
-  ) {
+    AiRecommendationAgronomicInput input, {
+    required Map<String, num> activeThresholds,
+    required bool useGeminiPumpRecommendations,
+  }) {
     final guardedResponse =
         AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
-      canActivateWaterPump: summary.canActivateWaterPump,
-      canActivateNitrogenPump: summary.canActivateNitrogenPump,
-      canActivatePhosphorusPump: summary.canActivatePhosphorusPump,
-      canActivatePotassiumPump: summary.canActivatePotassiumPump,
+      canActivateWaterPump: summary.canActivateWaterPump(activeThresholds),
+      canActivateNitrogenPump:
+          summary.canActivateNitrogenPump(activeThresholds),
+      canActivatePhosphorusPump:
+          summary.canActivatePhosphorusPump(activeThresholds),
+      canActivatePotassiumPump:
+          summary.canActivatePotassiumPump(activeThresholds),
     );
-    final pumpRecommendations = _buildPumpRecommendations(
+    final localPumpRecommendations = _buildPumpRecommendations(
       summary,
-      landAreaSquareMeters,
+      input,
+      activeThresholds,
     );
+    final geminiPumpRecommendations = useGeminiPumpRecommendations
+        ? _validateGeminiPumpRecommendations(
+            decoded,
+            summary,
+            input,
+            activeThresholds,
+            localPumpRecommendations,
+          )
+        : const <PumpFertilizationRecommendation>[];
+    final pumpRecommendations = geminiPumpRecommendations.isNotEmpty
+        ? geminiPumpRecommendations
+        : localPumpRecommendations;
+    final scheduleRecommendation = pumpRecommendations.isEmpty
+        ? null
+        : _validateGeminiSchedule(decoded, pumpRecommendations) ??
+            DailyFertilizationScheduleRecommendation.fromPlan(
+              recommendations: pumpRecommendations,
+              reason:
+                  'Jadwal harian ${input.plantType.label} direkomendasikan dari kalkulasi hybrid Gemini dengan validasi batas aman lokal, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, dan asumsi media ${input.plantingMedium.label}.',
+            );
 
     return guardedResponse.copyWith(
       pumpRecommendations: pumpRecommendations,
-      dailyScheduleRecommendation: pumpRecommendations.isEmpty
-          ? null
-          : DailyFertilizationScheduleRecommendation.fromPlan(
-              recommendations: pumpRecommendations,
-              reason:
-                  'Jadwal harian direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2.',
-            ),
+      dailyScheduleRecommendation: scheduleRecommendation,
     );
   }
 
@@ -279,12 +527,13 @@ class GeminiRecommendationService {
 
   static String _buildRequestFingerprint(
     _SensorHistorySummary summary,
-    double landAreaSquareMeters,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
   ) {
     return jsonEncode({
-      'land_area_square_meters': _roundDouble(landAreaSquareMeters),
-      'thresholds': thresholds,
-      'summary': summary.toJson(),
+      'agronomic_input': input.toJson(),
+      'thresholds': activeThresholds,
+      'summary': summary.toJson(activeThresholds),
     });
   }
 
@@ -326,7 +575,8 @@ class GeminiRecommendationService {
     required String rawText,
     required String originalPayload,
     required _SensorHistorySummary summary,
-    required double landAreaSquareMeters,
+    required AiRecommendationAgronomicInput input,
+    required Map<String, num> activeThresholds,
     required Map<String, dynamic> deterministicPlan,
   }) async {
     final cleaned = _stripCodeFence(rawText);
@@ -346,6 +596,8 @@ class GeminiRecommendationService {
               'sensor_summary',
               'recommendations',
               'automation_triggers',
+              'pump_recommendations',
+              'daily_schedule_recommendation',
             ],
             'automation_trigger_keys': [
               'activate_nitrogen_pump',
@@ -362,6 +614,21 @@ class GeminiRecommendationService {
               'explanation',
               'recommendation',
             ],
+            'pump_recommendation_item_keys': [
+              'relay',
+              'pump_index',
+              'pump_name',
+              'nutrient',
+              'unit',
+              'current_value',
+              'target_minimum',
+              'deficit',
+              'deficit_percent',
+              'recommended_volume_ml',
+              'recommended_seconds',
+              'reason',
+              'calculation_basis',
+            ],
             'original_input': originalPayload,
             'malformed_output': cleaned,
           })),
@@ -375,7 +642,8 @@ class GeminiRecommendationService {
         return _buildAiUnavailableFallbackResponse(
           summary,
           error,
-          landAreaSquareMeters,
+          input,
+          activeThresholds,
         );
       }
       rethrow;
@@ -394,22 +662,24 @@ class GeminiRecommendationService {
 
   static Map<String, dynamic> _buildDeterministicDecisionPlan(
     _SensorHistorySummary summary,
-    double landAreaSquareMeters,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
   ) {
     final pumpRecommendations = _buildPumpRecommendations(
       summary,
-      landAreaSquareMeters,
+      input,
+      activeThresholds,
     );
     final dailyScheduleRecommendation = pumpRecommendations.isEmpty
         ? null
         : DailyFertilizationScheduleRecommendation.fromPlan(
             recommendations: pumpRecommendations,
             reason:
-                'Jadwal harian direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2.',
+                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, dan asumsi media ${input.plantingMedium.label}.',
           );
 
     return {
-      ..._buildLocalFallbackResponse(summary, landAreaSquareMeters),
+      ..._buildLocalFallbackResponse(summary, input, activeThresholds),
       'pump_recommendations': _pumpRecommendationsToJson(pumpRecommendations),
       if (dailyScheduleRecommendation != null)
         'daily_schedule_recommendation':
@@ -471,6 +741,11 @@ class GeminiRecommendationService {
 
     return {
       ...deterministicPlan,
+      if (geminiResponse['pump_recommendations'] != null)
+        'pump_recommendations': geminiResponse['pump_recommendations'],
+      if (geminiResponse['daily_schedule_recommendation'] != null)
+        'daily_schedule_recommendation':
+            geminiResponse['daily_schedule_recommendation'],
       'plant_health_percentage': deterministicPlan['plant_health_percentage'],
       'sensor_summary': _nonEmptyText(geminiResponse['sensor_summary']) ??
           _nonEmptyText(deterministicPlan['sensor_summary']) ??
@@ -490,8 +765,6 @@ class GeminiRecommendationService {
           'recommendation_status',
           'recommendation_groups',
           'automation_triggers',
-          'pump_recommendations',
-          'daily_schedule_recommendation',
         ],
       },
     };
@@ -532,6 +805,134 @@ class GeminiRecommendationService {
       'duration_seconds': recommendation.durationSeconds,
       'reason': recommendation.reason,
     };
+  }
+
+  static List<PumpFertilizationRecommendation>
+      _validateGeminiPumpRecommendations(
+    Map<String, dynamic> decoded,
+    _SensorHistorySummary summary,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
+    List<PumpFertilizationRecommendation> localFallback,
+  ) {
+    final rawItems = _asMapList(decoded['pump_recommendations']);
+    if (rawItems.isEmpty) return const [];
+
+    final fallbackByRelay = {
+      for (final item in localFallback) item.relay: item,
+    };
+    final validated = <PumpFertilizationRecommendation>[];
+    final usedRelays = <int>{};
+
+    for (final raw in rawItems) {
+      final relay = _readJsonInt(raw['relay']);
+      final pumpIndex = _readJsonInt(raw['pump_index']).clamp(0, 3);
+      final resolvedRelay = relay >= 1 && relay <= 4 ? relay : pumpIndex + 1;
+      if (!usedRelays.add(resolvedRelay)) continue;
+
+      final metadata = _pumpMetadata(resolvedRelay, activeThresholds);
+      if (metadata == null) continue;
+
+      final current = summary.parameters[metadata.sensorKey]?.current;
+      if (current == null || current >= metadata.minimum) continue;
+
+      final rawVolume = _readJsonDouble(
+        raw['recommended_volume_ml'] ?? raw['estimated_volume_ml'],
+      );
+      final rawSeconds = _readJsonInt(raw['recommended_seconds']);
+      final secondsFromVolume = rawVolume > 0
+          ? PumpFlowRates.secondsForVolume(
+              pumpIndex: metadata.pumpIndex,
+              volumeMl: rawVolume,
+            )
+          : 0;
+      final candidateSeconds = rawSeconds > 0 ? rawSeconds : secondsFromVolume;
+      if (candidateSeconds <= 0) continue;
+
+      final maxSeconds = _maxSafeSecondsForPump(metadata.pumpIndex, input);
+      final safeSeconds = candidateSeconds.clamp(1, maxSeconds).toInt();
+      final deficit = _roundDouble(metadata.minimum - current);
+      final deficitPercent = _roundDouble((deficit / metadata.minimum) * 100);
+      final flowRate =
+          PumpFlowRates.byPumpIndex(metadata.pumpIndex).averageMlPerSecond;
+      final estimatedVolumeMl = PumpFlowRates.volumeForDuration(
+        pumpIndex: metadata.pumpIndex,
+        seconds: safeSeconds,
+      );
+      final basis = _nonEmptyText(raw['calculation_basis']);
+      final reason = _nonEmptyText(raw['reason']) ??
+          _nonEmptyText(raw['explanation']) ??
+          fallbackByRelay[resolvedRelay]?.reason ??
+          '${metadata.nutrient} saat ini ${_formatNumber(current)} ${metadata.unit}, kurang ${_formatNumber(deficit)} ${metadata.unit} dari ambang minimum ${_formatNumber(metadata.minimum)} ${metadata.unit}.';
+
+      validated.add(
+        PumpFertilizationRecommendation(
+          relay: resolvedRelay,
+          pumpIndex: metadata.pumpIndex,
+          pumpName: metadata.pumpName,
+          nutrient: metadata.nutrient,
+          unit: metadata.unit,
+          currentValue: current,
+          targetMinimum: metadata.minimum,
+          deficit: deficit,
+          deficitPercent: deficitPercent,
+          recommendedSeconds: safeSeconds,
+          reason:
+              '$reason ${basis == null ? '' : 'Dasar hitung: $basis '}Durasi telah divalidasi dengan batas aman lokal maksimal $maxSeconds detik dan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+        ),
+      );
+    }
+
+    return validated;
+  }
+
+  static DailyFertilizationScheduleRecommendation? _validateGeminiSchedule(
+    Map<String, dynamic> decoded,
+    List<PumpFertilizationRecommendation> recommendations,
+  ) {
+    final rawSchedule = _asMap(decoded['daily_schedule_recommendation']);
+    final schedule = DailyFertilizationScheduleRecommendation.fromJson(
+      rawSchedule,
+    );
+    if (schedule == null) return null;
+    if (schedule.hour < 5 || schedule.hour > 17) return null;
+
+    final pumpIndexes = recommendations.map((item) => item.pumpIndex).toSet();
+    final durationSeconds = recommendations
+        .map((item) => item.recommendedSeconds)
+        .reduce((a, b) => a > b ? a : b);
+
+    return DailyFertilizationScheduleRecommendation(
+      hour: schedule.hour,
+      minute: schedule.minute,
+      pumpIndexes: pumpIndexes,
+      durationSeconds: durationSeconds,
+      reason: schedule.reason.isEmpty
+          ? 'Jadwal dipilih Gemini dan divalidasi aplikasi pada rentang waktu aman 05:00-17:59.'
+          : schedule.reason,
+    );
+  }
+
+  static Map<String, dynamic> _safetyBoundsToJson(
+    AiRecommendationAgronomicInput input,
+  ) {
+    return {
+      'gradual_correction_fraction': _gradualCorrectionFraction,
+      'max_seconds_per_pump': _maxPumpRunSeconds,
+      'max_volume_ml_per_pump': {
+        for (final item in PumpFlowRates.values)
+          item.pumpName:
+              _roundDouble(item.averageMlPerSecond * _maxPumpRunSeconds),
+      },
+      'recommended_schedule_hour_range': '05:00-17:59',
+      'estimated_soil_mass_kg': _roundDouble(_estimatedSoilMassKg(input)),
+    };
+  }
+
+  static Map<String, num> _thresholdsFor(
+    AiRecommendationAgronomicInput input,
+  ) {
+    return input.plantType.thresholds;
   }
 
   static Map<String, dynamic> _asMap(Object? value) {
@@ -640,7 +1041,8 @@ class GeminiRecommendationService {
 
   static Map<String, dynamic> _buildLocalFallbackResponse(
     _SensorHistorySummary summary,
-    double landAreaSquareMeters,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
   ) {
     final items = <Map<String, dynamic>>[];
 
@@ -721,27 +1123,27 @@ class GeminiRecommendationService {
       key: 'N',
       label: 'Nitrogen',
       unit: 'mg/kg',
-      min: thresholds['nitrogen_min']!,
-      max: thresholds['nitrogen_max']!,
+      min: activeThresholds['nitrogen_min']!,
+      max: activeThresholds['nitrogen_max']!,
       lowTitle: 'Nitrogen Rendah',
       highTitle: 'Nitrogen Berlebih',
       lowAction:
-          'Aktifkan Pompa A dalam dosis kecil sesuai DSS untuk tanaman teh, lalu pantau ulang NPK setelah larutan merata. Hindari penambahan besar sekaligus karena teh sensitif terhadap lonjakan EC.',
+          'Aktifkan Pompa A dalam dosis kecil sesuai DSS untuk ${input.plantType.label}, lalu pantau ulang NPK setelah larutan merata. Hindari penambahan besar sekaligus karena perubahan EC mendadak dapat menekan akar.',
       highAction:
-          'Tunda penambahan nitrogen dan lakukan pengenceran bertahap bila EC ikut tinggi. Pantau pucuk daun teh dan ulangi pembacaan N serta EC sebelum koreksi berikutnya.',
+          'Tunda penambahan nitrogen dan lakukan pengenceran bertahap bila EC ikut tinggi. Pantau respons daun ${input.plantType.label} dan ulangi pembacaan N serta EC sebelum koreksi berikutnya.',
       normalAction:
-          'Pertahankan dosis nitrogen saat ini dan lanjutkan pemantauan berkala untuk menjaga pertumbuhan pucuk teh tetap stabil.',
+          'Pertahankan dosis nitrogen saat ini dan lanjutkan pemantauan berkala untuk menjaga pertumbuhan ${input.plantType.label} tetap stabil.',
     );
     evaluateRange(
       key: 'P',
       label: 'Fosfor',
       unit: 'mg/kg',
-      min: thresholds['phosphorus_min']!,
-      max: thresholds['phosphorus_max']!,
+      min: activeThresholds['phosphorus_min']!,
+      max: activeThresholds['phosphorus_max']!,
       lowTitle: 'Fosfor Rendah',
       highTitle: 'Fosfor Berlebih',
       lowAction:
-          'Aktifkan Pump B secara bertahap dan pastikan larutan tercampur sebelum evaluasi ulang. Jaga pH media teh tetap asam karena pH yang tidak sesuai dapat menghambat ketersediaan fosfor.',
+          'Aktifkan Pump B secara bertahap dan pastikan larutan tercampur sebelum evaluasi ulang. Jaga pH media sesuai rentang ${input.plantType.label} karena pH yang tidak sesuai dapat menghambat ketersediaan fosfor.',
       highAction:
           'Hentikan sementara suplai fosfor dan pantau EC serta pH media tanam. Lakukan pengenceran ringan jika konsentrasi nutrisi keseluruhan meningkat.',
       normalAction:
@@ -751,12 +1153,12 @@ class GeminiRecommendationService {
       key: 'K',
       label: 'Kalium',
       unit: 'mg/kg',
-      min: thresholds['potassium_min']!,
-      max: thresholds['potassium_max']!,
+      min: activeThresholds['potassium_min']!,
+      max: activeThresholds['potassium_max']!,
       lowTitle: 'Kalium Rendah',
       highTitle: 'Kalium Berlebih',
       lowAction:
-          'Aktifkan Pump C sesuai durasi DSS, lalu ulangi pembacaan setelah nutrisi tersebar merata. Kalium penting untuk ketahanan teh, tetapi tetap jaga keseimbangan NPK agar EC tidak melonjak.',
+          'Aktifkan Pump C sesuai durasi DSS, lalu ulangi pembacaan setelah nutrisi tersebar merata. Kalium penting untuk ketahanan dan fase produktif ${input.plantType.label}, tetapi tetap jaga keseimbangan NPK agar EC tidak melonjak.',
       highAction:
           'Tunda penambahan kalium dan pantau EC. Jika nilai tetap tinggi, kurangi konsentrasi larutan secara bertahap.',
       normalAction:
@@ -766,28 +1168,28 @@ class GeminiRecommendationService {
       key: 'pH',
       label: 'pH',
       unit: 'pH',
-      min: thresholds['ph_min']!,
-      max: thresholds['ph_max']!,
+      min: activeThresholds['ph_min']!,
+      max: activeThresholds['ph_max']!,
       lowTitle: 'pH Terlalu Asam',
       highTitle: 'pH Terlalu Basa',
       lowAction:
-          'Naikkan pH secara sangat bertahap menggunakan korektor pH up dosis kecil. Teh menyukai media asam, jadi hindari koreksi berlebihan melewati rentang 4.5-5.5.',
+          'Naikkan pH secara sangat bertahap menggunakan korektor pH up dosis kecil. Sesuaikan dengan rentang aman ${input.plantType.label} dan hindari koreksi berlebihan.',
       highAction:
-          'Turunkan pH secara bertahap menggunakan korektor pH down agar media kembali asam. Hindari koreksi besar sekaligus karena akar teh rentan stres terhadap perubahan pH mendadak.',
+          'Turunkan pH secara bertahap menggunakan korektor pH down agar media kembali ke rentang ${input.plantType.label}. Hindari koreksi besar sekaligus karena akar rentan stres terhadap perubahan pH mendadak.',
       normalAction:
-          'pH berada pada zona asam yang sesuai untuk serapan hara tanaman teh, pertahankan prosedur pemantauan.',
+          'pH berada pada zona yang sesuai untuk serapan hara ${input.plantType.label}, pertahankan prosedur pemantauan.',
     );
     evaluateRange(
       key: 'Moisture',
       label: 'Kelembapan',
       unit: '%',
-      min: thresholds['moisture_min']!,
-      max: thresholds['moisture_max']!,
+      min: activeThresholds['moisture_min']!,
+      max: activeThresholds['moisture_max']!,
       lowTitle: 'Kelembapan Media Rendah',
       highTitle: 'Kelembapan Media Tinggi',
-      lowAction: _buildWateringLowAction(summary, landAreaSquareMeters),
+      lowAction: _buildWateringLowAction(summary, input, activeThresholds),
       highAction:
-          'Tunda penyiraman dan periksa drainase media tanam. Jika kelembapan tetap tinggi, kurangi frekuensi irigasi untuk mencegah akar teh kekurangan oksigen.',
+          'Tunda penyiraman dan periksa drainase media tanam. Jika kelembapan tetap tinggi, kurangi frekuensi irigasi untuk mencegah akar ${input.plantType.label} kekurangan oksigen.',
       normalAction:
           'Kelembapan media cukup, pertahankan jadwal penyiraman saat ini.',
     );
@@ -795,14 +1197,14 @@ class GeminiRecommendationService {
       key: 'Temp',
       label: 'Suhu',
       unit: '°C',
-      min: thresholds['temperature_min']!,
-      max: thresholds['temperature_max']!,
+      min: activeThresholds['temperature_min']!,
+      max: activeThresholds['temperature_max']!,
       lowTitle: 'Suhu Terlalu Rendah',
       highTitle: 'Suhu Terlalu Tinggi',
       lowAction:
-          'Kurangi paparan dingin dan jaga lingkungan tumbuh teh tetap stabil. Pantau suhu bersama kelembapan karena perubahan suhu memengaruhi penguapan media.',
+          'Kurangi paparan dingin dan jaga lingkungan tumbuh ${input.plantType.label} tetap stabil. Pantau suhu bersama kelembapan karena perubahan suhu memengaruhi penguapan media.',
       highAction:
-          'Berikan naungan dan tingkatkan ventilasi untuk menurunkan stres panas pada teh. Gunakan Pump D Water seperlunya dengan durasi pendek agar media tidak terlalu basah.',
+          'Berikan naungan dan tingkatkan ventilasi untuk menurunkan stres panas pada ${input.plantType.label}. Gunakan Pump D Water seperlunya dengan durasi pendek agar media tidak terlalu basah.',
       normalAction:
           'Suhu berada dalam rentang aman, lanjutkan pemantauan normal.',
     );
@@ -810,12 +1212,12 @@ class GeminiRecommendationService {
       key: 'EC',
       label: 'Electrical Conductivity',
       unit: 'mS/cm',
-      min: thresholds['ec_min']!,
-      max: thresholds['ec_max']!,
+      min: activeThresholds['ec_min']!,
+      max: activeThresholds['ec_max']!,
       lowTitle: 'EC Rendah',
       highTitle: 'EC Tinggi',
       lowAction:
-          'Tambahkan nutrisi secara bertahap melalui pompa NPK yang sesuai dengan unsur rendah. Ukur ulang EC setelah pencampuran karena tanaman teh lebih aman dengan koreksi kecil dan stabil.',
+          'Tambahkan nutrisi secara bertahap melalui pompa NPK yang sesuai dengan unsur rendah. Ukur ulang EC setelah pencampuran agar ${input.plantType.label} tetap menerima koreksi kecil dan stabil.',
       highAction:
           'Encerkan larutan dengan air bersih secara bertahap dan tunda penambahan pupuk. Pantau ulang EC serta pH asam setelah larutan stabil.',
       normalAction:
@@ -834,7 +1236,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Analisis menggunakan ${summary.rowCount} baris data sensor terbaru dan luas tanah ${_formatNumber(landAreaSquareMeters)} m2 untuk menilai NPK, pH, suhu, kelembapan, dan EC berdasarkan standar tanaman teh.',
+          'Analisis ${input.plantType.label} menggunakan ${summary.rowCount} baris data sensor terbaru, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
@@ -842,10 +1244,13 @@ class GeminiRecommendationService {
         'baik': baik,
       },
       'automation_triggers': {
-        'activate_nitrogen_pump': summary.canActivateNitrogenPump,
-        'activate_phosphorus_pump': summary.canActivatePhosphorusPump,
-        'activate_potassium_pump': summary.canActivatePotassiumPump,
-        'activate_water_pump': summary.canActivateWaterPump,
+        'activate_nitrogen_pump':
+            summary.canActivateNitrogenPump(activeThresholds),
+        'activate_phosphorus_pump':
+            summary.canActivatePhosphorusPump(activeThresholds),
+        'activate_potassium_pump':
+            summary.canActivatePotassiumPump(activeThresholds),
+        'activate_water_pump': summary.canActivateWaterPump(activeThresholds),
         'reason':
             'Trigger mengikuti flag ambang lokal dari data sensor terbaru.',
       },
@@ -855,11 +1260,13 @@ class GeminiRecommendationService {
   static Map<String, dynamic> _buildAiUnavailableFallbackResponse(
     _SensorHistorySummary summary,
     Object error,
-    double landAreaSquareMeters,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
   ) {
     final fallback = _buildLocalFallbackResponse(
       summary,
-      landAreaSquareMeters,
+      input,
+      activeThresholds,
     );
     final prefix = _isQuotaOrRateLimitError(error)
         ? 'Kuota atau rate limit Gemini API sedang tercapai, sehingga rekomendasi sementara dibuat memakai analisis DSS/XAI lokal.'
@@ -873,7 +1280,8 @@ class GeminiRecommendationService {
 
   static List<PumpFertilizationRecommendation> _buildPumpRecommendations(
     _SensorHistorySummary summary,
-    double landAreaSquareMeters,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
   ) {
     final recommendations = <PumpFertilizationRecommendation>[];
 
@@ -891,20 +1299,20 @@ class GeminiRecommendationService {
 
       final deficit = _roundDouble(minimum - current);
       final deficitPercent = _roundDouble((deficit / minimum) * 100);
-      final baseSeconds = _secondsFromDeficit(deficitPercent);
       final targetVolumeMl = key == 'Moisture'
           ? _estimatedWaterVolumeMl(
               deficitPercent: deficitPercent,
-              landAreaSquareMeters: landAreaSquareMeters,
+              input: input,
             )
           : _estimatedNutrientVolumeMl(
-              baseSeconds: baseSeconds,
-              landAreaSquareMeters: landAreaSquareMeters,
+              sensorKey: key,
+              deficitMgPerKg: deficit,
+              input: input,
             );
       final recommendedSeconds = PumpFlowRates.secondsForVolume(
         pumpIndex: pumpIndex,
         volumeMl: targetVolumeMl,
-      );
+      ).clamp(1, _maxSafeSecondsForPump(pumpIndex, input)).toInt();
       final flowRate = PumpFlowRates.byPumpIndex(pumpIndex).averageMlPerSecond;
       final estimatedVolumeMl = PumpFlowRates.volumeForDuration(
         pumpIndex: pumpIndex,
@@ -924,8 +1332,8 @@ class GeminiRecommendationService {
           deficitPercent: deficitPercent,
           recommendedSeconds: recommendedSeconds,
           reason: key == 'Moisture'
-              ? '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi penyiraman memakai luas tanah ${_formatNumber(landAreaSquareMeters)} m2 dengan kebutuhan sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.'
-              : '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi nutrisi memakai luas tanah ${_formatNumber(landAreaSquareMeters)} m2 dengan kebutuhan sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+              ? '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi penyiraman memakai luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2 sebagai koreksi bertahap sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.'
+              : '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi nutrisi memakai media ${input.plantingMedium.label}, kedalaman asumsi ${_formatNumber(input.plantingMedium.assumedDepthCm)} cm, massa tanah sekitar ${_formatNumber(_estimatedSoilMassKg(input))} kg, dan konsentrasi larutan ${_formatNumber(_concentrationForKey(key, input))} mg/ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -937,7 +1345,7 @@ class GeminiRecommendationService {
       pumpName: 'Pompa A',
       nutrient: 'Nitrogen',
       unit: 'mg/kg',
-      minimum: thresholds['nitrogen_min']!.toDouble(),
+      minimum: activeThresholds['nitrogen_min']!.toDouble(),
     );
     addIfLow(
       key: 'P',
@@ -946,7 +1354,7 @@ class GeminiRecommendationService {
       pumpName: 'Pompa B',
       nutrient: 'Fosfor',
       unit: 'mg/kg',
-      minimum: thresholds['phosphorus_min']!.toDouble(),
+      minimum: activeThresholds['phosphorus_min']!.toDouble(),
     );
     addIfLow(
       key: 'K',
@@ -955,7 +1363,7 @@ class GeminiRecommendationService {
       pumpName: 'Pompa C',
       nutrient: 'Kalium',
       unit: 'mg/kg',
-      minimum: thresholds['potassium_min']!.toDouble(),
+      minimum: activeThresholds['potassium_min']!.toDouble(),
     );
     addIfLow(
       key: 'Moisture',
@@ -964,60 +1372,161 @@ class GeminiRecommendationService {
       pumpName: 'Pompa D',
       nutrient: 'Air',
       unit: '%',
-      minimum: thresholds['moisture_min']!.toDouble(),
+      minimum: activeThresholds['moisture_min']!.toDouble(),
     );
 
     return recommendations;
   }
 
   static double _estimatedNutrientVolumeMl({
-    required int baseSeconds,
-    required double landAreaSquareMeters,
+    required String sensorKey,
+    required double deficitMgPerKg,
+    required AiRecommendationAgronomicInput input,
   }) {
-    final safeArea = landAreaSquareMeters <= 0 ? 0 : landAreaSquareMeters;
-    final baseVolumePerSquareMeterMl =
-        PumpFlowRates.highestRate.averageMlPerSecond * baseSeconds;
-    final volumeMl = safeArea * baseVolumePerSquareMeterMl;
+    final concentrationMgPerMl = _concentrationForKey(sensorKey, input);
+    final deficitMg = deficitMgPerKg *
+        _estimatedSoilMassKg(input) *
+        _gradualCorrectionFraction;
+    final volumeMl =
+        (concentrationMgPerMl <= 0 ? 1 : deficitMg / concentrationMgPerMl)
+            .toDouble();
     return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
   }
 
   static String _buildWateringLowAction(
     _SensorHistorySummary summary,
-    double landAreaSquareMeters,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
   ) {
     final current = summary.parameters['Moisture']?.current;
-    final minimum = thresholds['moisture_min']!.toDouble();
+    final minimum = activeThresholds['moisture_min']!.toDouble();
     if (current == null || current >= minimum) {
-      return 'Pertahankan penyiraman bertahap dan pastikan media teh lembap merata tetapi tidak tergenang.';
+      return 'Pertahankan penyiraman bertahap dan pastikan media ${input.plantType.label} lembap merata tetapi tidak tergenang.';
     }
 
     final deficitPercent = _roundDouble(((minimum - current) / minimum) * 100);
     final waterVolumeMl = _estimatedWaterVolumeMl(
       deficitPercent: deficitPercent,
-      landAreaSquareMeters: landAreaSquareMeters,
+      input: input,
     );
     final seconds = PumpFlowRates.secondsForVolume(
       pumpIndex: 3,
       volumeMl: waterVolumeMl,
-    );
+    ).clamp(1, _maxSafeSecondsForPump(3, input));
 
-    return 'Aktifkan Pump D Water sekitar $seconds detik sebagai penyiraman bertahap awal untuk luas ${_formatNumber(landAreaSquareMeters)} m2 dengan estimasi kebutuhan ${PumpFlowRates.formatMl(waterVolumeMl)} ml. Pastikan media tanam teh lembap merata tetapi tidak tergenang, lalu ukur ulang kelembapan.';
+    return 'Aktifkan Pump D Water sekitar $seconds detik sebagai penyiraman bertahap awal untuk luas ${_formatNumber(input.landAreaSquareMeters)} m2 dengan estimasi kebutuhan ${PumpFlowRates.formatMl(waterVolumeMl)} ml. Asumsi media ${input.plantingMedium.label} dipakai karena kedalaman aktual belum tersedia; ukur ulang kelembapan setelah larutan merata.';
   }
 
   static double _estimatedWaterVolumeMl({
     required double deficitPercent,
-    required double landAreaSquareMeters,
+    required AiRecommendationAgronomicInput input,
   }) {
     const waterMlPerSquareMeterPerMoisturePercent = 50.0;
-    final safeArea = landAreaSquareMeters <= 0 ? 0 : landAreaSquareMeters;
-    final volumeMl =
-        safeArea * deficitPercent * waterMlPerSquareMeterPerMoisturePercent;
+    final safeArea =
+        input.landAreaSquareMeters <= 0 ? 0 : input.landAreaSquareMeters;
+    final volumeMl = safeArea *
+        deficitPercent *
+        waterMlPerSquareMeterPerMoisturePercent *
+        _gradualCorrectionFraction;
     return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
   }
 
-  static int _secondsFromDeficit(double deficitPercent) {
-    final seconds = (10 + (deficitPercent * 2.4)).round();
-    return seconds < 1 ? 1 : seconds;
+  static double _estimatedSoilMassKg(AiRecommendationAgronomicInput input) {
+    final safeArea =
+        input.landAreaSquareMeters <= 0 ? 0 : input.landAreaSquareMeters;
+    final depthMeters = input.plantingMedium.assumedDepthCm / 100;
+    return safeArea * depthMeters * input.plantingMedium.bulkDensityKgPerM3;
+  }
+
+  static double _concentrationForKey(
+    String sensorKey,
+    AiRecommendationAgronomicInput input,
+  ) {
+    switch (sensorKey) {
+      case 'N':
+        return input.fertilizerConcentration.nitrogenMgPerMl;
+      case 'P':
+        return input.fertilizerConcentration.phosphorusMgPerMl;
+      case 'K':
+        return input.fertilizerConcentration.potassiumMgPerMl;
+      default:
+        return 1;
+    }
+  }
+
+  static int _maxSafeSecondsForPump(
+    int pumpIndex,
+    AiRecommendationAgronomicInput input,
+  ) {
+    final flowRate = PumpFlowRates.byPumpIndex(pumpIndex).averageMlPerSecond;
+    final areaBasedMaxVolume =
+        (input.landAreaSquareMeters <= 0 ? 1 : input.landAreaSquareMeters) *
+            1000;
+    final maxByVolume = flowRate <= 0
+        ? _maxPumpRunSeconds
+        : (areaBasedMaxVolume / flowRate).round();
+    return maxByVolume.clamp(1, _maxPumpRunSeconds).toInt();
+  }
+
+  static _PumpMetadata? _pumpMetadata(
+    int relay,
+    Map<String, num> activeThresholds,
+  ) {
+    switch (relay) {
+      case 1:
+        return _PumpMetadata(
+          sensorKey: 'N',
+          relay: 1,
+          pumpIndex: 0,
+          pumpName: 'Pompa A',
+          nutrient: 'Nitrogen',
+          unit: 'mg/kg',
+          minimum: activeThresholds['nitrogen_min']!.toDouble(),
+        );
+      case 2:
+        return _PumpMetadata(
+          sensorKey: 'P',
+          relay: 2,
+          pumpIndex: 1,
+          pumpName: 'Pompa B',
+          nutrient: 'Fosfor',
+          unit: 'mg/kg',
+          minimum: activeThresholds['phosphorus_min']!.toDouble(),
+        );
+      case 3:
+        return _PumpMetadata(
+          sensorKey: 'K',
+          relay: 3,
+          pumpIndex: 2,
+          pumpName: 'Pompa C',
+          nutrient: 'Kalium',
+          unit: 'mg/kg',
+          minimum: activeThresholds['potassium_min']!.toDouble(),
+        );
+      case 4:
+        return _PumpMetadata(
+          sensorKey: 'Moisture',
+          relay: 4,
+          pumpIndex: 3,
+          pumpName: 'Pompa D',
+          nutrient: 'Air',
+          unit: '%',
+          minimum: activeThresholds['moisture_min']!.toDouble(),
+        );
+      default:
+        return null;
+    }
+  }
+
+  static int _readJsonInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static double _readJsonDouble(Object? value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   static double _roundDouble(double value) {
@@ -1063,6 +1572,26 @@ class AiRecommendationException implements Exception {
   String toString() => message;
 }
 
+class _PumpMetadata {
+  const _PumpMetadata({
+    required this.sensorKey,
+    required this.relay,
+    required this.pumpIndex,
+    required this.pumpName,
+    required this.nutrient,
+    required this.unit,
+    required this.minimum,
+  });
+
+  final String sensorKey;
+  final int relay;
+  final int pumpIndex;
+  final String pumpName;
+  final String nutrient;
+  final String unit;
+  final double minimum;
+}
+
 class _CachedAiRecommendation {
   const _CachedAiRecommendation({
     required this.fingerprint,
@@ -1076,7 +1605,7 @@ class _CachedAiRecommendation {
 }
 
 const _systemPrompt =
-    'You are an expert agronomist editor for tea plants (Camellia sinensis) and an Explainable AI (XAI) narrator. The application has already performed deterministic DSS calculations for status, threshold gap, pump volume, pump duration, plant health score, and automation triggers. Treat deterministic_decision_plan as the single source of truth. Do not recalculate, override, or invent decision values. Only rewrite the Indonesian summary, explanation, and recommendation text so the deterministic decisions are clear, scientifically reasonable, concise, and practical. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
+    'You are an expert agronomist calculator and an Explainable AI (XAI) narrator. Calculate candidate nutrient and watering doses for the selected plant type from sensor history, crop-specific thresholds, land area, pump flow rates, fertilizer solution concentration, and selected planting medium assumptions. The app will validate your pump recommendations with local safety rules before any user confirmation. Explain that media depth is estimated from the selected medium because actual depth is not measured. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {
@@ -1094,6 +1623,39 @@ final _recommendationItemSchema = Schema.object(
     'message',
     'explanation',
     'recommendation',
+  ],
+);
+
+final _pumpRecommendationSchema = Schema.object(
+  properties: {
+    'relay': Schema.integer(),
+    'pump_index': Schema.integer(),
+    'pump_name': Schema.string(),
+    'nutrient': Schema.string(),
+    'unit': Schema.string(),
+    'current_value': Schema.number(),
+    'target_minimum': Schema.number(),
+    'deficit': Schema.number(),
+    'deficit_percent': Schema.number(),
+    'recommended_volume_ml': Schema.number(),
+    'recommended_seconds': Schema.integer(),
+    'reason': Schema.string(),
+    'calculation_basis': Schema.string(),
+  },
+  requiredProperties: [
+    'relay',
+    'pump_index',
+    'pump_name',
+    'nutrient',
+    'unit',
+    'current_value',
+    'target_minimum',
+    'deficit',
+    'deficit_percent',
+    'recommended_volume_ml',
+    'recommended_seconds',
+    'reason',
+    'calculation_basis',
   ],
 );
 
@@ -1126,12 +1688,31 @@ final _responseSchema = Schema.object(
         'reason',
       ],
     ),
+    'pump_recommendations': Schema.array(items: _pumpRecommendationSchema),
+    'daily_schedule_recommendation': Schema.object(
+      properties: {
+        'hour': Schema.integer(),
+        'minute': Schema.integer(),
+        'pump_indexes': Schema.array(items: Schema.integer()),
+        'duration_seconds': Schema.integer(),
+        'reason': Schema.string(),
+      },
+      requiredProperties: [
+        'hour',
+        'minute',
+        'pump_indexes',
+        'duration_seconds',
+        'reason',
+      ],
+    ),
   },
   requiredProperties: [
     'plant_health_percentage',
     'sensor_summary',
     'recommendations',
     'automation_triggers',
+    'pump_recommendations',
+    'daily_schedule_recommendation',
   ],
 );
 
@@ -1255,31 +1836,27 @@ class _SensorHistorySummary {
     );
   }
 
-  bool get canActivateWaterPump {
+  bool canActivateWaterPump(Map<String, num> activeThresholds) {
     final moisture = parameters['Moisture']?.current;
-    return moisture != null &&
-        moisture < GeminiRecommendationService.thresholds['moisture_min']!;
+    return moisture != null && moisture < activeThresholds['moisture_min']!;
   }
 
-  bool get canActivateNitrogenPump {
+  bool canActivateNitrogenPump(Map<String, num> activeThresholds) {
     final n = parameters['N']?.current;
-    return n != null &&
-        n < GeminiRecommendationService.thresholds['nitrogen_min']!;
+    return n != null && n < activeThresholds['nitrogen_min']!;
   }
 
-  bool get canActivatePhosphorusPump {
+  bool canActivatePhosphorusPump(Map<String, num> activeThresholds) {
     final p = parameters['P']?.current;
-    return p != null &&
-        p < GeminiRecommendationService.thresholds['phosphorus_min']!;
+    return p != null && p < activeThresholds['phosphorus_min']!;
   }
 
-  bool get canActivatePotassiumPump {
+  bool canActivatePotassiumPump(Map<String, num> activeThresholds) {
     final k = parameters['K']?.current;
-    return k != null &&
-        k < GeminiRecommendationService.thresholds['potassium_min']!;
+    return k != null && k < activeThresholds['potassium_min']!;
   }
 
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toJson(Map<String, num> activeThresholds) {
     return {
       'row_count': rowCount,
       'time_range': {
@@ -1291,10 +1868,10 @@ class _SensorHistorySummary {
             value.toJson(),
           )),
       'local_threshold_flags': {
-        'water_pump_allowed': canActivateWaterPump,
-        'nitrogen_pump_allowed': canActivateNitrogenPump,
-        'phosphorus_pump_allowed': canActivatePhosphorusPump,
-        'potassium_pump_allowed': canActivatePotassiumPump,
+        'water_pump_allowed': canActivateWaterPump(activeThresholds),
+        'nitrogen_pump_allowed': canActivateNitrogenPump(activeThresholds),
+        'phosphorus_pump_allowed': canActivatePhosphorusPump(activeThresholds),
+        'potassium_pump_allowed': canActivatePotassiumPump(activeThresholds),
       },
     };
   }

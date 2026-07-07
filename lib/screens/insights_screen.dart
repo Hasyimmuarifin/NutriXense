@@ -38,7 +38,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   Object? _requestError;
   DateTime? _lastUpdated;
   AiPumpAutomationResult? _lastAutomationResult;
-  double? _lastLandAreaSquareMeters;
+  AiRecommendationAgronomicInput? _lastAgronomicInput;
   final Map<int, int> _adjustedPumpSeconds = {};
 
   final List<String> _filters = ['All', 'Kritis', 'Awas', 'Baik'];
@@ -107,23 +107,25 @@ class _InsightsScreenState extends State<InsightsScreen> {
   }
 
   Future<void> _promptAndRequestAiRecommendation() async {
-    final landAreaSquareMeters = await _showLandAreaInputDialog();
-    if (landAreaSquareMeters == null || !mounted) return;
+    final input = await _showAgronomicInputDialog();
+    if (input == null || !mounted) return;
 
-    await _requestAiRecommendation(landAreaSquareMeters);
+    await _requestAiRecommendation(input);
   }
 
-  Future<void> _requestAiRecommendation(double landAreaSquareMeters) async {
+  Future<void> _requestAiRecommendation(
+    AiRecommendationAgronomicInput input,
+  ) async {
     setState(() {
       _isRequesting = true;
       _requestError = null;
       _expandedIndex = null;
-      _lastLandAreaSquareMeters = landAreaSquareMeters;
+      _lastAgronomicInput = input;
     });
 
     try {
       final response = await _recommendationService.requestRecommendation(
-        landAreaSquareMeters: landAreaSquareMeters,
+        input: input,
       );
       if (!mounted) return;
       setState(() {
@@ -158,13 +160,13 @@ class _InsightsScreenState extends State<InsightsScreen> {
     }
   }
 
-  Future<double?> _showLandAreaInputDialog() async {
-    return showDialog<double>(
+  Future<AiRecommendationAgronomicInput?> _showAgronomicInputDialog() async {
+    return showDialog<AiRecommendationAgronomicInput>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return _LandAreaInputDialog(
-          initialSquareMeters: _lastLandAreaSquareMeters ?? 0,
+          initialInput: _lastAgronomicInput,
           formatLandArea: _formatLandArea,
           parseLandAreaNumber: _parseLandAreaSquareMeters,
         );
@@ -409,10 +411,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            if (_lastLandAreaSquareMeters != null) ...[
+                            if (_lastAgronomicInput != null) ...[
                               const SizedBox(height: 10),
-                              _buildLandAreaInfoBox(
-                                _lastLandAreaSquareMeters!,
+                              _buildAgronomicInputInfoBox(
+                                _lastAgronomicInput!,
                               ),
                             ],
                             const SizedBox(height: 14),
@@ -995,9 +997,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   const SizedBox(height: 12),
                   _buildPumpRecommendationPanel(_aiResponse!),
                 ],
-                if (_lastLandAreaSquareMeters != null) ...[
+                if (_lastAgronomicInput != null) ...[
                   const SizedBox(height: 10),
-                  _buildLandAreaInfoBox(_lastLandAreaSquareMeters!),
+                  _buildAgronomicInputInfoBox(_lastAgronomicInput!),
                 ],
                 if (_lastAutomationResult != null) ...[
                   const SizedBox(height: 10),
@@ -1113,7 +1115,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildLandAreaInfoBox(double landAreaSquareMeters) {
+  Widget _buildAgronomicInputInfoBox(AiRecommendationAgronomicInput input) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1132,8 +1134,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Luas tanah: ${_formatLandArea(landAreaSquareMeters)} m²',
-              maxLines: 1,
+              '${input.plantType.label} • Luas ${_formatLandArea(input.landAreaSquareMeters)} m² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerMl)} mg/ml • ${input.plantingMedium.label}',
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontSize: 11,
@@ -1443,12 +1445,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
 class _LandAreaInputDialog extends StatefulWidget {
   const _LandAreaInputDialog({
-    required this.initialSquareMeters,
+    required this.initialInput,
     required this.formatLandArea,
     required this.parseLandAreaNumber,
   });
 
-  final double initialSquareMeters;
+  final AiRecommendationAgronomicInput? initialInput;
   final String Function(double value) formatLandArea;
   final double? Function(String input) parseLandAreaNumber;
 
@@ -1475,22 +1477,49 @@ const List<_LandAreaUnit> _landAreaUnits = [
 ];
 
 class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
-  late final TextEditingController _controller;
+  late final TextEditingController _areaController;
+  late final TextEditingController _nitrogenController;
+  late final TextEditingController _phosphorusController;
+  late final TextEditingController _potassiumController;
   late _LandAreaUnit _selectedUnit;
-  String? _errorText;
+  late PlantTypeProfile _selectedPlantType;
+  late PlantingMediumProfile _selectedMedium;
+  String? _areaErrorText;
+  String? _fertilizerErrorText;
 
   @override
   void initState() {
     super.initState();
+    final initial = widget.initialInput;
+    final initialConcentration = initial?.fertilizerConcentration ??
+        const FertilizerSolutionConcentration(
+          nitrogenMgPerMl: 10,
+          phosphorusMgPerMl: 10,
+          potassiumMgPerMl: 10,
+        );
     _selectedUnit = _landAreaUnits[2];
-    _controller = TextEditingController(
-      text: widget.formatLandArea(widget.initialSquareMeters),
+    _selectedPlantType = initial?.plantType ?? plantTypeProfiles.first;
+    _selectedMedium = initial?.plantingMedium ?? plantingMediumProfiles[1];
+    _areaController = TextEditingController(
+      text: widget.formatLandArea(initial?.landAreaSquareMeters ?? 0),
+    );
+    _nitrogenController = TextEditingController(
+      text: widget.formatLandArea(initialConcentration.nitrogenMgPerMl),
+    );
+    _phosphorusController = TextEditingController(
+      text: widget.formatLandArea(initialConcentration.phosphorusMgPerMl),
+    );
+    _potassiumController = TextEditingController(
+      text: widget.formatLandArea(initialConcentration.potassiumMgPerMl),
     );
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _areaController.dispose();
+    _nitrogenController.dispose();
+    _phosphorusController.dispose();
+    _potassiumController.dispose();
     super.dispose();
   }
 
@@ -1500,39 +1529,120 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
   }
 
   void _confirm() {
-    final parsed = widget.parseLandAreaNumber(_controller.text);
+    final parsed = widget.parseLandAreaNumber(_areaController.text);
     if (parsed == null || parsed <= 0) {
       setState(() {
-        _errorText =
+        _areaErrorText =
             'Masukkan luas tanah lebih dari 0, contoh 0.0044 atau 10.000.';
+      });
+      return;
+    }
+
+    final nitrogen = _parsePositiveNumber(_nitrogenController.text);
+    final phosphorus = _parsePositiveNumber(_phosphorusController.text);
+    final potassium = _parsePositiveNumber(_potassiumController.text);
+    if (nitrogen == null ||
+        phosphorus == null ||
+        potassium == null ||
+        nitrogen <= 0 ||
+        phosphorus <= 0 ||
+        potassium <= 0) {
+      setState(() {
+        _fertilizerErrorText =
+            'Isi konsentrasi N, P, dan K lebih dari 0 mg/ml.';
       });
       return;
     }
 
     final squareMeters = parsed * _selectedUnit.squareMetersPerUnit;
     FocusScope.of(context).unfocus();
-    Navigator.of(context).pop(squareMeters);
+    Navigator.of(context).pop(
+      AiRecommendationAgronomicInput(
+        plantType: _selectedPlantType,
+        landAreaSquareMeters: squareMeters,
+        fertilizerConcentration: FertilizerSolutionConcentration(
+          nitrogenMgPerMl: nitrogen,
+          phosphorusMgPerMl: phosphorus,
+          potassiumMgPerMl: potassium,
+        ),
+        plantingMedium: _selectedMedium,
+      ),
+    );
   }
 
   void _changeUnit(_LandAreaUnit? nextUnit) {
     if (nextUnit == null || nextUnit == _selectedUnit) return;
 
-    final parsed = widget.parseLandAreaNumber(_controller.text);
+    final parsed = widget.parseLandAreaNumber(_areaController.text);
     final squareMeters =
         parsed == null ? null : parsed * _selectedUnit.squareMetersPerUnit;
 
     setState(() {
       _selectedUnit = nextUnit;
-      _errorText = null;
+      _areaErrorText = null;
       if (squareMeters != null) {
         final converted = squareMeters / nextUnit.squareMetersPerUnit;
         final text = widget.formatLandArea(converted);
-        _controller.value = TextEditingValue(
+        _areaController.value = TextEditingValue(
           text: text,
           selection: TextSelection.collapsed(offset: text.length),
         );
       }
     });
+  }
+
+  double? _parsePositiveNumber(String input) {
+    final parsed = widget.parseLandAreaNumber(input);
+    return parsed == null || parsed <= 0 ? null : parsed;
+  }
+
+  InputDecoration _inputDecoration({
+    required String label,
+    String? hint,
+    String? errorText,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      errorText: errorText,
+      filled: true,
+      fillColor: AppTheme.bgPrimary,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: AppTheme.primaryGreen.withOpacity(0.22),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(
+          color: AppTheme.primaryGreen,
+          width: 1.4,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 13,
+      ),
+    );
+  }
+
+  Widget _buildConcentrationField({
+    required TextEditingController controller,
+    required String label,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: _inputDecoration(label: '$label mg/ml', hint: '10'),
+      onChanged: (_) {
+        if (_fertilizerErrorText == null) return;
+        setState(() => _fertilizerErrorText = null);
+      },
+    );
   }
 
   @override
@@ -1545,122 +1655,192 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
       contentPadding: const EdgeInsets.fromLTRB(22, 14, 22, 8),
       actionsPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
       title: const Text(
-        'Luas Tanah',
+        'Minta Rekomendasi AI',
         style: TextStyle(
           color: AppTheme.textPrimary,
           fontSize: 18,
           fontWeight: FontWeight.w900,
         ),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Isi luas area tanam untuk menghitung estimasi rekomendasi penyiraman.',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'Luas tanah',
-                    hintText: '0',
-                    errorText: _errorText,
-                    filled: true,
-                    fillColor: AppTheme.bgPrimary,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: AppTheme.primaryGreen.withOpacity(0.22),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppTheme.primaryGreen,
-                        width: 1.4,
-                      ),
-                    ),
-                  ),
-                  onSubmitted: (_) => _confirm(),
-                  onChanged: (_) {
-                    if (_errorText == null) return;
-                    setState(() => _errorText = null);
-                  },
-                ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Isi data dasar agar Gemini menghitung dosis kandidat, lalu aplikasi memvalidasi batas amannya.',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 124,
-                child: DropdownButtonFormField<_LandAreaUnit>(
-                  value: _selectedUnit,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: 'Satuan',
-                    filled: true,
-                    fillColor: AppTheme.bgPrimary,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: AppTheme.primaryGreen.withOpacity(0.22),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppTheme.primaryGreen,
-                        width: 1.4,
-                      ),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 13,
-                    ),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<PlantTypeProfile>(
+              value: _selectedPlantType,
+              isExpanded: true,
+              decoration: _inputDecoration(label: 'Jenis tanaman'),
+              items: plantTypeProfiles.map((plant) {
+                return DropdownMenuItem<PlantTypeProfile>(
+                  value: plant,
+                  child: Text(
+                    plant.label,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  items: _landAreaUnits.map((unit) {
-                    return DropdownMenuItem<_LandAreaUnit>(
-                      value: unit,
-                      child: Text(
-                        unit.label,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: _changeUnit,
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => _selectedPlantType = value);
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${_selectedPlantType.scientificName}. ${_selectedPlantType.contextNote}',
+              style: const TextStyle(
+                color: AppTheme.textLight,
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _areaController,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _inputDecoration(
+                      label: 'Luas tanah',
+                      hint: '0',
+                      errorText: _areaErrorText,
+                    ),
+                    onSubmitted: (_) => _confirm(),
+                    onChanged: (_) {
+                      if (_areaErrorText == null) return;
+                      setState(() => _areaErrorText = null);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 124,
+                  child: DropdownButtonFormField<_LandAreaUnit>(
+                    value: _selectedUnit,
+                    isExpanded: true,
+                    decoration: _inputDecoration(label: 'Satuan'),
+                    items: _landAreaUnits.map((unit) {
+                      return DropdownMenuItem<_LandAreaUnit>(
+                        value: unit,
+                        child: Text(
+                          unit.label,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: _changeUnit,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Contoh: 0.0044 m2 untuk pot kecil atau 1 hm2 (hektar) untuk lahan 10.000 m2.',
+              style: TextStyle(
+                color: AppTheme.textLight,
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Konsentrasi larutan pupuk',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildConcentrationField(
+                    controller: _nitrogenController,
+                    label: 'N',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildConcentrationField(
+                    controller: _phosphorusController,
+                    label: 'P',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildConcentrationField(
+                    controller: _potassiumController,
+                    label: 'K',
+                  ),
+                ),
+              ],
+            ),
+            if (_fertilizerErrorText != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _fertilizerErrorText!,
+                style: const TextStyle(
+                  color: AppTheme.statusLow,
+                  fontSize: 11,
+                  height: 1.3,
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Contoh: 0.0044 m² untuk pot kecil atau 1 hm² (hektar) untuk lahan 10.000 m².',
-            style: TextStyle(
-              color: AppTheme.textLight,
-              fontSize: 11,
-              height: 1.35,
+            const SizedBox(height: 8),
+            const Text(
+              'Satuan mg/ml. Jika belum punya angka lab, gunakan nilai bawaan dulu lalu sesuaikan saat data pupuk tersedia.',
+              style: TextStyle(
+                color: AppTheme.textLight,
+                fontSize: 11,
+                height: 1.35,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            DropdownButtonFormField<PlantingMediumProfile>(
+              value: _selectedMedium,
+              isExpanded: true,
+              decoration: _inputDecoration(label: 'Jenis media tanam'),
+              items: plantingMediumProfiles.map((medium) {
+                return DropdownMenuItem<PlantingMediumProfile>(
+                  value: medium,
+                  child: Text(
+                    medium.label,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => _selectedMedium = value);
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Asumsi: kedalaman ${widget.formatLandArea(_selectedMedium.assumedDepthCm)} cm, bulk density ${widget.formatLandArea(_selectedMedium.bulkDensityKgPerM3)} kg/m3. ${_selectedMedium.note}',
+              style: const TextStyle(
+                color: AppTheme.textLight,
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
       ),
       actions: [
         OutlinedButton(
