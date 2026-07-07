@@ -64,7 +64,10 @@ class SensorDataPoint {
 
   factory SensorDataPoint.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    return SensorDataPoint.fromMap(data);
+  }
 
+  factory SensorDataPoint.fromMap(Map<String, dynamic> data) {
     return SensorDataPoint(
       nitrogen: _readDouble(data, ['nitrogen', 'N', 'n']),
       phosphorus: _readDouble(data, ['phosphorus', 'P', 'p']),
@@ -73,8 +76,21 @@ class SensorDataPoint {
       moisture: _readDouble(data, ['moisture', 'Moisture']),
       temperature: _readDouble(data, ['temperature', 'Temp', 'temp']),
       ec: _readDouble(data, ['ec', 'EC', 'electrical_conductivity']),
-      time: (data['timestamp'] as Timestamp).toDate(),
+      time: _readDate(data['timestamp']),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'nitrogen': nitrogen,
+      'phosphorus': phosphorus,
+      'potassium': potassium,
+      'ph': ph,
+      'moisture': moisture,
+      'temperature': temperature,
+      'ec': ec,
+      'timestamp': time.toIso8601String(),
+    };
   }
 
   static double _readDouble(Map<String, dynamic> data, List<String> keys) {
@@ -88,6 +104,20 @@ class SensorDataPoint {
     }
 
     return 0;
+  }
+
+  static DateTime _readDate(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed;
+    }
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 }
 

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../services/log_alert_badge_service.dart';
+import '../services/offline_data_cache_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
 
@@ -21,29 +22,35 @@ class LogsScreen extends StatefulWidget {
 
 class _LogsScreenState extends State<LogsScreen> {
   static const int _logLimit = 100;
+  static const String _pumpLogsCollection = 'pump_activity_logs';
+  static const String _thresholdLogsCollection = 'threshold_alert_logs';
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final DateFormat _dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+  final OfflineDataCacheService _offlineCache =
+      OfflineDataCacheService.instance;
 
   int _selectedLogType = 0;
   bool _isDeletingLogs = false;
+  bool _isLoadingLogs = true;
+  Object? _logsError;
+  List<CachedLogEntry> _pumpLogEntries = const [];
+  List<CachedLogEntry> _thresholdLogEntries = const [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pumpLogSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+      _thresholdLogSubscription;
   final LogAlertBadgeService _badgeService = LogAlertBadgeService.instance;
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> get _pumpLogsStream => _firestore
-      .collection('pump_activity_logs')
-      .orderBy('createdAt', descending: true)
-      .limit(_logLimit)
-      .snapshots();
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> get _thresholdLogsStream =>
-      _firestore
-          .collection('threshold_alert_logs')
-          .orderBy('createdAt', descending: true)
-          .limit(_logLimit)
-          .snapshots();
 
   @override
   void initState() {
     super.initState();
+    _loadLogsFromCacheAndSync();
+  }
+
+  @override
+  void dispose() {
+    _pumpLogSubscription?.cancel();
+    _thresholdLogSubscription?.cancel();
+    super.dispose();
   }
 
   void _selectLogType(int index) {
@@ -56,6 +63,207 @@ class _LogsScreenState extends State<LogsScreen> {
     } else if (index == 1) {
       unawaited(_badgeService.markAlertsSeen());
     }
+  }
+
+  Future<void> _loadLogsFromCacheAndSync() async {
+    await _pumpLogSubscription?.cancel();
+    await _thresholdLogSubscription?.cancel();
+    _pumpLogSubscription = null;
+    _thresholdLogSubscription = null;
+
+    setState(() {
+      _isLoadingLogs = true;
+      _logsError = null;
+    });
+
+    try {
+      final pumpCache = await _offlineCache.loadLogs(_pumpLogsCollection);
+      final thresholdCache =
+          await _offlineCache.loadLogs(_thresholdLogsCollection);
+
+      if (!mounted) return;
+      setState(() {
+        _pumpLogEntries = pumpCache;
+        _thresholdLogEntries = thresholdCache;
+      });
+
+      await Future.wait([
+        _syncLogUpdates(_pumpLogsCollection),
+        _syncLogUpdates(_thresholdLogsCollection),
+      ]);
+
+      _listenForLatestLogs(_pumpLogsCollection);
+      _listenForLatestLogs(_thresholdLogsCollection);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _logsError = error);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingLogs = false);
+      }
+    }
+  }
+
+  Future<void> _syncLogUpdates(String collectionPath) async {
+    final cachedEntries = _entriesFor(collectionPath);
+    final latestCachedTime = _latestLogTime(cachedEntries);
+    if (collectionPath == _pumpLogsCollection) {
+      await _refreshRunningPumpLogs(cachedEntries);
+    }
+
+    Query<Map<String, dynamic>> query =
+        _firestore.collection(collectionPath).orderBy(
+              'createdAt',
+              descending: latestCachedTime == null,
+            );
+
+    if (latestCachedTime == null) {
+      query = query.limit(_logLimit);
+    } else {
+      query = _firestore
+          .collection(collectionPath)
+          .where('createdAt',
+              isGreaterThan: Timestamp.fromDate(latestCachedTime))
+          .orderBy('createdAt', descending: false);
+    }
+
+    try {
+      final snapshot = await query.get(const GetOptions(source: Source.server));
+      if (snapshot.docs.isEmpty) return;
+
+      final merged = await _offlineCache.mergeLogs(
+        collectionPath,
+        snapshot.docs.map(CachedLogEntry.fromFirestore),
+      );
+
+      if (!mounted) return;
+      _applyLogEntries(collectionPath, merged);
+    } catch (_) {
+      // Cache remains the source of truth when Firestore is offline/unavailable.
+    }
+  }
+
+  void _listenForLatestLogs(String collectionPath) {
+    final entries = _entriesFor(collectionPath);
+    final runningSince = collectionPath == _pumpLogsCollection
+        ? _earliestRunningPumpLogTime(entries)
+        : null;
+    final startAfter =
+        (runningSince ?? _latestLogTime(entries) ?? DateTime.now())
+            .subtract(const Duration(minutes: 5));
+
+    final subscription = _firestore
+        .collection(collectionPath)
+        .where('createdAt', isGreaterThan: Timestamp.fromDate(startAfter))
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .listen((snapshot) {
+      unawaited(_handleLatestLogSnapshot(collectionPath, snapshot));
+    }, onError: (Object error) {
+      if (!mounted) return;
+      setState(() => _logsError = error);
+    });
+
+    if (collectionPath == _pumpLogsCollection) {
+      _pumpLogSubscription = subscription;
+    } else {
+      _thresholdLogSubscription = subscription;
+    }
+  }
+
+  Future<void> _handleLatestLogSnapshot(
+    String collectionPath,
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) async {
+    if (snapshot.docs.isEmpty || !mounted) return;
+
+    final merged = await _offlineCache.mergeLogs(
+      collectionPath,
+      snapshot.docs.map(CachedLogEntry.fromFirestore),
+    );
+    if (!mounted) return;
+    _applyLogEntries(collectionPath, merged);
+  }
+
+  Future<void> _refreshRunningPumpLogs(List<CachedLogEntry> entries) async {
+    final runningEntries = entries.where(_isRunningPumpLog).toList();
+    if (runningEntries.isEmpty) return;
+
+    final refreshedEntries = <CachedLogEntry>[];
+
+    for (final entry in runningEntries) {
+      try {
+        final snapshot = await _firestore
+            .collection(_pumpLogsCollection)
+            .doc(entry.id)
+            .get(const GetOptions(source: Source.server));
+        if (snapshot.exists) {
+          refreshedEntries.add(CachedLogEntry.fromDocumentSnapshot(snapshot));
+        }
+      } catch (_) {
+        // Keep the cached running log if Firestore is unavailable.
+      }
+    }
+
+    if (refreshedEntries.isEmpty) return;
+
+    final merged = await _offlineCache.mergeLogs(
+      _pumpLogsCollection,
+      refreshedEntries,
+    );
+    if (!mounted) return;
+    _applyLogEntries(_pumpLogsCollection, merged);
+  }
+
+  List<CachedLogEntry> _entriesFor(String collectionPath) {
+    return collectionPath == _pumpLogsCollection
+        ? _pumpLogEntries
+        : _thresholdLogEntries;
+  }
+
+  void _applyLogEntries(String collectionPath, List<CachedLogEntry> entries) {
+    setState(() {
+      if (collectionPath == _pumpLogsCollection) {
+        _pumpLogEntries = entries;
+      } else {
+        _thresholdLogEntries = entries;
+      }
+    });
+  }
+
+  DateTime? _latestLogTime(List<CachedLogEntry> entries) {
+    DateTime? latest;
+    for (final entry in entries) {
+      final createdAt = entry.createdAt;
+      if (createdAt == null) continue;
+      if (latest == null || createdAt.isAfter(latest)) {
+        latest = createdAt;
+      }
+    }
+
+    return latest;
+  }
+
+  DateTime? _earliestRunningPumpLogTime(List<CachedLogEntry> entries) {
+    DateTime? earliest;
+    for (final entry in entries.where(_isRunningPumpLog)) {
+      final createdAt = entry.createdAt;
+      if (createdAt == null) continue;
+      if (earliest == null || createdAt.isBefore(earliest)) {
+        earliest = createdAt;
+      }
+    }
+
+    return earliest;
+  }
+
+  bool _isRunningPumpLog(CachedLogEntry entry) {
+    final action = entry.data['action']?.toString().trim().toLowerCase();
+    final metadata = entry.data['metadata'];
+    final metadataState = metadata is Map
+        ? metadata['state']?.toString().trim().toLowerCase()
+        : null;
+    return action == 'running' || metadataState == 'running';
   }
 
   @override
@@ -225,7 +433,7 @@ class _LogsScreenState extends State<LogsScreen> {
         Expanded(
           child: _buildCountCard(
             title: 'Aktivitas Pompa',
-            collectionPath: 'pump_activity_logs',
+            collectionPath: _pumpLogsCollection,
             icon: Icons.opacity_rounded,
             color: AppTheme.primaryBlue,
           ),
@@ -234,7 +442,7 @@ class _LogsScreenState extends State<LogsScreen> {
         Expanded(
           child: _buildCountCard(
             title: 'Peringatan',
-            collectionPath: 'threshold_alert_logs',
+            collectionPath: _thresholdLogsCollection,
             icon: Icons.warning_amber_rounded,
             color: AppTheme.statusHigh,
           ),
@@ -249,158 +457,143 @@ class _LogsScreenState extends State<LogsScreen> {
     required IconData icon,
     required Color color,
   }) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _firestore
-          .collection(collectionPath)
-          .orderBy('createdAt', descending: true)
-          .limit(1)
-          .snapshots(),
-      builder: (context, snapshot) {
-        return FutureBuilder(
-          future: _firestore.collection(collectionPath).count().get(),
-          builder: (context, countSnapshot) {
-            final value = countSnapshot.hasData
-                ? '${countSnapshot.data?.count ?? 0}'
-                : '-';
+    final value = _isLoadingLogs && _entriesFor(collectionPath).isEmpty
+        ? '-'
+        : '${_entriesFor(collectionPath).length}';
 
-            return Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.bgCard,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: color.withOpacity(0.14)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(icon, color: color, size: 19),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    value,
-                    style: TextStyle(
-                      fontSize: 24,
-                      color: color,
-                      fontWeight: FontWeight.w900,
-                      height: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$title tercatat',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.14)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 19),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              color: color,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$title tersimpan',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildPumpLogs() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    if (_isLoadingLogs && _pumpLogEntries.isEmpty) {
+      return const _LogLoadingState();
+    }
+
+    if (_logsError != null && _pumpLogEntries.isEmpty) {
+      return _LogMessageState(
+        icon: Icons.error_outline_rounded,
+        title: 'Gagal memuat log pompa',
+        message: 'Data offline tidak tersedia. $_logsError',
+      );
+    }
+
+    final logs = _pumpLogEntries
+        .take(_logLimit)
+        .map((entry) => _PumpActivityLog.fromCache(
+              id: entry.id,
+              data: entry.data,
+              firestore: _firestore,
+              collectionPath: _pumpLogsCollection,
+            ))
+        .toList(growable: false);
+
+    if (logs.isEmpty) {
+      return const _LogMessageState(
+        icon: Icons.inbox_outlined,
+        title: 'Belum ada aktivitas pompa',
+        message: 'Aktivitas Pompa akan tampil di sini.',
+      );
+    }
+
+    return Column(
       key: const ValueKey('pump_logs'),
-      stream: _pumpLogsStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const _LogLoadingState();
-        }
-
-        if (snapshot.hasError) {
-          return _LogMessageState(
-            icon: Icons.error_outline_rounded,
-            title: 'Gagal memuat log pompa',
-            message: '${snapshot.error}',
-          );
-        }
-
-        final logs = snapshot.data?.docs
-                .map((doc) => _PumpActivityLog.fromFirestore(doc))
-                .toList() ??
-            [];
-
-        if (logs.isEmpty) {
-          return const _LogMessageState(
-            icon: Icons.inbox_outlined,
-            title: 'Belum ada aktivitas pompa',
-            message: 'Aksi pompa otomatis dari VPS akan tampil di sini.',
-          );
-        }
-
-        return Column(
-          children: logs
-              .map((log) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _buildPumpLogCard(log),
-                  ))
-              .toList(),
-        );
-      },
+      children: logs
+          .map((log) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildPumpLogCard(log),
+              ))
+          .toList(),
     );
   }
 
   Widget _buildThresholdLogs() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    if (_isLoadingLogs && _thresholdLogEntries.isEmpty) {
+      return const _LogLoadingState();
+    }
+
+    if (_logsError != null && _thresholdLogEntries.isEmpty) {
+      return _LogMessageState(
+        icon: Icons.error_outline_rounded,
+        title: 'Gagal memuat log peringatan',
+        message: 'Data offline tidak tersedia. $_logsError',
+      );
+    }
+
+    final logs = _thresholdLogEntries
+        .take(_logLimit)
+        .map((entry) => _ThresholdAlertLog.fromCache(
+              id: entry.id,
+              data: entry.data,
+              firestore: _firestore,
+              collectionPath: _thresholdLogsCollection,
+            ))
+        .toList(growable: false);
+
+    if (logs.isEmpty) {
+      return const _LogMessageState(
+        icon: Icons.notifications_none_rounded,
+        title: 'Belum ada peringatan ambang batas',
+        message: 'Notifikasi ketika sensor melewati batas akan tampil di sini.',
+      );
+    }
+
+    return Column(
       key: const ValueKey('threshold_logs'),
-      stream: _thresholdLogsStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const _LogLoadingState();
-        }
-
-        if (snapshot.hasError) {
-          return _LogMessageState(
-            icon: Icons.error_outline_rounded,
-            title: 'Gagal memuat log peringatan',
-            message: '${snapshot.error}',
-          );
-        }
-
-        final logs = snapshot.data?.docs
-                .map((doc) => _ThresholdAlertLog.fromFirestore(doc))
-                .toList() ??
-            [];
-
-        if (logs.isEmpty) {
-          return const _LogMessageState(
-            icon: Icons.notifications_none_rounded,
-            title: 'Belum ada threshold alert',
-            message:
-                'Notifikasi ketika sensor melewati batas akan tampil di sini.',
-          );
-        }
-
-        return Column(
-          children: logs
-              .map((log) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _buildThresholdLogCard(log),
-                  ))
-              .toList(),
-        );
-      },
+      children: logs
+          .map((log) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildThresholdLogCard(log),
+              ))
+          .toList(),
     );
   }
 
@@ -419,6 +612,7 @@ class _LogsScreenState extends State<LogsScreen> {
             badge: log.badgeText,
             badgeColor: AppTheme.primaryBlue,
             onDelete: () => _confirmDeleteSingleLog(
+              collectionPath: _pumpLogsCollection,
               reference: log.reference,
               successMessage: 'Log aktivitas pompa berhasil dihapus.',
             ),
@@ -459,6 +653,7 @@ class _LogsScreenState extends State<LogsScreen> {
             badge: '${log.alerts.length} peringatan',
             badgeColor: AppTheme.statusHigh,
             onDelete: () => _confirmDeleteSingleLog(
+              collectionPath: _thresholdLogsCollection,
               reference: log.reference,
               successMessage: 'Log peringatan berhasil dihapus.',
             ),
@@ -673,12 +868,16 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   Future<void> _confirmDeleteSingleLog({
+    required String collectionPath,
     required DocumentReference<Map<String, dynamic>> reference,
     required String successMessage,
   }) async {
     try {
       await reference.delete();
+      final entries =
+          await _offlineCache.removeLog(collectionPath, reference.id);
       if (!mounted) return;
+      _applyLogEntries(collectionPath, entries);
       _showSnackBar(successMessage, AppTheme.primaryGreen);
     } catch (error) {
       if (!mounted) return;
@@ -692,7 +891,7 @@ class _LogsScreenState extends State<LogsScreen> {
   Future<void> _confirmDeleteCurrentLogType() async {
     final isPumpTab = _selectedLogType == 0;
     final collectionPath =
-        isPumpTab ? 'pump_activity_logs' : 'threshold_alert_logs';
+        isPumpTab ? _pumpLogsCollection : _thresholdLogsCollection;
     final label = isPumpTab ? 'Aktivitas Pompa' : 'Peringatan';
 
     final confirmed = await _showDeleteConfirmation(
@@ -708,7 +907,9 @@ class _LogsScreenState extends State<LogsScreen> {
 
     try {
       final deletedCount = await _deleteCollection(collectionPath);
+      await _offlineCache.clearLogs(collectionPath);
       if (!mounted) return;
+      _applyLogEntries(collectionPath, const []);
       _showSnackBar(
         deletedCount == 0
             ? 'Tidak ada log $label yang perlu dihapus.'
@@ -931,10 +1132,22 @@ class _PumpActivityLog {
     return '$durationSeconds detik';
   }
 
-  factory _PumpActivityLog.fromFirestore(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  factory _PumpActivityLog.fromCache({
+    required String id,
+    required Map<String, dynamic> data,
+    required FirebaseFirestore firestore,
+    required String collectionPath,
+  }) {
+    return _PumpActivityLog._fromData(
+      firestore.collection(collectionPath).doc(id),
+      data,
+    );
+  }
+
+  factory _PumpActivityLog._fromData(
+    DocumentReference<Map<String, dynamic>> reference,
+    Map<String, dynamic> data,
   ) {
-    final data = doc.data();
     final metadata = _readMap(data['metadata']);
     final labels = _readStringList(data['pumpLabels']);
     final relays = _readIntList(data['relays']);
@@ -947,7 +1160,7 @@ class _PumpActivityLog {
             .toLowerCase();
 
     return _PumpActivityLog(
-      reference: doc.reference,
+      reference: reference,
       reason: _readString(data['reason'], fallback: 'Aktivitas Pompa'),
       pumpLabels: pumpLabels.isEmpty ? ['Pompa tidak diketahui'] : pumpLabels,
       durationSeconds: durationMs <= 0 ? 0 : (durationMs / 1000).round(),
@@ -992,14 +1205,26 @@ class _ThresholdAlertLog {
   final DateTime? time;
   final String? sensorReadingId;
 
-  factory _ThresholdAlertLog.fromFirestore(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  factory _ThresholdAlertLog.fromCache({
+    required String id,
+    required Map<String, dynamic> data,
+    required FirebaseFirestore firestore,
+    required String collectionPath,
+  }) {
+    return _ThresholdAlertLog._fromData(
+      firestore.collection(collectionPath).doc(id),
+      data,
+    );
+  }
+
+  factory _ThresholdAlertLog._fromData(
+    DocumentReference<Map<String, dynamic>> reference,
+    Map<String, dynamic> data,
   ) {
-    final data = doc.data();
     final rawAlerts = data['alerts'];
 
     return _ThresholdAlertLog(
-      reference: doc.reference,
+      reference: reference,
       title: _readString(data['title'], fallback: 'Peringatan Nutrisi Tanaman'),
       body: _readString(data['body']),
       alerts: rawAlerts is List

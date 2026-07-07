@@ -141,7 +141,7 @@ class NutrixenseBackgroundService : Service() {
     private val lastScheduleRunDates = mutableMapOf<Long, String>()
     private val repeatAlertMillis = TimeUnit.MINUTES.toMillis(5)
     private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(1)
-    private val fuzzyMinPulseMillis = 1_000L
+    private val fuzzyMinPulseMillis = 3_000L
     private val fuzzyMediumPulseMillis = 5_000L
     private val fuzzyMaxPulseMillis = 10_000L
 
@@ -507,45 +507,11 @@ class NutrixenseBackgroundService : Service() {
     }
 
     private fun defuzzifyDuration(gapRatio: Double): Long {
-        val slight = descendingMembership(gapRatio, 0.0, 0.30)
-        val medium = triangularMembership(gapRatio, 0.12, 0.38, 0.64)
-        val severe = ascendingMembership(gapRatio, 0.45, 0.85)
-        val totalWeight = slight + medium + severe
-
-        if (totalWeight <= 0.0) return fuzzyMinPulseMillis
-
-        val crispMillis = (
-            (slight * fuzzyMinPulseMillis) +
-                (medium * fuzzyMediumPulseMillis) +
-                (severe * fuzzyMaxPulseMillis)
-            ) / totalWeight
-
-        return crispMillis.toLong().coerceIn(fuzzyMinPulseMillis, fuzzyMaxPulseMillis)
-    }
-
-    private fun descendingMembership(value: Double, fullUntil: Double, zeroAt: Double): Double {
         return when {
-            value <= fullUntil -> 1.0
-            value >= zeroAt -> 0.0
-            else -> (zeroAt - value) / (zeroAt - fullUntil)
-        }.coerceIn(0.0, 1.0)
-    }
-
-    private fun ascendingMembership(value: Double, zeroUntil: Double, fullAt: Double): Double {
-        return when {
-            value <= zeroUntil -> 0.0
-            value >= fullAt -> 1.0
-            else -> (value - zeroUntil) / (fullAt - zeroUntil)
-        }.coerceIn(0.0, 1.0)
-    }
-
-    private fun triangularMembership(value: Double, left: Double, peak: Double, right: Double): Double {
-        return when {
-            value <= left || value >= right -> 0.0
-            value == peak -> 1.0
-            value < peak -> (value - left) / (peak - left)
-            else -> (right - value) / (right - peak)
-        }.coerceIn(0.0, 1.0)
+            gapRatio <= 0.30 -> fuzzyMinPulseMillis
+            gapRatio <= 0.60 -> fuzzyMediumPulseMillis
+            else -> fuzzyMaxPulseMillis
+        }
     }
 
     private fun relaysForRule(reading: SensorReading): Set<Int> {

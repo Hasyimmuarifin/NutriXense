@@ -78,7 +78,6 @@ const config = {
   automation: {
     dssCheckIntervalMs: readNumberEnv('DSS_CHECK_INTERVAL_MS', 60 * 1000),
     dssPulseDurationMs: readNumberEnv('DSS_PULSE_DURATION_MS', 5 * 1000),
-    dssCooldownMs: readNumberEnv('DSS_COOLDOWN_MS', 10 * 60 * 1000),
     maxSensorAgeMs: readNumberEnv('DSS_MAX_SENSOR_AGE_MS', 10 * 60 * 1000),
     scheduleCheckIntervalMs: readNumberEnv(
       'SCHEDULE_CHECK_INTERVAL_MS',
@@ -87,14 +86,8 @@ const config = {
     timezoneOffsetMinutes: readNumberEnv('TIMEZONE_OFFSET_MINUTES', 7 * 60),
     thresholdNotificationEnabled:
       (process.env.THRESHOLD_NOTIFICATION_ENABLED || 'true') !== 'false',
-    thresholdNotificationIntervalMs: readNumberEnv(
-      'THRESHOLD_NOTIFICATION_INTERVAL_MS',
-      5 * 60 * 1000,
-    ),
-    thresholdNotificationRepeatMs: readNumberEnv(
-      'THRESHOLD_NOTIFICATION_REPEAT_MS',
-      5 * 60 * 1000,
-    ),
+    thresholdNotificationIntervalMs: 5 * 60 * 1000,
+    thresholdNotificationRepeatMs: 5 * 60 * 1000,
     thresholdNotificationMaxSensorAgeMs: readNumberEnv(
       'THRESHOLD_NOTIFICATION_MAX_SENSOR_AGE_MS',
       10 * 60 * 1000,

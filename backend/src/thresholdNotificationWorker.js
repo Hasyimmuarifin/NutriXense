@@ -79,9 +79,7 @@ async function loadNotificationConfig() {
         : config.automation.thresholdNotificationEnabled,
     thresholds: buildThresholds(data),
     mutedSensors: readMutedSensors(dssData, fallbackData, notificationData),
-    repeatMs:
-      Number(notificationData.repeatMs) ||
-      config.automation.thresholdNotificationRepeatMs,
+    repeatMs: config.automation.thresholdNotificationRepeatMs,
   };
 }
 
@@ -195,12 +193,13 @@ function startThresholdNotificationWorker() {
         return;
       }
 
+      const checkedAt = Date.now();
       const dueAlerts = alerts.filter((alert) => {
         const key = alertKey(alert);
         const lastSentAt = lastSentByAlert.get(key);
         return (
           !lastSentAt ||
-          Date.now() - lastSentAt >= notificationConfig.repeatMs
+          checkedAt - lastSentAt >= notificationConfig.repeatMs
         );
       });
 
@@ -217,9 +216,8 @@ function startThresholdNotificationWorker() {
       }
 
       const fcmMessageId = await sendThresholdNotification(dueAlerts, reading);
-      const now = Date.now();
       for (const alert of dueAlerts) {
-        lastSentByAlert.set(alertKey(alert), now);
+        lastSentByAlert.set(alertKey(alert), checkedAt);
       }
 
       await writeRuntimeStatus({

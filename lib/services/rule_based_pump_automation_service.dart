@@ -38,6 +38,9 @@ class RuleBasedPumpAutomationService {
   static const String _dssConfigDocument = 'dss';
   static const String _wateringSchedulesCollection = 'watering_schedules';
   static const String _dssFallbackDocument = '_dss_config';
+  static const int _minPulseSeconds = 3;
+  static const int _mediumPulseSeconds = 5;
+  static const int _maxPulseSeconds = 10;
 
   final ValueNotifier<Set<int>> activeRelays = ValueNotifier(<int>{});
 
@@ -96,14 +99,19 @@ class RuleBasedPumpAutomationService {
     final payload = {
       if (enabled != null) 'enabled': enabled,
       'thresholds': _thresholdConfigService.all(),
+      'minPulseMs': _minPulseSeconds * 1000,
+      'mediumPulseMs': _mediumPulseSeconds * 1000,
+      'maxPulseMs': _maxPulseSeconds * 1000,
+      'cooldownMs': FieldValue.delete(),
       'automationMode': 'fuzzy_logic',
       'fuzzyLogic': {
-        'minPulseSeconds': 5,
-        'mediumPulseSeconds': 12,
-        'maxPulseSeconds': 30,
+        'minPulseSeconds': _minPulseSeconds,
+        'mediumPulseSeconds': _mediumPulseSeconds,
+        'maxPulseSeconds': _maxPulseSeconds,
+        'cooldownSeconds': FieldValue.delete(),
         'checkIntervalSeconds': checkInterval.inSeconds,
         'description':
-            'Durasi pompa dihitung dari rasio kekurangan nutrisi terhadap ambang minimum menggunakan membership tipis, sedang, dan parah.',
+            'Durasi pompa otomatis mengikuti fuzzy: Minimum 3 detik, Sedang 5 detik, Maksimum 10 detik berdasarkan tingkat pelanggaran ambang sensor.',
       },
       'updatedAt': FieldValue.serverTimestamp(),
     };

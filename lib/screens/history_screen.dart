@@ -16,6 +16,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/sensor_data.dart';
+import '../services/offline_data_cache_service.dart';
 import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
@@ -41,7 +42,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   static const int _pageSize = 100;
 
   List<SensorDataPoint> _pageData = [];
-  final List<DocumentSnapshot> _pageCursors = [];
   final Set<String> _knownHistoryDocIds = {};
   final Set<String> _pageDocIds = {};
   StreamSubscription<QuerySnapshot>? _latestSubscription;
@@ -49,6 +49,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   bool _isExportingHistory = false;
   bool _isDeletingHistory = false;
   Object? _historyError;
+  DateTime? _latestHistorySyncTime;
+  final OfflineDataCacheService _offlineCache =
+      OfflineDataCacheService.instance;
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
 
@@ -158,15 +161,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _pageData = [];
       _pageIndex = 0;
       _totalRows = 0;
-      _pageCursors.clear();
+      _latestHistorySyncTime = null;
       _knownHistoryDocIds.clear();
       _pageDocIds.clear();
     });
 
     try {
       await _loadInitialHistory();
-      await _loadTotalRows();
-      await _loadPage();
       _listenForLatestHistory();
     } catch (e) {
       if (!mounted) return;
@@ -225,49 +226,32 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _loadInitialHistory() async {
-    final query = _historyBaseQuery()
-        .orderBy('timestamp', descending: true)
-        .orderBy(FieldPath.documentId, descending: true)
-        .withConverter<SensorDataPoint>(
-          fromFirestore: (doc, _) => SensorDataPoint.fromFirestore(doc),
-          toFirestore: (_, __) => throw UnsupportedError(
-            'History screen does not write sensor data.',
-          ),
-        );
+    var cached = await _offlineCache.loadSensorHistory();
+    _applyCachedHistory(cached);
 
-    QuerySnapshot<SensorDataPoint>? snapshot;
+    final rangeHasCache = _historyEntriesInRange(cached).isNotEmpty;
+    final earliestCachedTime = _earliestHistoryTime(cached);
+    final latestCachedTime = _latestHistoryTime(cached);
+    final backfilled = rangeHasCache && earliestCachedTime != null
+        ? await _fetchHistoryBackfill(
+            from: _historyStartDate(),
+            until: earliestCachedTime,
+          )
+        : const <CachedSensorDataPoint>[];
+    final synced = await _fetchHistoryUpdates(
+      fetchFrom: rangeHasCache ? latestCachedTime : _historyStartDate(),
+      includeBoundary: !rangeHasCache,
+    );
 
-    try {
-      snapshot = await query.get(const GetOptions(source: Source.server));
-    } catch (_) {
-      snapshot = null;
+    final fetched = [...backfilled, ...synced];
+    if (fetched.isNotEmpty) {
+      cached = await _offlineCache.mergeSensorHistory(fetched);
+      _applyCachedHistory(cached);
     }
-
-    if (snapshot == null || snapshot.docs.isEmpty) {
-      snapshot = await query.get(const GetOptions(source: Source.cache));
-    }
-
-    _knownHistoryDocIds.addAll(snapshot.docs.map((doc) => doc.id));
-
-    final points = snapshot.docs.map((doc) => doc.data()).toList()
-      ..sort((a, b) => a.time.compareTo(b.time));
-
-    // Apply interval sampling for chart
-    final sampledPoints = _applySampling(points);
-
-    if (!mounted) return;
-    setState(() => _data = sampledPoints);
-  }
-
-  Future<void> _loadTotalRows() async {
-    final snapshot = await _historyBaseQuery().count().get();
-
-    if (!mounted) return;
-    setState(() => _totalRows = snapshot.count ?? 0);
   }
 
   void _listenForLatestHistory() {
-    final startAfter = _data.isNotEmpty ? _data.last.time : _historyStartDate();
+    final startAfter = _latestHistorySyncTime ?? _historyStartDate();
 
     _latestSubscription = FirebaseFirestore.instance
         .collection('sensor_data')
@@ -278,95 +262,161 @@ class _HistoryScreenState extends State<HistoryScreen> {
         .orderBy('timestamp', descending: false)
         .snapshots()
         .listen((snapshot) {
-      if (snapshot.docs.isEmpty || !mounted) return;
-
-      final newDocs = snapshot.docs
-          .where((doc) => !_knownHistoryDocIds.contains(doc.id))
-          .toList();
-
-      if (newDocs.isEmpty) return;
-
-      final latestPoints =
-          newDocs.map((doc) => SensorDataPoint.fromFirestore(doc)).toList();
-      final latestDocIds = newDocs.map((doc) => doc.id).toList();
-
-      setState(() {
-        _knownHistoryDocIds.addAll(latestDocIds);
-
-        final merged = [..._data, ...latestPoints]
-          ..sort((a, b) => a.time.compareTo(b.time));
-        // Apply interval sampling again
-        _data = _applySampling(merged);
-
-        _totalRows += latestPoints.length;
-        if (_pageIndex == 0) {
-          final newPagePoints = <SensorDataPoint>[];
-
-          for (int i = 0; i < latestPoints.length; i++) {
-            final docId = latestDocIds[i];
-            if (_pageDocIds.add(docId)) {
-              newPagePoints.add(latestPoints[i]);
-            }
-          }
-
-          if (newPagePoints.isEmpty) return;
-
-          _pageData = [..._pageData, ...newPagePoints]
-            ..sort((a, b) => b.time.compareTo(a.time));
-          if (_pageData.length > _pageSize) {
-            _pageData = _pageData.take(_pageSize).toList();
-          }
-        }
-      });
+      unawaited(_handleLatestHistorySnapshot(snapshot));
     }, onError: (Object e) {
       if (!mounted) return;
       setState(() => _historyError = e);
     });
   }
 
-  Future<void> _loadPage() async {
-    Query query = _historyBaseQuery()
-        .orderBy('timestamp', descending: true)
-        .orderBy(FieldPath.documentId, descending: true)
-        .limit(_pageSize);
+  Future<void> _handleLatestHistorySnapshot(QuerySnapshot snapshot) async {
+    if (snapshot.docs.isEmpty || !mounted) return;
 
-    // pagination
-    if (_pageIndex > 0 && _pageCursors.length >= _pageIndex) {
-      query = query.startAfterDocument(_pageCursors[_pageIndex - 1]);
-    }
+    final newDocs =
+        snapshot.docs.where((doc) => !_knownHistoryDocIds.contains(doc.id));
+    final newEntries =
+        newDocs.map(CachedSensorDataPoint.fromFirestore).toList();
 
-    final snapshot = await query.get();
+    if (newEntries.isEmpty) return;
+
+    final cached = await _offlineCache.mergeSensorHistory(newEntries);
     if (!mounted) return;
 
+    _applyCachedHistory(cached);
+  }
+
+  Future<void> _loadPage() async {
+    final cached = await _offlineCache.loadSensorHistory();
+    if (!mounted) return;
+
+    _applyCachedHistory(cached, keepPageIndex: true);
+  }
+
+  List<CachedSensorDataPoint> _historyEntriesInRange(
+    List<CachedSensorDataPoint> entries,
+  ) {
+    final startDate = _historyStartDate();
+    return entries
+        .where((entry) => !entry.data.time.isBefore(startDate))
+        .toList()
+      ..sort((a, b) => a.data.time.compareTo(b.data.time));
+  }
+
+  DateTime? _latestHistoryTime(List<CachedSensorDataPoint> entries) {
+    final rangeEntries = _historyEntriesInRange(entries);
+    if (rangeEntries.isEmpty) return null;
+
+    return rangeEntries.last.data.time;
+  }
+
+  DateTime? _earliestHistoryTime(List<CachedSensorDataPoint> entries) {
+    final rangeEntries = _historyEntriesInRange(entries);
+    if (rangeEntries.isEmpty) return null;
+
+    return rangeEntries.first.data.time;
+  }
+
+  Future<List<CachedSensorDataPoint>> _fetchHistoryBackfill({
+    required DateTime from,
+    required DateTime until,
+  }) async {
+    if (!until.isAfter(from)) return const [];
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('sensor_data')
+          .where(
+            'timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(from),
+          )
+          .where(
+            'timestamp',
+            isLessThan: Timestamp.fromDate(until),
+          )
+          .orderBy('timestamp', descending: false)
+          .get(const GetOptions(source: Source.server));
+
+      return snapshot.docs
+          .where((doc) => !_knownHistoryDocIds.contains(doc.id))
+          .map(CachedSensorDataPoint.fromFirestore)
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<CachedSensorDataPoint>> _fetchHistoryUpdates({
+    required DateTime? fetchFrom,
+    required bool includeBoundary,
+  }) async {
+    final boundary = fetchFrom ?? _historyStartDate();
+    Query<Map<String, dynamic>> query =
+        FirebaseFirestore.instance.collection('sensor_data');
+
+    query = includeBoundary
+        ? query.where(
+            'timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(boundary),
+          )
+        : query.where(
+            'timestamp',
+            isGreaterThan: Timestamp.fromDate(boundary),
+          );
+
+    try {
+      final snapshot = await query
+          .orderBy('timestamp', descending: false)
+          .get(const GetOptions(source: Source.server));
+
+      return snapshot.docs
+          .where((doc) => !_knownHistoryDocIds.contains(doc.id))
+          .map(CachedSensorDataPoint.fromFirestore)
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void _applyCachedHistory(
+    List<CachedSensorDataPoint> cached, {
+    bool keepPageIndex = false,
+  }) {
+    if (!mounted) return;
+
+    final rangeEntries = _historyEntriesInRange(cached);
+    final nextTotalRows = rangeEntries.length;
+    final nextTotalPages =
+        nextTotalRows == 0 ? 1 : ((nextTotalRows - 1) ~/ _pageSize) + 1;
+    final nextPageIndex =
+        keepPageIndex ? _pageIndex.clamp(0, nextTotalPages - 1).toInt() : 0;
+    final pageEntries = [...rangeEntries]
+      ..sort((a, b) => b.data.time.compareTo(a.data.time));
+    final pageSlice = pageEntries
+        .skip(nextPageIndex * _pageSize)
+        .take(_pageSize)
+        .toList(growable: false);
+
     setState(() {
+      _knownHistoryDocIds
+        ..clear()
+        ..addAll(cached.map((entry) => entry.id));
       _pageDocIds
         ..clear()
-        ..addAll(snapshot.docs.map((doc) => doc.id));
-      _knownHistoryDocIds.addAll(snapshot.docs.map((doc) => doc.id));
-      _pageData =
-          snapshot.docs.map((d) => SensorDataPoint.fromFirestore(d)).toList();
-      if (snapshot.docs.isNotEmpty) {
-        if (_pageCursors.length <= _pageIndex) {
-          _pageCursors.add(snapshot.docs.last);
-        } else {
-          _pageCursors[_pageIndex] = snapshot.docs.last;
-        }
-      }
+        ..addAll(pageSlice.map((entry) => entry.id));
+      _pageIndex = nextPageIndex;
+      _totalRows = nextTotalRows;
+      _latestHistorySyncTime =
+          rangeEntries.isEmpty ? null : rangeEntries.last.data.time;
+      _data = _applySampling(
+        rangeEntries.map((entry) => entry.data).toList(growable: false),
+      );
+      _pageData = pageSlice.map((entry) => entry.data).toList(growable: false);
     });
   }
 
   Future<List<SensorDataPoint>> _loadExportData() async {
-    final query = _historyBaseQuery().orderBy('timestamp', descending: false);
-    QuerySnapshot? snapshot;
-
-    try {
-      snapshot = await query.get(const GetOptions(source: Source.server));
-    } catch (_) {
-      snapshot = await query.get(const GetOptions(source: Source.cache));
-    }
-
-    return snapshot.docs
-        .map((doc) => SensorDataPoint.fromFirestore(doc))
+    return _historyEntriesInRange(await _offlineCache.loadSensorHistory())
+        .map((entry) => entry.data)
         .toList()
       ..sort((a, b) => a.time.compareTo(b.time));
   }
@@ -417,6 +467,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Future<int> _deleteHistoryRange() async {
     var deletedCount = 0;
+    final startDate = _historyStartDate();
 
     while (true) {
       final snapshot = await _historyBaseQuery()
@@ -435,6 +486,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       deletedCount += snapshot.docs.length;
       if (snapshot.docs.length < 500) break;
     }
+
+    await _offlineCache.removeSensorHistoryWhere(
+      (item) => !item.data.time.isBefore(startDate),
+    );
 
     return deletedCount;
   }

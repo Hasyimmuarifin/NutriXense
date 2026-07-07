@@ -1,6 +1,6 @@
 const { admin, db } = require('./firebase');
 const { config } = require('./config');
-const { runPumpPulse } = require('./pumpController');
+const { runPumpPulseByRelay } = require('./pumpController');
 const { sensorReadingFromFirestore } = require('./readingUtils');
 const { DEFAULT_THRESHOLDS, buildThresholds } = require('./thresholdRules');
 
@@ -12,21 +12,109 @@ function isHigh(value, maximum) {
   return typeof value === 'number' && typeof maximum === 'number' && value > maximum;
 }
 
-function relaysForReading(reading, thresholds) {
-  const relays = new Set();
+function durationConfigFromData(data = {}) {
+  const fuzzyLogic = data.fuzzyLogic || {};
+  return {
+    minMs:
+      Number(data.minPulseMs) ||
+      Number(fuzzyLogic.minPulseSeconds) * 1000 ||
+      3 * 1000,
+    mediumMs:
+      Number(data.mediumPulseMs) ||
+      Number(fuzzyLogic.mediumPulseSeconds) * 1000 ||
+      5 * 1000,
+    maxMs:
+      Number(data.maxPulseMs) ||
+      Number(fuzzyLogic.maxPulseSeconds) * 1000 ||
+      10 * 1000,
+  };
+}
 
-  if (isLow(reading.nitrogen, thresholds.min_nitrogen)) relays.add(1);
-  if (isLow(reading.phosphorus, thresholds.min_phosphorus)) relays.add(2);
-  if (isLow(reading.potassium, thresholds.min_potassium)) relays.add(3);
-  if (isLow(reading.moisture, thresholds.min_moisture)) relays.add(4);
-  if (isHigh(reading.temperature, thresholds.max_temperature)) relays.add(4);
-  if (isLow(reading.ec, thresholds.min_ec)) {
-    relays.add(1);
-    relays.add(2);
-    relays.add(3);
+function fuzzyLevelForRatio(gapRatio) {
+  if (gapRatio <= 0.30) {
+    return {
+      label: 'Minimum',
+      condition: 'Tipis',
+      durationKey: 'minMs',
+    };
   }
 
-  return [...relays];
+  if (gapRatio <= 0.60) {
+    return {
+      label: 'Sedang',
+      condition: 'Sedang',
+      durationKey: 'mediumMs',
+    };
+  }
+
+  return {
+    label: 'Maksimum',
+    condition: 'Parah',
+    durationKey: 'maxMs',
+  };
+}
+
+function lowDecision(reading, sensorKey, minKey, relay, thresholds, durations) {
+  const value = reading[sensorKey];
+  const minimum = thresholds[minKey];
+  if (!isLow(value, minimum) || minimum <= 0) return [];
+
+  const gapRatio = Math.min(Math.max((minimum - value) / minimum, 0), 1);
+  const fuzzy = fuzzyLevelForRatio(gapRatio);
+  return [{
+    sensorKey,
+    direction: 'low',
+    relay,
+    threshold: minimum,
+    value,
+    gapRatio,
+    fuzzyCondition: fuzzy.condition,
+    fuzzyOutput: fuzzy.label,
+    durationMs: durations[fuzzy.durationKey],
+  }];
+}
+
+function highDecision(reading, sensorKey, maxKey, relay, thresholds, durations) {
+  const value = reading[sensorKey];
+  const maximum = thresholds[maxKey];
+  if (!isHigh(value, maximum) || maximum <= 0) return [];
+
+  const gapRatio = Math.min(Math.max((value - maximum) / maximum, 0), 1);
+  const fuzzy = fuzzyLevelForRatio(gapRatio);
+  return [{
+    sensorKey,
+    direction: 'high',
+    relay,
+    threshold: maximum,
+    value,
+    gapRatio,
+    fuzzyCondition: fuzzy.condition,
+    fuzzyOutput: fuzzy.label,
+    durationMs: durations[fuzzy.durationKey],
+  }];
+}
+
+function fuzzyDecisionsForReading(reading, thresholds, durations) {
+  return [
+    ...lowDecision(reading, 'nitrogen', 'min_nitrogen', 1, thresholds, durations),
+    ...lowDecision(reading, 'phosphorus', 'min_phosphorus', 2, thresholds, durations),
+    ...lowDecision(reading, 'potassium', 'min_potassium', 3, thresholds, durations),
+    ...lowDecision(reading, 'moisture', 'min_moisture', 4, thresholds, durations),
+    ...highDecision(reading, 'temperature', 'max_temperature', 4, thresholds, durations),
+    ...lowDecision(reading, 'ec', 'min_ec', 1, thresholds, durations),
+    ...lowDecision(reading, 'ec', 'min_ec', 2, thresholds, durations),
+    ...lowDecision(reading, 'ec', 'min_ec', 3, thresholds, durations),
+  ];
+}
+
+function durationMsByRelay(decisions) {
+  return decisions.reduce((durations, decision) => {
+    durations[decision.relay] = Math.max(
+      durations[decision.relay] || 0,
+      decision.durationMs,
+    );
+    return durations;
+  }, {});
 }
 
 async function loadDssConfig() {
@@ -49,11 +137,11 @@ async function loadDssConfig() {
       ...(fallbackData.thresholds || {}),
     },
   };
+  const durations = durationConfigFromData(data);
   return {
     enabled: data.enabled === true,
     thresholds: buildThresholds(data),
-    pulseDurationMs: Number(data.pulseDurationMs) || config.automation.dssPulseDurationMs,
-    cooldownMs: Number(data.cooldownMs) || config.automation.dssCooldownMs,
+    durations,
   };
 }
 
@@ -65,6 +153,7 @@ async function writeDssRuntimeStatus(status) {
       .set(
         {
           ...status,
+          cooldownMs: admin.firestore.FieldValue.delete(),
           checkedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -89,7 +178,6 @@ async function loadLatestReading() {
 }
 
 function startDssWorker(mqttClient) {
-  const lastActivationByRelay = new Map();
   let isChecking = false;
 
   async function check() {
@@ -130,11 +218,16 @@ function startDssWorker(mqttClient) {
         return;
       }
 
-      const relays = relaysForReading(reading, dssConfig.thresholds);
-      if (relays.length === 0) {
+      const decisions = fuzzyDecisionsForReading(
+        reading,
+        dssConfig.thresholds,
+        dssConfig.durations,
+      );
+
+      if (decisions.length === 0) {
         await writeDssRuntimeStatus({
-          state: 'no_rule_matched',
-          message: 'Latest sensor reading does not cross any DSS threshold.',
+          state: 'normal',
+          message: 'All values are inside thresholds, all relays remain off.',
           sensorReadingId: reading.id,
           reading,
           thresholds: dssConfig.thresholds,
@@ -142,47 +235,32 @@ function startDssWorker(mqttClient) {
         return;
       }
 
-      const allowedRelays = relays.filter((relay) => {
-        const lastActivation = lastActivationByRelay.get(relay);
-        return !lastActivation || Date.now() - lastActivation >= dssConfig.cooldownMs;
-      });
+      const relayDurations = durationMsByRelay(decisions);
+      const matchedRelays = Object.keys(relayDurations).map(Number);
+      const allowedDurations = Object.fromEntries(
+        matchedRelays.map((relay) => [relay, relayDurations[relay]]),
+      );
 
-      if (allowedRelays.length === 0) {
-        await writeDssRuntimeStatus({
-          state: 'cooldown',
-          message: 'DSS rule matched, but all matched relays are still in cooldown.',
-          sensorReadingId: reading.id,
-          matchedRelays: relays,
-          cooldownMs: dssConfig.cooldownMs,
-        });
-        return;
-      }
-
-      await runPumpPulse(
+      await runPumpPulseByRelay(
         mqttClient,
-        allowedRelays,
-        dssConfig.pulseDurationMs,
+        allowedDurations,
         'Pompa Otomatis',
         {
           source: 'dss_worker',
           sensorReadingId: reading.id,
           thresholds: dssConfig.thresholds,
+          fuzzyDurations: dssConfig.durations,
+          decisions,
         },
       );
-
-      const now = Date.now();
-      for (const relay of allowedRelays) {
-        lastActivationByRelay.set(relay, now);
-      }
 
       await writeDssRuntimeStatus({
         state: 'activated',
         message: 'DSS activated pump relay(s).',
         sensorReadingId: reading.id,
-        matchedRelays: relays,
-        activatedRelays: allowedRelays,
-        pulseDurationMs: dssConfig.pulseDurationMs,
-        cooldownMs: dssConfig.cooldownMs,
+        matchedRelays,
+        activatedRelays: matchedRelays,
+        durationMsByRelay: allowedDurations,
       });
     } catch (error) {
       console.error('DSS worker check failed:', error);

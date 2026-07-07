@@ -45,6 +45,10 @@ class _HomeScreenState extends State<HomeScreen>
   ];
   static const String _automationConfigCollection = 'automation_config';
   static const String _dssConfigDocument = 'dss';
+  static const String _thresholdNotificationsDocument =
+      'threshold_notifications';
+  static const Duration _thresholdNotificationRepeatInterval =
+      Duration(minutes: 5);
 
   int totalSensors = 0;
   int totalAlerts = 0;
@@ -458,10 +462,6 @@ class _HomeScreenState extends State<HomeScreen>
     });
 
     _alertCountService.updateFromSensorReadings(nextReadings);
-    _nutrientAlertService.handleReadings(
-      nextReadings,
-      mutedSensorKeys: _mutedSensorKeys,
-    );
   }
 
   Future<void> _openThresholdConfigDialog() async {
@@ -809,6 +809,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     await _thresholdConfigService.update(payload);
     RuleBasedPumpAutomationService.instance.syncNativeThresholds();
+    unawaited(_syncThresholdNotificationConfig(payload));
 
     await mqttService.init();
     if (!mqttService.isConnected) {
@@ -841,10 +842,31 @@ class _HomeScreenState extends State<HomeScreen>
 
     showAppTextSnackBar(
       context,
-      'Ambang berhasil diperbarui',
+      'Ambang Batas Normal Diperbarui',
       AppTheme.primaryGreen,
     );
     return true;
+  }
+
+  Future<void> _syncThresholdNotificationConfig(
+    Map<String, double> thresholds,
+  ) async {
+    try {
+      await _firestore
+          .collection(_automationConfigCollection)
+          .doc(_thresholdNotificationsDocument)
+          .set(
+        {
+          'enabled': true,
+          'repeatMs': _thresholdNotificationRepeatInterval.inMilliseconds,
+          'thresholds': thresholds,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    } catch (error) {
+      debugPrint('Threshold notification config sync failed: $error');
+    }
   }
 
   String _thresholdDisplayLabel(String key) {
@@ -872,6 +894,9 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _syncThresholdControllersFromStorage();
+    unawaited(
+      _syncThresholdNotificationConfig(_thresholdConfigService.all()),
+    );
     _listenBuzzerMuteConfig();
     initializeDefaultReadings();
 
