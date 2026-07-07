@@ -73,6 +73,13 @@ class FcmNotificationService {
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
+    if (message.data['type']?.toString() == 'threshold_alert') {
+      debugPrint(
+        'Foreground threshold FCM received; local display is handled by alert logs.',
+      );
+      return;
+    }
+
     final title = message.notification?.title ??
         message.data['title']?.toString() ??
         'NutriXense notification';

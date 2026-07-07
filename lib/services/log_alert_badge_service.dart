@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class LogAlertBadgeService {
@@ -12,6 +13,8 @@ class LogAlertBadgeService {
       'nutrixense_threshold_alert_logs_last_seen_ms';
   static const String _pumpLastSeenStorageKey =
       'nutrixense_pump_activity_logs_last_seen_ms';
+  static const MethodChannel _alertsChannel =
+      MethodChannel('com.example.nutrixense/alerts');
 
   final ValueNotifier<int> unreadPumpCount = ValueNotifier<int>(0);
   final ValueNotifier<int> unreadAlertCount = ValueNotifier<int>(0);
@@ -24,7 +27,9 @@ class LogAlertBadgeService {
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _latestAlertDocs = [];
   int _pumpLastSeenMillis = 0;
   int _alertLastSeenMillis = 0;
+  int _initializedAtMillis = 0;
   bool _initialized = false;
+  final Set<String> _notifiedAlertLogIds = <String>{};
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -32,6 +37,7 @@ class LogAlertBadgeService {
 
     final prefs = await SharedPreferences.getInstance();
     final nowMillis = DateTime.now().millisecondsSinceEpoch;
+    _initializedAtMillis = nowMillis;
     final storedPumpLastSeen = prefs.getInt(_pumpLastSeenStorageKey);
     final storedAlertLastSeen = prefs.getInt(_alertLastSeenStorageKey);
 
@@ -69,6 +75,7 @@ class LogAlertBadgeService {
         .listen((snapshot) {
       _latestAlertDocs = snapshot.docs;
       _recalculateUnreadCounts();
+      unawaited(_showAlertLogFallbackNotifications(snapshot.docs));
     }, onError: (Object error) {
       debugPrint('Threshold alert badge listener failed: $error');
     });
@@ -149,6 +156,54 @@ class LogAlertBadgeService {
     final alerts = data['alerts'];
     if (alerts is List && alerts.isNotEmpty) return alerts.length;
     return 1;
+  }
+
+  Future<void> _showAlertLogFallbackNotifications(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    for (final doc in docs.reversed) {
+      final data = doc.data();
+      final createdAt = _readDate(data['createdAt']);
+      if (createdAt == null ||
+          createdAt.millisecondsSinceEpoch <= _initializedAtMillis ||
+          !_notifiedAlertLogIds.add(doc.id)) {
+        continue;
+      }
+
+      final title = data['title']?.toString() ?? 'Peringatan Nutrisi Tanaman';
+      final message = data['body']?.toString() ?? _messageFromAlerts(data);
+      if (message.trim().isEmpty) continue;
+
+      try {
+        await _alertsChannel.invokeMethod<void>('showNutrientAlert', {
+          'title': title,
+          'message': message,
+        });
+      } on PlatformException catch (error) {
+        debugPrint('Alert log fallback notification skipped: ${error.message}');
+      }
+    }
+  }
+
+  String _messageFromAlerts(Map<String, dynamic> data) {
+    final alerts = data['alerts'];
+    if (alerts is! List) return '';
+
+    return alerts
+        .whereType<Map>()
+        .map((alert) {
+          final label = alert['label']?.toString();
+          final value = alert['value']?.toString();
+          final unit = alert['unit']?.toString() ?? '';
+          final direction = alert['direction']?.toString();
+          final threshold = alert['threshold']?.toString();
+          if (label == null || value == null || direction == null) return '';
+          final thresholdText =
+              threshold == null ? '' : ' $direction $threshold $unit';
+          return '$label: $value $unit$thresholdText'.trim();
+        })
+        .where((line) => line.isNotEmpty)
+        .join('\n');
   }
 
   DateTime? _readDate(Object? value) {

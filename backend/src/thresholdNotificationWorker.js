@@ -11,10 +11,6 @@ function formatAlertLine(alert) {
   return `${alert.label}: ${formatValue(alert.value)} ${alert.unit} is ${alert.direction} ${formatValue(alert.threshold)} ${alert.unit}`;
 }
 
-function alertKey(alert) {
-  return `${alert.key}:${alert.status}`;
-}
-
 function readMutedSensors(...configs) {
   return configs.reduce((mutedSensors, item) => {
     const rawMuted = item?.buzzerMuted || item?.buzzer_muted || {};
@@ -23,6 +19,17 @@ function readMutedSensors(...configs) {
     }
     return mutedSensors;
   }, {});
+}
+
+function runtimeConfigSnapshot(extra = {}) {
+  return {
+    intervalMs: config.automation.thresholdNotificationIntervalMs,
+    repeatMs: config.automation.thresholdNotificationRepeatMs,
+    maxSensorAgeMs: config.automation.thresholdNotificationMaxSensorAgeMs,
+    fcmTopic: config.automation.fcmTopic,
+    fcmChannelId: config.automation.fcmChannelId,
+    ...extra,
+  };
 }
 
 async function writeRuntimeStatus(status) {
@@ -100,45 +107,78 @@ async function loadLatestReading() {
 async function sendThresholdNotification(alerts, reading) {
   const body = alerts.map(formatAlertLine).join('\n');
   const title = 'Peringatan Nutrisi Tanaman';
+  const logRef = db.collection(config.firestore.thresholdAlertLogsCollection).doc();
 
-  const response = await admin.messaging().send({
-    topic: config.automation.fcmTopic,
-    notification: {
-      title,
-      body,
-    },
-    data: {
-      title,
-      body,
-      message: body,
-      type: 'threshold_alert',
-      sensorReadingId: reading.id,
-      alertCount: String(alerts.length),
-    },
-    android: {
-      priority: 'high',
-      notification: {
-        channelId: config.automation.fcmChannelId,
-        sound: 'default',
-      },
-    },
-  });
-
-  await db.collection(config.firestore.thresholdAlertLogsCollection).add({
+  await logRef.set({
     topic: config.automation.fcmTopic,
     title,
     body,
     alerts,
     sensorReadingId: reading.id,
-    fcmMessageId: response,
+    deliveryStatus: 'pending',
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  return response;
+  try {
+    const response = await admin.messaging().send({
+      topic: config.automation.fcmTopic,
+      notification: {
+        title,
+        body,
+      },
+      data: {
+        title,
+        body,
+        message: body,
+        type: 'threshold_alert',
+        sensorReadingId: reading.id,
+        alertCount: String(alerts.length),
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: config.automation.fcmChannelId,
+          sound: 'default',
+        },
+      },
+    });
+
+    await logRef.set(
+      {
+        fcmMessageId: response,
+        deliveryStatus: 'sent',
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      logId: logRef.id,
+      fcmMessageId: response,
+      deliveryStatus: 'sent',
+    };
+  } catch (error) {
+    console.error('Failed to send threshold FCM notification:', error.message);
+
+    await logRef.set(
+      {
+        deliveryStatus: 'failed',
+        fcmError: error.message,
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return {
+      logId: logRef.id,
+      fcmMessageId: null,
+      deliveryStatus: 'failed',
+      fcmError: error.message,
+    };
+  }
 }
 
 function startThresholdNotificationWorker() {
-  const lastSentByAlert = new Map();
   let isChecking = false;
 
   async function check() {
@@ -151,6 +191,7 @@ function startThresholdNotificationWorker() {
         await writeRuntimeStatus({
           state: 'disabled',
           message: 'Threshold notification worker is disabled.',
+          ...runtimeConfigSnapshot(),
         });
         return;
       }
@@ -160,6 +201,7 @@ function startThresholdNotificationWorker() {
         await writeRuntimeStatus({
           state: 'no_reading',
           message: 'No sensor reading found in Firestore.',
+          ...runtimeConfigSnapshot(),
         });
         return;
       }
@@ -175,6 +217,7 @@ function startThresholdNotificationWorker() {
             'Latest sensor reading is older than THRESHOLD_NOTIFICATION_MAX_SENSOR_AGE_MS.',
           sensorReadingId: reading.id,
           sensorAgeMs: Date.now() - reading.timestampMillis,
+          ...runtimeConfigSnapshot(),
         });
         return;
       }
@@ -182,58 +225,39 @@ function startThresholdNotificationWorker() {
       const alerts = abnormalReadings(reading, notificationConfig.thresholds)
         .filter((alert) => notificationConfig.mutedSensors[alert.key] !== true);
       if (alerts.length === 0) {
-        lastSentByAlert.clear();
         await writeRuntimeStatus({
           state: 'normal',
           message:
             'All unmuted readings are inside configured thresholds.',
           sensorReadingId: reading.id,
           mutedSensors: notificationConfig.mutedSensors,
+          ...runtimeConfigSnapshot(),
         });
         return;
       }
 
-      const checkedAt = Date.now();
-      const dueAlerts = alerts.filter((alert) => {
-        const key = alertKey(alert);
-        const lastSentAt = lastSentByAlert.get(key);
-        return (
-          !lastSentAt ||
-          checkedAt - lastSentAt >= notificationConfig.repeatMs
-        );
-      });
-
-      if (dueAlerts.length === 0) {
-        await writeRuntimeStatus({
-          state: 'repeat_wait',
-          message: 'Abnormal readings found, but repeat interval has not passed.',
-          sensorReadingId: reading.id,
-          alerts,
-          mutedSensors: notificationConfig.mutedSensors,
-          repeatMs: notificationConfig.repeatMs,
-        });
-        return;
-      }
-
-      const fcmMessageId = await sendThresholdNotification(dueAlerts, reading);
-      for (const alert of dueAlerts) {
-        lastSentByAlert.set(alertKey(alert), checkedAt);
-      }
+      const delivery = await sendThresholdNotification(alerts, reading);
 
       await writeRuntimeStatus({
-        state: 'sent',
-        message: 'Threshold push notification sent.',
+        state: delivery.deliveryStatus === 'sent' ? 'sent' : 'fcm_failed',
+        message: delivery.deliveryStatus === 'sent'
+          ? 'Threshold push notification sent.'
+          : 'Threshold alert logged, but FCM push failed.',
         sensorReadingId: reading.id,
-        alerts: dueAlerts,
+        alerts,
         mutedSensors: notificationConfig.mutedSensors,
-        fcmMessageId,
-        repeatMs: notificationConfig.repeatMs,
+        logId: delivery.logId,
+        fcmMessageId: delivery.fcmMessageId,
+        fcmError: delivery.fcmError || null,
+        deliveryStatus: delivery.deliveryStatus,
+        ...runtimeConfigSnapshot(),
       });
     } catch (error) {
       console.error('Threshold notification worker check failed:', error);
       await writeRuntimeStatus({
         state: 'error',
         message: error.message,
+        ...runtimeConfigSnapshot(),
       });
     } finally {
       isChecking = false;
