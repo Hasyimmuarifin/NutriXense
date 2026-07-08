@@ -21,7 +21,6 @@ class LogsScreen extends StatefulWidget {
 }
 
 class _LogsScreenState extends State<LogsScreen> {
-  static const int _logLimit = 100;
   static const String _pumpLogsCollection = 'pump_activity_logs';
   static const String _thresholdLogsCollection = 'threshold_alert_logs';
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -117,9 +116,7 @@ class _LogsScreenState extends State<LogsScreen> {
               descending: latestCachedTime == null,
             );
 
-    if (latestCachedTime == null) {
-      query = query.limit(_logLimit);
-    } else {
+    if (latestCachedTime != null) {
       query = _firestore
           .collection(collectionPath)
           .where('createdAt',
@@ -527,7 +524,6 @@ class _LogsScreenState extends State<LogsScreen> {
     }
 
     final logs = _pumpLogEntries
-        .take(_logLimit)
         .map((entry) => _PumpActivityLog.fromCache(
               id: entry.id,
               data: entry.data,
@@ -569,7 +565,6 @@ class _LogsScreenState extends State<LogsScreen> {
     }
 
     final logs = _thresholdLogEntries
-        .take(_logLimit)
         .map((entry) => _ThresholdAlertLog.fromCache(
               id: entry.id,
               data: entry.data,
@@ -1177,7 +1172,7 @@ class _PumpActivityLog {
       case 'manual_control':
         return 'Kontrol Manual';
       case 'ai_automation':
-        return 'Otomasi AI';
+        return 'Rekomendasi AI';
       case 'dss_worker':
         return 'Pompa Otomatis';
       case 'schedule_worker':

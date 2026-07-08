@@ -1,3 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+
 import '../models/ai_recommendation.dart';
 import 'pump_state_service.dart';
 
@@ -15,10 +18,17 @@ class AiPumpAutomationResult {
 
 class AiPumpAutomationService {
   AiPumpAutomationService({
+    FirebaseFirestore? firestore,
     PumpStateService? pumpStateService,
     this.pulseDuration = const Duration(seconds: 5),
-  }) : _pumpStateService = pumpStateService ?? PumpStateService.instance;
+  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+        _pumpStateService = pumpStateService ?? PumpStateService.instance;
 
+  static const String _pumpLogsCollection = 'pump_activity_logs';
+  static const String _aiSource = 'ai_automation';
+  static const String _aiLogTitle = 'Rekomendasi AI';
+
+  final FirebaseFirestore _firestore;
   final PumpStateService _pumpStateService;
   final Duration pulseDuration;
 
@@ -86,16 +96,21 @@ class AiPumpAutomationService {
           'MQTT is not connected, so AI pump automation was not applied.');
     }
 
+    final startedAt = DateTime.now();
+    final logRef = await _createRunningLog(
+      pumpCommands,
+      startedAt: startedAt,
+    );
+
     try {
       for (final command in pumpCommands) {
         await _pumpStateService.setRelay(
           command.relay,
           true,
-          source: 'ai_automation',
+          source: _aiSource,
         );
       }
 
-      final startedAt = DateTime.now();
       final sortedCommands = [...pumpCommands]
         ..sort((a, b) => a.duration.compareTo(b.duration));
       for (final command in sortedCommands) {
@@ -107,7 +122,7 @@ class AiPumpAutomationService {
         await _pumpStateService.setRelay(
           command.relay,
           false,
-          source: 'ai_automation',
+          source: _aiSource,
         );
       }
     } finally {
@@ -115,15 +130,95 @@ class AiPumpAutomationService {
         await _pumpStateService.setRelay(
           command.relay,
           false,
-          source: 'ai_automation',
+          source: _aiSource,
         );
       }
+      await _completeLog(
+        logRef,
+        pumpCommands,
+        startedAt: startedAt,
+        finishedAt: DateTime.now(),
+      );
     }
 
     return AiPumpAutomationResult(
       activatedPumps: pumpCommands.map((command) => command.label).toList(),
       reason: reason,
     );
+  }
+
+  Future<DocumentReference<Map<String, dynamic>>?> _createRunningLog(
+    List<_PumpCommand> pumpCommands, {
+    required DateTime startedAt,
+  }) async {
+    try {
+      final durationMsByRelay = {
+        for (final command in pumpCommands)
+          '${command.relay}': command.duration.inMilliseconds,
+      };
+      final maxDuration = _maxDuration(pumpCommands);
+
+      final ref = _firestore.collection(_pumpLogsCollection).doc();
+      await ref.set({
+        'reason': _aiLogTitle,
+        'action': 'running',
+        'relays': pumpCommands.map((command) => command.relay).toList(),
+        'pumpLabels': pumpCommands.map((command) => command.label).toList(),
+        'durationMs': maxDuration.inMilliseconds,
+        'durationMsByRelay': durationMsByRelay,
+        'createdAt': Timestamp.fromDate(startedAt),
+        'startedAt': Timestamp.fromDate(startedAt),
+        'metadata': {
+          'source': _aiSource,
+          'state': 'running',
+          'title': _aiLogTitle,
+        },
+      });
+      return ref;
+    } catch (error) {
+      debugPrint('AI pump running log failed: $error');
+      return null;
+    }
+  }
+
+  Future<void> _completeLog(
+    DocumentReference<Map<String, dynamic>>? logRef,
+    List<_PumpCommand> pumpCommands, {
+    required DateTime startedAt,
+    required DateTime finishedAt,
+  }) async {
+    if (logRef == null) return;
+
+    try {
+      final durationMsByRelay = {
+        for (final command in pumpCommands)
+          '${command.relay}': command.duration.inMilliseconds,
+      };
+      final actualDurationMs = finishedAt.difference(startedAt).inMilliseconds;
+
+      await logRef.set({
+        'reason': _aiLogTitle,
+        'action': 'completed',
+        'relays': pumpCommands.map((command) => command.relay).toList(),
+        'pumpLabels': pumpCommands.map((command) => command.label).toList(),
+        'durationMs': actualDurationMs,
+        'durationMsByRelay': durationMsByRelay,
+        'finishedAt': Timestamp.fromDate(finishedAt),
+        'metadata': {
+          'source': _aiSource,
+          'state': 'completed',
+          'title': _aiLogTitle,
+        },
+      }, SetOptions(merge: true));
+    } catch (error) {
+      debugPrint('AI pump completed log failed: $error');
+    }
+  }
+
+  Duration _maxDuration(List<_PumpCommand> pumpCommands) {
+    return pumpCommands
+        .map((command) => command.duration)
+        .reduce((a, b) => a > b ? a : b);
   }
 
   _PumpCommand? _commandForRelay(int relay) {

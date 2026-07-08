@@ -224,6 +224,13 @@ const List<PlantingMediumProfile> plantingMediumProfiles = [
     note: 'Media lebih padat; koreksi dibuat lebih bertahap.',
   ),
   PlantingMediumProfile(
+    id: 'sandy_fast_drying_soil',
+    label: 'Tanah berpasir/cepat kering',
+    assumedDepthCm: 18,
+    bulkDensityKgPerM3: 1100,
+    note: 'Media berdrainase cepat; penyiraman dan nutrisi dibuat bertahap.',
+  ),
+  PlantingMediumProfile(
     id: 'raised_bed',
     label: 'Bedengan/lahan teh',
     assumedDepthCm: 25,

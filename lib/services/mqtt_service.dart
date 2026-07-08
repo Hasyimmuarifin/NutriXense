@@ -127,9 +127,11 @@ class MQTTService {
     bool state, {
     String source = 'manual_control',
   }) {
+    final commandSource = source.trim().isEmpty ? 'manual_control' : source;
     final payload = jsonEncode({
-      "source": source,
-      if (source == 'manual_control') "manual_override": state ? 1 : 0,
+      "source": "manual_control",
+      if (commandSource != 'manual_control') "command_source": commandSource,
+      "manual_override": state ? 1 : 0,
       "relay$relay": state ? 1 : 0,
     });
 

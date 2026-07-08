@@ -12,7 +12,6 @@ class OfflineDataCacheService {
   static final OfflineDataCacheService instance = OfflineDataCacheService._();
 
   static const int _maxHistoryEntries = 20000;
-  static const int _maxLogEntries = 1000;
 
   Future<List<CachedSensorDataPoint>> loadSensorHistory() async {
     final items = await _readList('sensor_history.json');
@@ -92,16 +91,13 @@ class OfflineDataCacheService {
 
     final merged = byId.values.toList()
       ..sort((a, b) => _compareDateDesc(a.createdAt, b.createdAt));
-    final trimmed = merged.length > _maxLogEntries
-        ? merged.take(_maxLogEntries).toList(growable: false)
-        : merged;
 
     await _writeList(
       _logFileName(collectionPath),
-      trimmed.map((item) => item.toJson()).toList(growable: false),
+      merged.map((item) => item.toJson()).toList(growable: false),
     );
 
-    return trimmed;
+    return merged;
   }
 
   Future<List<CachedLogEntry>> removeLog(
