@@ -81,18 +81,43 @@ class PlantTypeProfile {
   }
 }
 
+class AiAnalysisWindowProfile {
+  const AiAnalysisWindowProfile({
+    required this.id,
+    required this.label,
+    required this.rowLimit,
+    required this.description,
+  });
+
+  final String id;
+  final String label;
+  final int rowLimit;
+  final String description;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'label': label,
+      'row_limit': rowLimit,
+      'description': description,
+    };
+  }
+}
+
 class AiRecommendationAgronomicInput {
   const AiRecommendationAgronomicInput({
     required this.plantType,
     required this.landAreaSquareMeters,
     required this.fertilizerConcentration,
     required this.plantingMedium,
+    required this.analysisWindow,
   });
 
   final PlantTypeProfile plantType;
   final double landAreaSquareMeters;
   final FertilizerSolutionConcentration fertilizerConcentration;
   final PlantingMediumProfile plantingMedium;
+  final AiAnalysisWindowProfile analysisWindow;
 
   Map<String, dynamic> toJson() {
     return {
@@ -100,11 +125,78 @@ class AiRecommendationAgronomicInput {
       'land_area_square_meters': landAreaSquareMeters,
       'fertilizer_solution_concentration': fertilizerConcentration.toJson(),
       'planting_medium': plantingMedium.toJson(),
+      'analysis_window': analysisWindow.toJson(),
       'calculation_note':
           'Media depth is an assumption from the selected planting medium because actual depth is not measured by the app.',
     };
   }
 }
+
+const AiAnalysisWindowProfile defaultAnalysisWindowProfile =
+    AiAnalysisWindowProfile(
+  id: '12h',
+  label: '12 jam',
+  rowLimit: 720,
+  description: 'Analisis stabilitas setengah hari terakhir.',
+);
+
+const List<AiAnalysisWindowProfile> analysisWindowProfiles = [
+  AiAnalysisWindowProfile(
+    id: '1h',
+    label: '1 jam',
+    rowLimit: 60,
+    description: 'Analisis cepat untuk kondisi sensor terbaru.',
+  ),
+  AiAnalysisWindowProfile(
+    id: '6h',
+    label: '6 jam',
+    rowLimit: 360,
+    description: 'Analisis perubahan kondisi dalam beberapa jam terakhir.',
+  ),
+  defaultAnalysisWindowProfile,
+  AiAnalysisWindowProfile(
+    id: '24h',
+    label: '24 jam',
+    rowLimit: 1440,
+    description: 'Analisis pola harian penuh.',
+  ),
+  AiAnalysisWindowProfile(
+    id: '7d',
+    label: '7 hari',
+    rowLimit: 10080,
+    description: 'Analisis tren mingguan untuk melihat kestabilan nutrisi.',
+  ),
+  AiAnalysisWindowProfile(
+    id: '30d',
+    label: '30 hari',
+    rowLimit: 43200,
+    description: 'Analisis tren jangka panjang satu bulan.',
+  ),
+];
+
+const PlantTypeProfile customPlantTypeProfile = PlantTypeProfile(
+  id: 'custom',
+  label: 'Lainnya',
+  scientificName: 'Profil tanaman kustom',
+  contextNote:
+      'Gunakan pilihan ini jika tanaman belum tersedia di daftar. NutriXense akan menyesuaikan rekomendasi dari data sensor, luas lahan, dan media tanam yang Anda masukkan.',
+  thresholds: {
+    'nitrogen_min': 70,
+    'nitrogen_max': 170,
+    'phosphorus_min': 60,
+    'phosphorus_max': 200,
+    'potassium_min': 180,
+    'potassium_max': 550,
+    'moisture_min': 45,
+    'moisture_max': 75,
+    'ph_min': 5.5,
+    'ph_max': 6.8,
+    'temperature_min': 18,
+    'temperature_max': 30,
+    'ec_min': 1.0,
+    'ec_max': 3.0,
+  },
+);
 
 const List<PlantTypeProfile> plantTypeProfiles = [
   PlantTypeProfile(
@@ -199,7 +291,17 @@ const List<PlantTypeProfile> plantTypeProfiles = [
       'ec_max': 1.8,
     },
   ),
+  customPlantTypeProfile,
 ];
+
+const PlantingMediumProfile customPlantingMediumProfile = PlantingMediumProfile(
+  id: 'custom',
+  label: 'Lainnya',
+  assumedDepthCm: 20,
+  bulkDensityKgPerM3: 900,
+  note:
+      'Gunakan pilihan ini jika media tanam belum tersedia di daftar. NutriXense akan menyesuaikan rekomendasi dari data sensor dan informasi lahan yang Anda masukkan.',
+);
 
 const List<PlantingMediumProfile> plantingMediumProfiles = [
   PlantingMediumProfile(
@@ -237,6 +339,7 @@ const List<PlantingMediumProfile> plantingMediumProfiles = [
     bulkDensityKgPerM3: 850,
     note: 'Profil akar dangkal-menengah untuk koreksi permukaan bertahap.',
   ),
+  customPlantingMediumProfile,
 ];
 
 class GeminiRecommendationService {
@@ -249,7 +352,6 @@ class GeminiRecommendationService {
         _modelNameOverride = modelName;
 
   static const _collection = 'sensor_data';
-  static const _historyLimit = 720;
   static const _configAssetPath = 'assets/config/gemini_config.json';
   static const _dartDefineApiKey = String.fromEnvironment('GEMINI_API_KEY');
   static const _dartDefineModelName = String.fromEnvironment('GEMINI_MODEL');
@@ -280,7 +382,9 @@ class GeminiRecommendationService {
       );
     }
 
-    final readings = await _fetchRecentReadings();
+    final readings = await _fetchRecentReadings(
+      limit: input.analysisWindow.rowLimit,
+    );
     if (readings.isEmpty) {
       throw StateError('Belum ada data sensor di koleksi $_collection.');
     }
@@ -314,7 +418,7 @@ class GeminiRecommendationService {
 
     final payload = jsonEncode({
       'task':
-          'Calculate hybrid Gemini dose recommendations for tea plants and return JSON only.',
+          'Calculate hybrid Gemini dose recommendations for ${input.plantType.label} and return JSON only.',
       'crop_context':
           '${input.plantType.label} (${input.plantType.scientificName}). ${input.plantType.contextNote}',
       'language': 'id',
@@ -333,6 +437,7 @@ class GeminiRecommendationService {
             'Use this area with the selected planting medium assumption to estimate soil mass.',
       },
       'agronomic_input': input.toJson(),
+      'analysis_window': input.analysisWindow.toJson(),
       'pump_flow_rates_ml_per_second': PumpFlowRates.toPromptJson(),
       'output_rules': [
         'Return one complete JSON object only.',
@@ -352,10 +457,10 @@ class GeminiRecommendationService {
         'Do not exceed local_safety_bounds.max_seconds_per_pump or local_safety_bounds.max_volume_ml_per_pump.',
         'If a calculation is uncertain, recommend a smaller gradual dose and explain the assumption.',
         'Narasi XAI must explain that depth/media values are estimates from selected planting medium because actual media depth is not measured.',
-        'sensor_summary maximum 2 sentences.',
+        'sensor_summary maximum 2 sentences and must mention the selected analysis window (${input.analysisWindow.label}), not the number of analyzed rows.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
         'For each recommendation item, explanation must explain current value, threshold, average, trend, and the dose basis when correction is needed.',
-        'For each recommendation item, recommendation must explain practical follow-up actions for tea plants and require user confirmation before pump activation.',
+        'For each recommendation item, recommendation must explain practical follow-up actions for ${input.plantType.label} and require user confirmation before pump activation.',
         'Do not mention or assume any specific cultivation container unless the input data explicitly states it.',
         'Return pump_recommendations and daily_schedule_recommendation when pump correction is needed.',
       ],
@@ -518,11 +623,13 @@ class GeminiRecommendationService {
     return fallback;
   }
 
-  Future<List<_SensorReadingSnapshot>> _fetchRecentReadings() async {
+  Future<List<_SensorReadingSnapshot>> _fetchRecentReadings({
+    required int limit,
+  }) async {
     final query = _firestore
         .collection(_collection)
         .orderBy('timestamp', descending: true)
-        .limit(_historyLimit);
+        .limit(limit);
 
     final snapshot = await query.get();
     return snapshot.docs
@@ -682,7 +789,7 @@ class GeminiRecommendationService {
         : DailyFertilizationScheduleRecommendation.fromPlan(
             recommendations: pumpRecommendations,
             reason:
-                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum setelah analisis maksimal $_historyLimit data sensor, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, dan asumsi media ${input.plantingMedium.label}.',
+                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum berdasarkan rentang analisis ${input.analysisWindow.label}, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, dan asumsi media ${input.plantingMedium.label}.',
           );
 
     return {
@@ -1169,7 +1276,7 @@ class GeminiRecommendationService {
       highAction:
           'Tunda penambahan kalium dan pantau EC. Jika nilai tetap tinggi, kurangi konsentrasi larutan secara bertahap.',
       normalAction:
-          'Kadar kalium sudah memadai untuk tanaman teh, lanjutkan pemantauan bersama N dan P.',
+          'Kadar kalium sudah memadai untuk ${input.plantType.label}, lanjutkan pemantauan bersama N dan P.',
     );
     evaluateRange(
       key: 'pH',
@@ -1228,7 +1335,7 @@ class GeminiRecommendationService {
       highAction:
           'Encerkan larutan dengan air bersih secara bertahap dan tunda penambahan pupuk. Pantau ulang EC serta pH asam setelah larutan stabil.',
       normalAction:
-          'EC stabil untuk tanaman teh, pertahankan konsentrasi larutan dan pantau perubahan setelah irigasi.',
+          'EC stabil untuk ${input.plantType.label}, pertahankan konsentrasi larutan dan pantau perubahan setelah irigasi.',
     );
 
     final kritis = items
@@ -1243,7 +1350,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Analisis ${input.plantType.label} menggunakan ${summary.rowCount} baris data sensor terbaru, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
+          'Analisis ${input.plantType.label} dibuat dari rentang ${input.analysisWindow.label} terakhir, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
       'recommendations': {
         'all': items,
         'kritis': kritis,

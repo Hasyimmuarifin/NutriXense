@@ -1134,7 +1134,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '${input.plantType.label} • Luas ${_formatLandArea(input.landAreaSquareMeters)} m² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerMl)} mg/ml • ${input.plantingMedium.label}',
+              '${input.plantType.label} • Analisis ${input.analysisWindow.label} • Luas ${_formatLandArea(input.landAreaSquareMeters)} m² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerMl)} mg/ml • ${input.plantingMedium.label}',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -1481,11 +1481,16 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
   late final TextEditingController _nitrogenController;
   late final TextEditingController _phosphorusController;
   late final TextEditingController _potassiumController;
+  late final TextEditingController _customPlantTypeController;
+  late final TextEditingController _customMediumController;
   late _LandAreaUnit _selectedUnit;
   late PlantTypeProfile _selectedPlantType;
   late PlantingMediumProfile _selectedMedium;
+  late AiAnalysisWindowProfile _selectedAnalysisWindow;
   String? _areaErrorText;
   String? _fertilizerErrorText;
+  String? _customPlantTypeErrorText;
+  String? _customMediumErrorText;
 
   @override
   void initState() {
@@ -1498,8 +1503,10 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
           potassiumMgPerMl: 10,
         );
     _selectedUnit = _landAreaUnits[2];
-    _selectedPlantType = initial?.plantType ?? plantTypeProfiles.first;
-    _selectedMedium = initial?.plantingMedium ?? plantingMediumProfiles[1];
+    _selectedPlantType = _initialPlantType(initial?.plantType);
+    _selectedMedium = _initialMedium(initial?.plantingMedium);
+    _selectedAnalysisWindow =
+        initial?.analysisWindow ?? defaultAnalysisWindowProfile;
     _areaController = TextEditingController(
       text: widget.formatLandArea(initial?.landAreaSquareMeters ?? 0),
     );
@@ -1512,6 +1519,16 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     _potassiumController = TextEditingController(
       text: widget.formatLandArea(initialConcentration.potassiumMgPerMl),
     );
+    _customPlantTypeController = TextEditingController(
+      text: _selectedPlantType.id == customPlantTypeProfile.id
+          ? initial?.plantType.label ?? ''
+          : '',
+    );
+    _customMediumController = TextEditingController(
+      text: _selectedMedium.id == customPlantingMediumProfile.id
+          ? initial?.plantingMedium.label ?? ''
+          : '',
+    );
   }
 
   @override
@@ -1520,8 +1537,32 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     _nitrogenController.dispose();
     _phosphorusController.dispose();
     _potassiumController.dispose();
+    _customPlantTypeController.dispose();
+    _customMediumController.dispose();
     super.dispose();
   }
+
+  PlantTypeProfile _initialPlantType(PlantTypeProfile? initial) {
+    if (initial == null) return plantTypeProfiles.first;
+    return plantTypeProfiles.firstWhere(
+      (profile) => profile.id == initial.id,
+      orElse: () => customPlantTypeProfile,
+    );
+  }
+
+  PlantingMediumProfile _initialMedium(PlantingMediumProfile? initial) {
+    if (initial == null) return plantingMediumProfiles[1];
+    return plantingMediumProfiles.firstWhere(
+      (profile) => profile.id == initial.id,
+      orElse: () => customPlantingMediumProfile,
+    );
+  }
+
+  bool get _usesCustomPlantType =>
+      _selectedPlantType.id == customPlantTypeProfile.id;
+
+  bool get _usesCustomMedium =>
+      _selectedMedium.id == customPlantingMediumProfile.id;
 
   void _cancel() {
     FocusScope.of(context).unfocus();
@@ -1554,20 +1595,79 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
       return;
     }
 
+    final plantType = _buildSelectedPlantType();
+    final medium = _buildSelectedMedium();
+    if (plantType == null || medium == null) return;
+
     final squareMeters = parsed * _selectedUnit.squareMetersPerUnit;
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
       AiRecommendationAgronomicInput(
-        plantType: _selectedPlantType,
+        plantType: plantType,
         landAreaSquareMeters: squareMeters,
         fertilizerConcentration: FertilizerSolutionConcentration(
           nitrogenMgPerMl: nitrogen,
           phosphorusMgPerMl: phosphorus,
           potassiumMgPerMl: potassium,
         ),
-        plantingMedium: _selectedMedium,
+        plantingMedium: medium,
+        analysisWindow: _selectedAnalysisWindow,
       ),
     );
+  }
+
+  PlantTypeProfile? _buildSelectedPlantType() {
+    if (!_usesCustomPlantType) return _selectedPlantType;
+
+    final label = _normalizedText(_customPlantTypeController.text);
+    if (label.isEmpty) {
+      setState(() {
+        _customPlantTypeErrorText = 'Masukkan nama jenis tanaman.';
+      });
+      return null;
+    }
+
+    return PlantTypeProfile(
+      id: _customProfileId('custom_plant', label),
+      label: label,
+      scientificName: 'Tanaman kustom',
+      contextNote:
+          'Tanaman ini dimasukkan manual oleh pengguna. NutriXense akan menyesuaikan rekomendasi dari data sensor, luas lahan, dan media tanam yang Anda masukkan.',
+      thresholds: customPlantTypeProfile.thresholds,
+    );
+  }
+
+  PlantingMediumProfile? _buildSelectedMedium() {
+    if (!_usesCustomMedium) return _selectedMedium;
+
+    final label = _normalizedText(_customMediumController.text);
+    if (label.isEmpty) {
+      setState(() {
+        _customMediumErrorText = 'Masukkan nama media tanam.';
+      });
+      return null;
+    }
+
+    return PlantingMediumProfile(
+      id: _customProfileId('custom_medium', label),
+      label: label,
+      assumedDepthCm: customPlantingMediumProfile.assumedDepthCm,
+      bulkDensityKgPerM3: customPlantingMediumProfile.bulkDensityKgPerM3,
+      note:
+          'Media tanam ini dimasukkan manual oleh pengguna. NutriXense akan menyesuaikan rekomendasi dari data sensor dan informasi lahan yang Anda masukkan.',
+    );
+  }
+
+  String _normalizedText(String input) {
+    return input.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _customProfileId(String prefix, String label) {
+    final slug = label
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return slug.isEmpty ? prefix : '${prefix}_$slug';
   }
 
   void _changeUnit(_LandAreaUnit? nextUnit) {
@@ -1677,6 +1777,34 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
               ),
             ),
             const SizedBox(height: 14),
+            DropdownButtonFormField<AiAnalysisWindowProfile>(
+              value: _selectedAnalysisWindow,
+              isExpanded: true,
+              decoration: _inputDecoration(label: 'Rentang analisis'),
+              items: analysisWindowProfiles.map((window) {
+                return DropdownMenuItem<AiAnalysisWindowProfile>(
+                  value: window,
+                  child: Text(
+                    window.label,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => _selectedAnalysisWindow = value);
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _selectedAnalysisWindow.description,
+              style: const TextStyle(
+                color: AppTheme.textLight,
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
             DropdownButtonFormField<PlantTypeProfile>(
               value: _selectedPlantType,
               isExpanded: true,
@@ -1692,12 +1820,33 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
               }).toList(),
               onChanged: (value) {
                 if (value == null) return;
-                setState(() => _selectedPlantType = value);
+                setState(() {
+                  _selectedPlantType = value;
+                  _customPlantTypeErrorText = null;
+                });
               },
             ),
+            if (_usesCustomPlantType) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _customPlantTypeController,
+                textInputAction: TextInputAction.next,
+                decoration: _inputDecoration(
+                  label: 'Nama tanaman lainnya',
+                  hint: 'Contoh: Pakcoy, Stroberi, Kentang',
+                  errorText: _customPlantTypeErrorText,
+                ),
+                onChanged: (_) {
+                  if (_customPlantTypeErrorText == null) return;
+                  setState(() => _customPlantTypeErrorText = null);
+                },
+              ),
+            ],
             const SizedBox(height: 8),
             Text(
-              '${_selectedPlantType.scientificName}. ${_selectedPlantType.contextNote}',
+              _usesCustomPlantType
+                  ? customPlantTypeProfile.contextNote
+                  : '${_selectedPlantType.scientificName}. ${_selectedPlantType.contextNote}',
               style: const TextStyle(
                 color: AppTheme.textLight,
                 fontSize: 11,
@@ -1827,9 +1976,29 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
               }).toList(),
               onChanged: (value) {
                 if (value == null) return;
-                setState(() => _selectedMedium = value);
+                setState(() {
+                  _selectedMedium = value;
+                  _customMediumErrorText = null;
+                });
               },
             ),
+            if (_usesCustomMedium) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _customMediumController,
+                textInputAction: TextInputAction.done,
+                decoration: _inputDecoration(
+                  label: 'Nama media tanam lainnya',
+                  hint: 'Contoh: Cocopeat, Rockwool, Hidroton',
+                  errorText: _customMediumErrorText,
+                ),
+                onSubmitted: (_) => _confirm(),
+                onChanged: (_) {
+                  if (_customMediumErrorText == null) return;
+                  setState(() => _customMediumErrorText = null);
+                },
+              ),
+            ],
             const SizedBox(height: 8),
             Text(
               'Asumsi: kedalaman ${widget.formatLandArea(_selectedMedium.assumedDepthCm)} cm, bulk density ${widget.formatLandArea(_selectedMedium.bulkDensityKgPerM3)} kg/m3. ${_selectedMedium.note}',
