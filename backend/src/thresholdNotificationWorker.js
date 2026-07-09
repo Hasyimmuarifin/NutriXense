@@ -133,12 +133,23 @@ async function sendThresholdNotification(alerts, reading) {
         type: 'threshold_alert',
         sensorReadingId: reading.id,
         alertCount: String(alerts.length),
+        logId: logRef.id,
       },
       android: {
+        collapseKey: `threshold_alert_${logRef.id}`,
         priority: 'high',
+        ttl: 5 * 60 * 1000,
         notification: {
+          title,
+          body,
           channelId: config.automation.fcmChannelId,
+          icon: 'ic_nutrixense_notification',
+          color: '#2E7D32',
           sound: 'default',
+          defaultSound: true,
+          priority: 'max',
+          visibility: 'public',
+          notificationCount: alerts.length,
         },
       },
     });

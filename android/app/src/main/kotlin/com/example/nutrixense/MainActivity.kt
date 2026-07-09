@@ -1,6 +1,7 @@
 package com.example.nutrixense
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
@@ -23,6 +27,9 @@ class MainActivity : FlutterActivity() {
     private val notificationChannelId = "nutrixense_threshold_alerts"
     private val fcmNotificationChannelId = "nutrixense_fcm_alerts"
     private val notificationPermissionRequestCode = 4102
+    private val alertGroupKey = "com.example.nutrixense.ALERT_NOTIFICATIONS"
+    private val alertGroupSummaryId = 4199
+    private val notificationColor = Color.rgb(46, 125, 50)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -180,6 +187,7 @@ class MainActivity : FlutterActivity() {
         ).apply {
             description = "Memberi peringatan saat pembacaan nutrisi tanaman keluar dari ambang batas normal yang dikonfigurasi."
             enableVibration(true)
+            setShowBadge(true)
             setSound(soundUri, audioAttributes)
         }
 
@@ -203,6 +211,7 @@ class MainActivity : FlutterActivity() {
         ).apply {
             description = "Notifikasi push yang dikirim melalui Firebase Cloud Messaging."
             enableVibration(true)
+            setShowBadge(true)
             setSound(soundUri, audioAttributes)
         }
 
@@ -307,17 +316,74 @@ class MainActivity : FlutterActivity() {
                 .setDefaults(android.app.Notification.DEFAULT_SOUND or android.app.Notification.DEFAULT_VIBRATE)
         }
 
-        val notification = builder
+        val notification = withBadgeIcon(withGroupAlertBehavior(builder))
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
+            .setLargeIcon(notificationLargeIcon())
+            .setColor(notificationColor)
+            .setNumber(1)
             .setContentTitle(title)
             .setContentText(message.lines().firstOrNull() ?: message)
             .setStyle(android.app.Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
+            .setGroup(alertGroupKey)
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 350, 150, 350))
             .build()
 
         manager.notify(System.currentTimeMillis().toInt(), notification)
+        showAlertGroupSummary(manager, pendingIntent)
+    }
+
+    private fun showAlertGroupSummary(
+        manager: NotificationManager,
+        pendingIntent: PendingIntent
+    ) {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, notificationChannelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+                .setPriority(Notification.PRIORITY_HIGH)
+        }
+
+        val notification = withBadgeIcon(withGroupAlertBehavior(builder))
+            .setSmallIcon(R.drawable.ic_nutrixense_notification)
+            .setLargeIcon(notificationLargeIcon())
+            .setColor(notificationColor)
+            .setNumber(1)
+            .setContentTitle("Peringatan NutriXense")
+            .setContentText("Buka aplikasi untuk melihat semua peringatan terbaru.")
+            .setStyle(
+                Notification.InboxStyle()
+                    .setSummaryText("Peringatan NutriXense")
+                    .addLine("Ada beberapa notifikasi peringatan nutrisi.")
+            )
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setGroup(alertGroupKey)
+            .setGroupSummary(true)
+            .build()
+
+        manager.notify(alertGroupSummaryId, notification)
+    }
+
+    private fun withGroupAlertBehavior(builder: Notification.Builder): Notification.Builder {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+        }
+        return builder
+    }
+
+    private fun withBadgeIcon(builder: Notification.Builder): Notification.Builder {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setBadgeIconType(Notification.BADGE_ICON_LARGE)
+        }
+        return builder
+    }
+
+    private fun notificationLargeIcon(): Bitmap? {
+        return BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
     }
 }

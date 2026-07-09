@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -39,6 +41,7 @@ class FcmNotificationService {
 
     _messaging.onTokenRefresh.listen((token) {
       debugPrint('FCM registration token refreshed: $token');
+      unawaited(_subscribeToTopic());
     });
   }
 
@@ -73,20 +76,17 @@ class FcmNotificationService {
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    if (message.data['type']?.toString() == 'threshold_alert') {
-      debugPrint(
-        'Foreground threshold FCM received; local display is handled by alert logs.',
-      );
-      return;
-    }
-
     final title = message.notification?.title ??
         message.data['title']?.toString() ??
-        'NutriXense notification';
+        (message.data['type']?.toString() == 'threshold_alert'
+            ? 'Peringatan Nutrisi Tanaman'
+            : 'NutriXense notification');
     final body = message.notification?.body ??
         message.data['body']?.toString() ??
         message.data['message']?.toString() ??
-        'A new NutriXense update is available.';
+        (message.data['type']?.toString() == 'threshold_alert'
+            ? 'Pembacaan sensor berada di luar ambang batas normal.'
+            : 'A new NutriXense update is available.');
 
     debugPrint('FCM foreground message received: ${message.messageId}');
 

@@ -82,14 +82,12 @@ class _MyAppState extends State<MyApp> {
       }),
     );
 
-    unawaited(
-      FcmNotificationService.instance
-          .initialize()
-          .timeout(const Duration(seconds: 15))
-          .catchError((error) {
-        debugPrint('FCM service startup skipped: $error');
-      }),
-    );
+    await FcmNotificationService.instance
+        .initialize()
+        .timeout(const Duration(seconds: 15))
+        .catchError((error) {
+      debugPrint('FCM service startup skipped: $error');
+    });
   }
 
   // This widget is the root of your application.

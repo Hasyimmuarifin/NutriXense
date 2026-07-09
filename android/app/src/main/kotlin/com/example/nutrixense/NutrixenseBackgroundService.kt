@@ -9,6 +9,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
@@ -55,8 +58,10 @@ class NutrixenseBackgroundService : Service() {
 
         private const val FOREGROUND_NOTIFICATION_ID = 2201
         private const val ALERT_NOTIFICATION_BASE_ID = 4200
+        private const val ALERT_GROUP_SUMMARY_ID = 4199
         private const val MONITOR_CHANNEL_ID = "nutrixense_background_monitor"
         private const val ALERT_CHANNEL_ID = "nutrixense_threshold_alerts"
+        private const val ALERT_GROUP_KEY = "com.example.nutrixense.ALERT_NOTIFICATIONS"
 
         @Volatile
         var isServiceRunning: Boolean = false
@@ -144,6 +149,7 @@ class NutrixenseBackgroundService : Service() {
     private val fuzzyMinPulseMillis = 3_000L
     private val fuzzyMediumPulseMillis = 5_000L
     private val fuzzyMaxPulseMillis = 10_000L
+    private val notificationColor = Color.rgb(46, 125, 50)
 
     override fun onCreate() {
         super.onCreate()
@@ -681,6 +687,7 @@ class NutrixenseBackgroundService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Menjaga pemantauan MQTT dan DSS tetap aktif."
+                setShowBadge(false)
             }
         )
 
@@ -692,6 +699,7 @@ class NutrixenseBackgroundService : Service() {
             ).apply {
                 description = "Memberi peringatan saat pembacaan nutrisi tanaman keluar dari ambang yang dikonfigurasi."
                 enableVibration(true)
+                setShowBadge(true)
                 setSound(soundUri, audioAttributes)
             }
         )
@@ -716,8 +724,10 @@ class NutrixenseBackgroundService : Service() {
                 .setPriority(Notification.PRIORITY_LOW)
         }
 
-        return builder
+        return withBadgeIcon(builder)
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
+            .setLargeIcon(notificationLargeIcon())
+            .setColor(notificationColor)
             .setContentTitle("NutriXense Berjalan di Latar Belakang")
             .setContentText("Aplikasi NutriXense mendukung berjalan di Latar Belakang untuk tetap memberikan notifikasi dan informasi penting setiap hari dan setiap saat.")
             .setContentIntent(pendingIntent)
@@ -753,18 +763,75 @@ class NutrixenseBackgroundService : Service() {
                 .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
         }
 
-        val notification = builder
+        val notification = withBadgeIcon(withGroupAlertBehavior(builder))
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
+            .setLargeIcon(notificationLargeIcon())
+            .setColor(notificationColor)
+            .setNumber(1)
             .setContentTitle(title)
             .setContentText(message.lines().firstOrNull() ?: message)
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
+            .setGroup(ALERT_GROUP_KEY)
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 350, 150, 350))
             .build()
 
         manager.notify(ALERT_NOTIFICATION_BASE_ID + (System.currentTimeMillis() % 1000).toInt(), notification)
+        showAlertGroupSummary(manager, pendingIntent)
+    }
+
+    private fun showAlertGroupSummary(
+        manager: NotificationManager,
+        pendingIntent: PendingIntent
+    ) {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, ALERT_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+                .setPriority(Notification.PRIORITY_HIGH)
+        }
+
+        val notification = withBadgeIcon(withGroupAlertBehavior(builder))
+            .setSmallIcon(R.drawable.ic_nutrixense_notification)
+            .setLargeIcon(notificationLargeIcon())
+            .setColor(notificationColor)
+            .setNumber(1)
+            .setContentTitle("Peringatan NutriXense")
+            .setContentText("Buka aplikasi untuk melihat semua peringatan terbaru.")
+            .setStyle(
+                Notification.InboxStyle()
+                    .setSummaryText("Peringatan NutriXense")
+                    .addLine("Ada beberapa notifikasi peringatan nutrisi.")
+            )
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setGroup(ALERT_GROUP_KEY)
+            .setGroupSummary(true)
+            .build()
+
+        manager.notify(ALERT_GROUP_SUMMARY_ID, notification)
+    }
+
+    private fun withGroupAlertBehavior(builder: Notification.Builder): Notification.Builder {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+        }
+        return builder
+    }
+
+    private fun withBadgeIcon(builder: Notification.Builder): Notification.Builder {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setBadgeIconType(Notification.BADGE_ICON_LARGE)
+        }
+        return builder
+    }
+
+    private fun notificationLargeIcon(): Bitmap? {
+        return BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
     }
 
     private fun formatNumber(value: Double): String {
