@@ -120,6 +120,14 @@ class LogAlertBadgeService {
     ]);
   }
 
+  Future<void> clearNativeAlertBadgeNotifications() async {
+    try {
+      await _alertsChannel.invokeMethod<void>('clearAlertBadgeNotifications');
+    } on PlatformException catch (error) {
+      debugPrint('Native alert badge clear skipped: ${error.message}');
+    }
+  }
+
   void dispose() {
     _pumpSubscription?.cancel();
     _alertSubscription?.cancel();
@@ -172,12 +180,17 @@ class LogAlertBadgeService {
 
       final title = data['title']?.toString() ?? 'Peringatan Nutrisi Tanaman';
       final message = data['body']?.toString() ?? _messageFromAlerts(data);
+      final recentAlertCount =
+          int.tryParse(data['recentAlertCount']?.toString() ?? '');
+      final notificationKey = data['notificationKey']?.toString() ?? doc.id;
       if (message.trim().isEmpty) continue;
 
       try {
         await _alertsChannel.invokeMethod<void>('showNutrientAlert', {
           'title': title,
           'message': message,
+          if (recentAlertCount != null) 'recentAlertCount': recentAlertCount,
+          if (notificationKey.isNotEmpty) 'notificationKey': notificationKey,
         });
       } on PlatformException catch (error) {
         debugPrint('Alert log fallback notification skipped: ${error.message}');

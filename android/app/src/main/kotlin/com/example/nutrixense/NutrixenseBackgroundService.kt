@@ -9,8 +9,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.RingtoneManager
@@ -58,10 +56,15 @@ class NutrixenseBackgroundService : Service() {
 
         private const val FOREGROUND_NOTIFICATION_ID = 2201
         private const val ALERT_NOTIFICATION_BASE_ID = 4200
+        private const val ALERT_CHILD_LIMIT = 15
         private const val ALERT_GROUP_SUMMARY_ID = 4199
         private const val MONITOR_CHANNEL_ID = "nutrixense_background_monitor"
         private const val ALERT_CHANNEL_ID = "nutrixense_threshold_alerts"
         private const val ALERT_GROUP_KEY = "com.example.nutrixense.ALERT_NOTIFICATIONS"
+        private const val NOTIFICATION_STATE_PREFS_NAME = "nutrixense_notification_state"
+        private const val PREF_ALERT_TIMESTAMPS = "alert_timestamps"
+        private const val PREF_NEXT_ALERT_SLOT = "next_alert_slot"
+        private const val ALERT_WINDOW_MILLIS = 60 * 60 * 1000L
 
         @Volatile
         var isServiceRunning: Boolean = false
@@ -726,7 +729,6 @@ class NutrixenseBackgroundService : Service() {
 
         return withBadgeIcon(builder)
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
-            .setLargeIcon(notificationLargeIcon())
             .setColor(notificationColor)
             .setContentTitle("NutriXense Berjalan di Latar Belakang")
             .setContentText("Aplikasi NutriXense mendukung berjalan di Latar Belakang untuk tetap memberikan notifikasi dan informasi penting setiap hari dan setiap saat.")
@@ -753,6 +755,8 @@ class NutrixenseBackgroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val currentAlertCount = countAlertLines(message)
+        val recentAlertCount = recordRecentAlerts(currentAlertCount)
 
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, ALERT_CHANNEL_ID)
@@ -765,11 +769,10 @@ class NutrixenseBackgroundService : Service() {
 
         val notification = withBadgeIcon(withGroupAlertBehavior(builder))
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
-            .setLargeIcon(notificationLargeIcon())
             .setColor(notificationColor)
-            .setNumber(1)
+            .setNumber(currentAlertCount)
             .setContentTitle(title)
-            .setContentText(message.lines().firstOrNull() ?: message)
+            .setContentText(firstAlertLine(message))
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
@@ -778,13 +781,14 @@ class NutrixenseBackgroundService : Service() {
             .setVibrate(longArrayOf(0, 350, 150, 350))
             .build()
 
-        manager.notify(ALERT_NOTIFICATION_BASE_ID + (System.currentTimeMillis() % 1000).toInt(), notification)
-        showAlertGroupSummary(manager, pendingIntent)
+        manager.notify(nextAlertChildNotificationId(), notification)
+        showAlertGroupSummary(manager, pendingIntent, recentAlertCount)
     }
 
     private fun showAlertGroupSummary(
         manager: NotificationManager,
-        pendingIntent: PendingIntent
+        pendingIntent: PendingIntent,
+        recentAlertCount: Int
     ) {
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, ALERT_CHANNEL_ID)
@@ -794,21 +798,22 @@ class NutrixenseBackgroundService : Service() {
                 .setPriority(Notification.PRIORITY_HIGH)
         }
 
+        val summaryText = alertSummaryText(recentAlertCount)
         val notification = withBadgeIcon(withGroupAlertBehavior(builder))
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
-            .setLargeIcon(notificationLargeIcon())
             .setColor(notificationColor)
-            .setNumber(1)
+            .setNumber(recentAlertCount)
             .setContentTitle("Peringatan NutriXense")
-            .setContentText("Buka aplikasi untuk melihat semua peringatan terbaru.")
+            .setContentText(summaryText)
             .setStyle(
                 Notification.InboxStyle()
                     .setSummaryText("Peringatan NutriXense")
-                    .addLine("Ada beberapa notifikasi peringatan nutrisi.")
+                    .addLine(summaryText)
             )
             .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
             .setOnlyAlertOnce(true)
+            .setOngoing(true)
             .setGroup(ALERT_GROUP_KEY)
             .setGroupSummary(true)
             .build()
@@ -825,13 +830,52 @@ class NutrixenseBackgroundService : Service() {
 
     private fun withBadgeIcon(builder: Notification.Builder): Notification.Builder {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder.setBadgeIconType(Notification.BADGE_ICON_LARGE)
+            builder.setBadgeIconType(Notification.BADGE_ICON_SMALL)
         }
         return builder
     }
 
-    private fun notificationLargeIcon(): Bitmap? {
-        return BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+    private fun firstAlertLine(message: String): String {
+        return message.lines().firstOrNull { it.isNotBlank() } ?: message
+    }
+
+    private fun countAlertLines(message: String): Int {
+        return message.lines().count { it.isNotBlank() }.coerceAtLeast(1)
+    }
+
+    private fun alertSummaryText(recentAlertCount: Int): String {
+        return "$recentAlertCount peringatan nutrisi terdeteksi dalam 1 jam terakhir. Buka halaman Logs untuk melihat detail."
+    }
+
+    private fun nextAlertChildNotificationId(): Int {
+        val prefs = getSharedPreferences(NOTIFICATION_STATE_PREFS_NAME, Context.MODE_PRIVATE)
+        val slot = prefs.getInt(PREF_NEXT_ALERT_SLOT, 0).coerceIn(0, ALERT_CHILD_LIMIT - 1)
+        prefs.edit()
+            .putInt(PREF_NEXT_ALERT_SLOT, (slot + 1) % ALERT_CHILD_LIMIT)
+            .apply()
+        return ALERT_NOTIFICATION_BASE_ID + slot
+    }
+
+    private fun recordRecentAlerts(alertCount: Int): Int {
+        val now = System.currentTimeMillis()
+        val prefs = getSharedPreferences(NOTIFICATION_STATE_PREFS_NAME, Context.MODE_PRIVATE)
+        val retained = prefs.getString(PREF_ALERT_TIMESTAMPS, "")
+            .orEmpty()
+            .split(',')
+            .mapNotNull { it.toLongOrNull() }
+            .filter { now - it <= ALERT_WINDOW_MILLIS }
+            .toMutableList()
+
+        repeat(alertCount.coerceAtLeast(1)) {
+            retained.add(now)
+        }
+
+        val capped = retained.takeLast(300)
+        prefs.edit()
+            .putString(PREF_ALERT_TIMESTAMPS, capped.joinToString(","))
+            .apply()
+
+        return capped.size
     }
 
     private fun formatNumber(value: Double): String {

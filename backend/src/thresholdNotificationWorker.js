@@ -3,12 +3,35 @@ const { config } = require('./config');
 const { sensorReadingFromFirestore } = require('./readingUtils');
 const { abnormalReadings, buildThresholds } = require('./thresholdRules');
 
+const SUMMARY_WINDOW_MS = 60 * 60 * 1000;
+
 function formatValue(value) {
   return Number(value).toFixed(1);
 }
 
 function formatAlertLine(alert) {
   return `${alert.label}: ${formatValue(alert.value)} ${alert.unit} is ${alert.direction} ${formatValue(alert.threshold)} ${alert.unit}`;
+}
+
+function alertCountForLogData(data = {}) {
+  return Array.isArray(data.alerts) && data.alerts.length > 0
+    ? data.alerts.length
+    : 1;
+}
+
+async function countRecentAlertLogs(currentAlerts) {
+  const since = admin.firestore.Timestamp.fromMillis(Date.now() - SUMMARY_WINDOW_MS);
+  const snapshot = await db
+    .collection(config.firestore.thresholdAlertLogsCollection)
+    .where('createdAt', '>=', since)
+    .limit(300)
+    .get();
+
+  let count = currentAlerts.length;
+  snapshot.docs.forEach((doc) => {
+    count += alertCountForLogData(doc.data());
+  });
+  return count;
 }
 
 function readMutedSensors(...configs) {
@@ -105,14 +128,18 @@ async function loadLatestReading() {
 }
 
 async function sendThresholdNotification(alerts, reading) {
-  const body = alerts.map(formatAlertLine).join('\n');
+  const detailBody = alerts.map(formatAlertLine).join('\n');
   const title = 'Peringatan Nutrisi Tanaman';
   const logRef = db.collection(config.firestore.thresholdAlertLogsCollection).doc();
+  const recentAlertCount = await countRecentAlertLogs(alerts);
+  const body = `${recentAlertCount} peringatan nutrisi terdeteksi dalam 1 jam terakhir. Buka halaman Logs untuk melihat detail.`;
 
   await logRef.set({
     topic: config.automation.fcmTopic,
     title,
-    body,
+    body: detailBody,
+    summaryBody: body,
+    recentAlertCount,
     alerts,
     sensorReadingId: reading.id,
     deliveryStatus: 'pending',
@@ -122,35 +149,21 @@ async function sendThresholdNotification(alerts, reading) {
   try {
     const response = await admin.messaging().send({
       topic: config.automation.fcmTopic,
-      notification: {
-        title,
-        body,
-      },
       data: {
         title,
         body,
+        detailBody,
         message: body,
         type: 'threshold_alert',
         sensorReadingId: reading.id,
         alertCount: String(alerts.length),
+        recentAlertCount: String(recentAlertCount),
         logId: logRef.id,
+        notificationKey: logRef.id,
       },
       android: {
-        collapseKey: `threshold_alert_${logRef.id}`,
         priority: 'high',
-        ttl: 5 * 60 * 1000,
-        notification: {
-          title,
-          body,
-          channelId: config.automation.fcmChannelId,
-          icon: 'ic_nutrixense_notification',
-          color: '#2E7D32',
-          sound: 'default',
-          defaultSound: true,
-          priority: 'max',
-          visibility: 'public',
-          notificationCount: alerts.length,
-        },
+        ttl: 60 * 60 * 1000,
       },
     });
 

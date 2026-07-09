@@ -35,13 +35,29 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late Future<void> _startupFuture;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startupFuture = _initializeApp();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(
+        LogAlertBadgeService.instance.clearNativeAlertBadgeNotifications(),
+      );
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -88,6 +104,8 @@ class _MyAppState extends State<MyApp> {
         .catchError((error) {
       debugPrint('FCM service startup skipped: $error');
     });
+
+    await LogAlertBadgeService.instance.clearNativeAlertBadgeNotifications();
   }
 
   // This widget is the root of your application.

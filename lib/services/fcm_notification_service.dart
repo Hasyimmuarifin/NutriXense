@@ -87,13 +87,21 @@ class FcmNotificationService {
         (message.data['type']?.toString() == 'threshold_alert'
             ? 'Pembacaan sensor berada di luar ambang batas normal.'
             : 'A new NutriXense update is available.');
+    final detailBody = message.data['detailBody']?.toString();
+    final recentAlertCount =
+        int.tryParse(message.data['recentAlertCount']?.toString() ?? '');
+    final notificationKey = message.data['notificationKey']?.toString() ??
+        message.data['logId']?.toString();
 
     debugPrint('FCM foreground message received: ${message.messageId}');
 
     try {
       await _alertsChannel.invokeMethod<void>('showNutrientAlert', {
         'title': title,
-        'message': body,
+        'message': detailBody?.trim().isNotEmpty == true ? detailBody : body,
+        if (recentAlertCount != null) 'recentAlertCount': recentAlertCount,
+        if (notificationKey?.isNotEmpty == true)
+          'notificationKey': notificationKey,
       });
     } on PlatformException catch (error) {
       debugPrint('FCM foreground notification failed: ${error.message}');

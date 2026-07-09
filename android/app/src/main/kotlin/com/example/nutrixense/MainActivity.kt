@@ -9,8 +9,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.RingtoneManager
@@ -29,6 +27,13 @@ class MainActivity : FlutterActivity() {
     private val notificationPermissionRequestCode = 4102
     private val alertGroupKey = "com.example.nutrixense.ALERT_NOTIFICATIONS"
     private val alertGroupSummaryId = 4199
+    private val alertChildBaseId = 4200
+    private val alertChildLimit = 15
+    private val alertWindowMillis = 60 * 60 * 1000L
+    private val notificationStatePrefsName = "nutrixense_notification_state"
+    private val alertTimestampPrefsKey = "alert_timestamps"
+    private val nextAlertSlotPrefsKey = "next_alert_slot"
+    private val displayedAlertKeysPrefsKey = "displayed_alert_keys"
     private val notificationColor = Color.rgb(46, 125, 50)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -50,11 +55,18 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "clearAlertBadgeNotifications" -> {
+                    clearAlertBadgeNotifications()
+                    result.success(null)
+                }
+
                 "showNutrientAlert" -> {
                     val title = call.argument<String>("title") ?: "Peringatan Nutrisi Tanaman"
                     val message = call.argument<String>("message") ?: "Pembacaan sensor berada di luar ambang batas normal."
+                    val recentAlertCount = call.argument<Int>("recentAlertCount")
+                    val notificationKey = call.argument<String>("notificationKey")
 
-                    showThresholdAlert(title, message)
+                    showThresholdAlert(title, message, recentAlertCount, notificationKey)
                     result.success(null)
                 }
 
@@ -287,13 +299,19 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun showThresholdAlert(title: String, message: String) {
+    private fun showThresholdAlert(
+        title: String,
+        message: String,
+        providedRecentAlertCount: Int? = null,
+        notificationKey: String? = null
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             requestNotificationPermissionIfNeeded()
             return
         }
+        if (shouldSkipDuplicateNotification(notificationKey)) return
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val intent = Intent(this, MainActivity::class.java).apply {
@@ -306,6 +324,8 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val currentAlertCount = countAlertLines(message)
+        val recentAlertCount = providedRecentAlertCount ?: recordRecentAlerts(currentAlertCount)
 
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             android.app.Notification.Builder(this, notificationChannelId)
@@ -318,11 +338,10 @@ class MainActivity : FlutterActivity() {
 
         val notification = withBadgeIcon(withGroupAlertBehavior(builder))
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
-            .setLargeIcon(notificationLargeIcon())
             .setColor(notificationColor)
-            .setNumber(1)
+            .setNumber(currentAlertCount)
             .setContentTitle(title)
-            .setContentText(message.lines().firstOrNull() ?: message)
+            .setContentText(firstAlertLine(message))
             .setStyle(android.app.Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
@@ -331,13 +350,14 @@ class MainActivity : FlutterActivity() {
             .setVibrate(longArrayOf(0, 350, 150, 350))
             .build()
 
-        manager.notify(System.currentTimeMillis().toInt(), notification)
-        showAlertGroupSummary(manager, pendingIntent)
+        manager.notify(nextAlertChildNotificationId(), notification)
+        showAlertGroupSummary(manager, pendingIntent, recentAlertCount)
     }
 
     private fun showAlertGroupSummary(
         manager: NotificationManager,
-        pendingIntent: PendingIntent
+        pendingIntent: PendingIntent,
+        recentAlertCount: Int
     ) {
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, notificationChannelId)
@@ -347,21 +367,22 @@ class MainActivity : FlutterActivity() {
                 .setPriority(Notification.PRIORITY_HIGH)
         }
 
+        val summaryText = alertSummaryText(recentAlertCount)
         val notification = withBadgeIcon(withGroupAlertBehavior(builder))
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
-            .setLargeIcon(notificationLargeIcon())
             .setColor(notificationColor)
-            .setNumber(1)
+            .setNumber(recentAlertCount)
             .setContentTitle("Peringatan NutriXense")
-            .setContentText("Buka aplikasi untuk melihat semua peringatan terbaru.")
+            .setContentText(summaryText)
             .setStyle(
                 Notification.InboxStyle()
                     .setSummaryText("Peringatan NutriXense")
-                    .addLine("Ada beberapa notifikasi peringatan nutrisi.")
+                    .addLine(summaryText)
             )
             .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
             .setOnlyAlertOnce(true)
+            .setOngoing(true)
             .setGroup(alertGroupKey)
             .setGroupSummary(true)
             .build()
@@ -378,12 +399,83 @@ class MainActivity : FlutterActivity() {
 
     private fun withBadgeIcon(builder: Notification.Builder): Notification.Builder {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder.setBadgeIconType(Notification.BADGE_ICON_LARGE)
+            builder.setBadgeIconType(Notification.BADGE_ICON_SMALL)
         }
         return builder
     }
 
-    private fun notificationLargeIcon(): Bitmap? {
-        return BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+    private fun firstAlertLine(message: String): String {
+        return message.lines().firstOrNull { it.isNotBlank() } ?: message
+    }
+
+    private fun countAlertLines(message: String): Int {
+        return message.lines().count { it.isNotBlank() }.coerceAtLeast(1)
+    }
+
+    private fun alertSummaryText(recentAlertCount: Int): String {
+        return "$recentAlertCount peringatan nutrisi terdeteksi dalam 1 jam terakhir. Buka halaman Logs untuk melihat detail."
+    }
+
+    private fun nextAlertChildNotificationId(): Int {
+        val prefs = getSharedPreferences(notificationStatePrefsName, Context.MODE_PRIVATE)
+        val slot = prefs.getInt(nextAlertSlotPrefsKey, 0).coerceIn(0, alertChildLimit - 1)
+        prefs.edit()
+            .putInt(nextAlertSlotPrefsKey, (slot + 1) % alertChildLimit)
+            .apply()
+        return alertChildBaseId + slot
+    }
+
+    private fun recordRecentAlerts(alertCount: Int): Int {
+        val now = System.currentTimeMillis()
+        val prefs = getSharedPreferences(notificationStatePrefsName, Context.MODE_PRIVATE)
+        val retained = prefs.getString(alertTimestampPrefsKey, "")
+            .orEmpty()
+            .split(',')
+            .mapNotNull { it.toLongOrNull() }
+            .filter { now - it <= alertWindowMillis }
+            .toMutableList()
+
+        repeat(alertCount.coerceAtLeast(1)) {
+            retained.add(now)
+        }
+
+        val capped = retained.takeLast(300)
+        prefs.edit()
+            .putString(alertTimestampPrefsKey, capped.joinToString(","))
+            .apply()
+
+        return capped.size
+    }
+
+    private fun clearAlertBadgeNotifications() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(alertGroupSummaryId)
+        for (slot in 0 until alertChildLimit) {
+            manager.cancel(alertChildBaseId + slot)
+        }
+
+        getSharedPreferences(notificationStatePrefsName, Context.MODE_PRIVATE)
+            .edit()
+            .remove(alertTimestampPrefsKey)
+            .remove(displayedAlertKeysPrefsKey)
+            .apply()
+    }
+
+    private fun shouldSkipDuplicateNotification(notificationKey: String?): Boolean {
+        val key = notificationKey?.takeIf { it.isNotBlank() } ?: return false
+        val prefs = getSharedPreferences(notificationStatePrefsName, Context.MODE_PRIVATE)
+        val displayedKeys = prefs.getString(displayedAlertKeysPrefsKey, "")
+            .orEmpty()
+            .split(',')
+            .filter { it.isNotBlank() }
+
+        if (displayedKeys.contains(key)) return true
+
+        val capped = (displayedKeys + key).takeLast(100)
+        prefs.edit()
+            .putString(displayedAlertKeysPrefsKey, capped.joinToString(","))
+            .apply()
+
+        return false
     }
 }

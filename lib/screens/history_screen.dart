@@ -40,6 +40,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   int _pageIndex = 0;
   int _totalRows = 0;
   static const int _pageSize = 100;
+  static const int _pdfMaxSampleRows = 720;
+  static const int _pdfMaxPages = 120;
 
   List<SensorDataPoint> _pageData = [];
   final Set<String> _knownHistoryDocIds = {};
@@ -719,7 +721,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       title: 'NutriXense Historical Sensor Data',
       author: 'NutriXense',
     );
-    final chartData = exportData;
+    final chartData = _samplePdfData(exportData);
+    final tableData = _samplePdfData(exportData);
+    final isSampledPdf = tableData.length < exportData.length;
     final logoData = await rootBundle
         .load('assets/images/New_NutriXense Letter Logo v1.png');
     final logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
@@ -728,6 +732,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
+        maxPages: _pdfMaxPages,
         footer: (context) => pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
@@ -744,7 +749,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
           pw.SizedBox(height: 3),
           pw.Text(
-            'Setiap indikator ditampilkan pada grafik terpisah dengan skala nilainya masing-masing.',
+            isSampledPdf
+                ? 'PDF menampilkan sampel ${chartData.length} dari ${exportData.length} data agar laporan tetap ringan. Data lengkap tersedia melalui ekspor CSV atau XLSX.'
+                : 'Setiap indikator ditampilkan pada grafik terpisah dengan skala nilainya masing-masing.',
             style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
           ),
           pw.SizedBox(height: 8),
@@ -755,9 +762,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
             style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 8),
+          if (isSampledPdf) ...[
+            _buildPdfSampleNotice(exportData.length, tableData.length),
+            pw.SizedBox(height: 8),
+          ],
           pw.TableHelper.fromTextArray(
             headers: _historyTableHeaders,
-            data: exportData.map(_exportRow).toList(),
+            data: tableData.map(_exportRow).toList(),
             border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.4),
             headerDecoration:
                 const pw.BoxDecoration(color: PdfColor(0.14, 0.48, 0.35)),
@@ -785,6 +796,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
 
     return document.save();
+  }
+
+  List<SensorDataPoint> _samplePdfData(List<SensorDataPoint> source) {
+    if (source.length <= _pdfMaxSampleRows) return source;
+    if (_pdfMaxSampleRows <= 1) return [source.first];
+
+    final sampled = <SensorDataPoint>[];
+    var lastIndex = -1;
+    final lastSourceIndex = source.length - 1;
+    final lastSampleIndex = _pdfMaxSampleRows - 1;
+
+    for (var index = 0; index < _pdfMaxSampleRows; index++) {
+      final sourceIndex = ((index * lastSourceIndex) / lastSampleIndex).round();
+      if (sourceIndex == lastIndex) continue;
+      sampled.add(source[sourceIndex]);
+      lastIndex = sourceIndex;
+    }
+
+    if (sampled.last != source.last) {
+      sampled[sampled.length - 1] = source.last;
+    }
+
+    return sampled;
+  }
+
+  pw.Widget _buildPdfSampleNotice(int totalRows, int sampledRows) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.green50,
+        border: pw.Border.all(color: PdfColors.green200, width: 0.6),
+      ),
+      child: pw.Text(
+        'Catatan: PDF ini menampilkan $sampledRows sampel representatif dari $totalRows baris data historis. Untuk arsip lengkap tanpa sampling, gunakan ekspor CSV atau XLSX.',
+        style: const pw.TextStyle(fontSize: 8, color: PdfColors.green900),
+      ),
+    );
   }
 
   pw.Widget _buildPdfReportHeader(pw.MemoryImage logoImage) {
