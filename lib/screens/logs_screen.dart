@@ -616,8 +616,13 @@ class _LogsScreenState extends State<LogsScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: log.pumpLabels
-                .map((label) => _buildInfoChip(label, AppTheme.primaryGreen))
+            children: log.pumpDetails
+                .map(
+                  (detail) => _buildInfoChip(
+                    '${detail.label} • ${detail.durationSeconds} detik',
+                    AppTheme.primaryGreen,
+                  ),
+                )
                 .toList(),
           ),
           if (log.sourceLabel.isNotEmpty) ...[
@@ -1104,7 +1109,7 @@ class _PumpActivityLog {
   const _PumpActivityLog({
     required this.reference,
     required this.reason,
-    required this.pumpLabels,
+    required this.pumpDetails,
     required this.durationSeconds,
     required this.time,
     required this.sourceLabel,
@@ -1113,7 +1118,7 @@ class _PumpActivityLog {
 
   final DocumentReference<Map<String, dynamic>> reference;
   final String reason;
-  final List<String> pumpLabels;
+  final List<_PumpDurationDetail> pumpDetails;
   final int durationSeconds;
   final DateTime? time;
   final String sourceLabel;
@@ -1150,21 +1155,49 @@ class _PumpActivityLog {
         ? labels
         : relays.map((relay) => 'Relay $relay').toList(growable: false);
     final durationMs = _readInt(data['durationMs']);
+    final durationMsByRelay = _readIntMap(data['durationMsByRelay']);
+    final fallbackSeconds = durationMs <= 0 ? 0 : (durationMs / 1000).round();
     final action =
         _readString(data['action'], fallback: _readString(metadata['state']))
             .toLowerCase();
+    final pumpDetails = _buildPumpDetails(
+      pumpLabels: pumpLabels.isEmpty ? ['Pompa tidak diketahui'] : pumpLabels,
+      relays: relays,
+      durationMsByRelay: durationMsByRelay,
+      fallbackSeconds: fallbackSeconds,
+    );
 
     return _PumpActivityLog(
       reference: reference,
       reason: _readString(data['reason'], fallback: 'Aktivitas Pompa'),
-      pumpLabels: pumpLabels.isEmpty ? ['Pompa tidak diketahui'] : pumpLabels,
-      durationSeconds: durationMs <= 0 ? 0 : (durationMs / 1000).round(),
+      pumpDetails: pumpDetails,
+      durationSeconds: fallbackSeconds,
       time: _readDate(data['createdAt']) ??
           _readDate(data['finishedAt']) ??
           _readDate(data['startedAt']),
       sourceLabel: _sourceLabel(_readString(metadata['source'])),
       action: action,
     );
+  }
+
+  static List<_PumpDurationDetail> _buildPumpDetails({
+    required List<String> pumpLabels,
+    required List<int> relays,
+    required Map<int, int> durationMsByRelay,
+    required int fallbackSeconds,
+  }) {
+    return pumpLabels.asMap().entries.map((entry) {
+      final relay = entry.key < relays.length ? relays[entry.key] : null;
+      final durationMs = relay == null ? null : durationMsByRelay[relay];
+      final seconds = durationMs == null || durationMs <= 0
+          ? fallbackSeconds
+          : (durationMs / 1000).round();
+
+      return _PumpDurationDetail(
+        label: entry.value,
+        durationSeconds: seconds,
+      );
+    }).toList(growable: false);
   }
 
   static String _sourceLabel(String value) {
@@ -1181,6 +1214,16 @@ class _PumpActivityLog {
         return value;
     }
   }
+}
+
+class _PumpDurationDetail {
+  const _PumpDurationDetail({
+    required this.label,
+    required this.durationSeconds,
+  });
+
+  final String label;
+  final int durationSeconds;
 }
 
 class _ThresholdAlertLog {
@@ -1265,6 +1308,26 @@ class _ThresholdAlert {
 Map<String, dynamic> _readMap(Object? value) {
   if (value is Map) return Map<String, dynamic>.from(value);
   return const {};
+}
+
+Map<int, int> _readIntMap(Object? value) {
+  if (value is! Map) return const {};
+
+  final result = <int, int>{};
+  for (final entry in value.entries) {
+    final key = entry.key is num
+        ? (entry.key as num).toInt()
+        : int.tryParse(entry.key.toString());
+    final number = entry.value is num
+        ? (entry.value as num).toInt()
+        : int.tryParse(entry.value.toString());
+
+    if (key != null && number != null) {
+      result[key] = number;
+    }
+  }
+
+  return result;
 }
 
 List<String> _readStringList(Object? value) {

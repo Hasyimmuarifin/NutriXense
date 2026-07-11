@@ -17,6 +17,12 @@ import '../services/mqtt_service.dart';
 import '../services/pump_state_service.dart';
 import '../services/rule_based_pump_automation_service.dart';
 
+const int _maxCustomPumpDurationSeconds = 30;
+
+int _clampPumpDurationSeconds(int seconds) {
+  return seconds.clamp(1, _maxCustomPumpDurationSeconds).toInt();
+}
+
 class ControlScreen extends StatefulWidget {
   const ControlScreen({super.key});
 
@@ -224,13 +230,15 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   int _draftDurationForPump(int pumpIndex) {
-    return _draftScheduleDurationsByPump[pumpIndex] ??
-        _draftScheduleDurationSeconds;
+    return _clampPumpDurationSeconds(
+      _draftScheduleDurationsByPump[pumpIndex] ?? _draftScheduleDurationSeconds,
+    );
   }
 
   void _setDraftPumpDuration(int pumpIndex, int seconds) {
     setState(() {
-      _draftScheduleDurationsByPump[pumpIndex] = seconds;
+      _draftScheduleDurationsByPump[pumpIndex] =
+          _clampPumpDurationSeconds(seconds);
       _syncDraftScheduleDuration();
     });
   }
@@ -503,7 +511,7 @@ class _ControlScreenState extends State<ControlScreen> {
                 'end_date': _formatIsoDate(schedule.endDate),
                 'time':
                     '${_twoDigits(schedule.time.hour)}:${_twoDigits(schedule.time.minute)}',
-                'duration_seconds': entry.value,
+                'duration_seconds': _clampPumpDurationSeconds(entry.value),
                 'days': schedule.repeatsDaily
                     ? [1, 2, 3, 4, 5, 6, 7]
                     : [_espDayOfWeek(schedule.startDate)],
@@ -574,6 +582,10 @@ class _ControlScreenState extends State<ControlScreen> {
       schedule.enabled = true;
       schedule.nextRun = nextRun;
     });
+    final delay = nextRun.difference(now);
+    schedule.timer = Timer(delay, () {
+      unawaited(_runSchedule(schedule));
+    });
     if (persist) {
       _saveSchedules();
     }
@@ -593,6 +605,85 @@ class _ControlScreenState extends State<ControlScreen> {
       'Penyiraman otomatis dijadwalkan pada $timeText',
       AppTheme.primaryGreen,
     );
+  }
+
+  Future<void> _runSchedule(_WateringSchedule schedule) async {
+    if (!mounted || !schedule.enabled || schedule.isRunning) return;
+
+    final hasDeviceTelemetry =
+        await _pumpStateService.waitForFreshDeviceTelemetry();
+    if (!_pumpStateService.isConnected || !hasDeviceTelemetry) {
+      if (!mounted) return;
+      _showPlainSnackBar(
+        'Jadwal dibatalkan: perangkat IoT tidak terhubung.',
+        AppTheme.statusLow,
+      );
+      _scheduleNextRun(schedule);
+      return;
+    }
+
+    final startedAt = DateTime.now();
+    final durationEntries = schedule.durationEntries;
+
+    setState(() => schedule.isRunning = true);
+    try {
+      for (final entry in durationEntries) {
+        await _pumpStateService.setRelay(
+          entry.key + 1,
+          true,
+          source: 'schedule_worker',
+          requireConfirmation: true,
+        );
+      }
+
+      final sortedEntries = [...durationEntries]
+        ..sort((a, b) => a.value.compareTo(b.value));
+      for (final entry in sortedEntries) {
+        final remaining = Duration(seconds: entry.value) -
+            DateTime.now().difference(startedAt);
+        if (remaining > Duration.zero) {
+          await Future.delayed(remaining);
+        }
+        await _pumpStateService.setRelay(
+          entry.key + 1,
+          false,
+          source: 'schedule_worker',
+          requireConfirmation: true,
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        _showPlainSnackBar(
+          'Jadwal gagal dijalankan: $error',
+          AppTheme.statusLow,
+        );
+      }
+    } finally {
+      for (final entry in durationEntries) {
+        try {
+          await _pumpStateService.setRelay(
+            entry.key + 1,
+            false,
+            source: 'schedule_worker',
+          );
+        } catch (_) {
+          // Best-effort shutdown when the device is unavailable.
+        }
+      }
+
+      if (mounted) {
+        setState(() => schedule.isRunning = false);
+        if (schedule.repeatsDaily) {
+          _scheduleNextRun(schedule);
+        } else {
+          setState(() {
+            schedule.enabled = false;
+            schedule.nextRun = null;
+          });
+          await _saveSchedules();
+        }
+      }
+    }
   }
 
   void _showPlainSnackBar(
@@ -1086,7 +1177,7 @@ class _ControlScreenState extends State<ControlScreen> {
                     ),
                     SizedBox(height: 3),
                     Text(
-                      'Atur tanggal, waktu, pompa, dan durasi penyiraman.',
+                      'Atur tanggal, waktu, pompa, dan durasi maksimal 30 detik.',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,
@@ -1205,7 +1296,9 @@ class _ControlScreenState extends State<ControlScreen> {
                     if (value) {
                       _draftSchedulePumpIndexes.add(index);
                       _draftScheduleDurationsByPump[index] =
-                          _draftScheduleDurationSeconds;
+                          _clampPumpDurationSeconds(
+                        _draftScheduleDurationSeconds,
+                      );
                     } else {
                       _draftSchedulePumpIndexes.remove(index);
                       _draftScheduleDurationsByPump.remove(index);
@@ -1429,7 +1522,7 @@ class _ControlScreenState extends State<ControlScreen> {
           children: [
             const Expanded(
               child: Text(
-                'Durasi penyiraman',
+                'Durasi penyiraman maks. 30 detik',
                 style: TextStyle(
                   fontSize: 12,
                   color: AppTheme.textSecondary,
@@ -1536,8 +1629,7 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   int _durationSliderMax(int seconds) {
-    if (seconds <= 300) return 300;
-    return seconds + 60;
+    return _maxCustomPumpDurationSeconds;
   }
 
   Widget _buildScheduleListTile(_WateringSchedule schedule) {
@@ -1822,13 +1914,22 @@ class _WateringSchedule {
 
   int get durationSeconds {
     if (durationSecondsByPump.isEmpty) return 1;
-    return durationSecondsByPump.values.reduce(
-      (current, next) => current > next ? current : next,
+    return _clampPumpDurationSeconds(
+      durationSecondsByPump.values.reduce(
+        (current, next) => current > next ? current : next,
+      ),
     );
   }
 
   List<MapEntry<int, int>> get durationEntries {
-    return durationSecondsByPump.entries.toList()
+    return durationSecondsByPump.entries
+        .map(
+          (entry) => MapEntry(
+            entry.key,
+            _clampPumpDurationSeconds(entry.value),
+          ),
+        )
+        .toList()
       ..sort((a, b) => a.key.compareTo(b.key));
   }
 
@@ -1843,7 +1944,7 @@ class _WateringSchedule {
       'durationSeconds': durationSeconds,
       'durationSecondsByPump': {
         for (final entry in durationSecondsByPump.entries)
-          '${entry.key}': entry.value,
+          '${entry.key}': _clampPumpDurationSeconds(entry.value),
       },
       'repeatsDaily': repeatsDaily,
       'enabled': enabled,
@@ -1902,7 +2003,7 @@ class _WateringSchedule {
         if (pumpIndex != null &&
             seconds != null &&
             parsedPumpIndexes.contains(pumpIndex)) {
-          parsedDurations[pumpIndex] = seconds < 1 ? 1 : seconds;
+          parsedDurations[pumpIndex] = _clampPumpDurationSeconds(seconds);
         }
       }
     }
@@ -1910,7 +2011,7 @@ class _WateringSchedule {
     for (final pumpIndex in parsedPumpIndexes) {
       parsedDurations.putIfAbsent(
         pumpIndex,
-        () => durationSeconds < 1 ? 1 : durationSeconds,
+        () => _clampPumpDurationSeconds(durationSeconds),
       );
     }
 

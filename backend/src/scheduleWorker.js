@@ -1,6 +1,6 @@
 const { admin, db } = require('./firebase');
 const { config } = require('./config');
-const { runPumpPulse, validRelays } = require('./pumpController');
+const { runPumpPulseByRelay, validRelays } = require('./pumpController');
 
 function localDateParts(date = new Date()) {
   const shifted = new Date(
@@ -24,6 +24,35 @@ function readRelays(schedule) {
   }
 
   return [];
+}
+
+function readDurationMsByRelay(schedule, relays) {
+  const defaultDurationSeconds = Number(schedule.durationSeconds);
+  const durationSecondsByPump =
+    schedule.durationSecondsByPump && typeof schedule.durationSecondsByPump === 'object'
+      ? schedule.durationSecondsByPump
+      : {};
+  const durationMsByRelay =
+    schedule.durationMsByRelay && typeof schedule.durationMsByRelay === 'object'
+      ? schedule.durationMsByRelay
+      : {};
+
+  return Object.fromEntries(
+    relays
+      .map((relay) => {
+        const pumpIndex = relay - 1;
+        const secondsByPump = Number(durationSecondsByPump[pumpIndex]);
+        const directMs = Number(durationMsByRelay[relay]);
+        const durationMs = Number.isFinite(secondsByPump) && secondsByPump > 0
+          ? secondsByPump * 1000
+          : Number.isFinite(directMs) && directMs > 0
+            ? directMs
+            : defaultDurationSeconds * 1000;
+
+        return [relay, durationMs];
+      })
+      .filter(([, durationMs]) => Number.isFinite(durationMs) && durationMs > 0),
+  );
 }
 
 async function markScheduleRun(scheduleRef, dateKey, repeatsDaily) {
@@ -59,17 +88,16 @@ function startScheduleWorker(mqttClient) {
         if (schedule.lastRunDateKey === now.dateKey) continue;
 
         const relays = readRelays(schedule);
-        const durationSeconds = Number(schedule.durationSeconds);
-        if (relays.length === 0 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        const durationMsByRelay = readDurationMsByRelay(schedule, relays);
+        if (relays.length === 0 || Object.keys(durationMsByRelay).length === 0) {
           console.warn(`Watering schedule ${doc.id} ignored because it is invalid.`);
           continue;
         }
 
         await markScheduleRun(doc.ref, now.dateKey, schedule.repeatsDaily === true);
-        await runPumpPulse(
+        await runPumpPulseByRelay(
           mqttClient,
-          relays,
-          durationSeconds * 1000,
+          durationMsByRelay,
           'Penjadwalan Otomatis',
           {
             source: 'schedule_worker',

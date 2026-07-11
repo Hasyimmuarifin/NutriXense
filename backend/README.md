@@ -5,6 +5,7 @@ Backend worker untuk menjalankan proses NutriXense yang harus hidup 24 jam di VP
 Tahap pertama yang sudah tersedia:
 
 - Subscribe data sensor dari HiveMQ Cloud.
+- Subscribe data history/offline-cache dari topic `nutrixense/history`.
 - Normalisasi payload sensor ke field yang dipakai Flutter.
 - Simpan data ke Firestore collection `sensor_data`.
 - Jalankan DSS rule-based dari VPS.
@@ -48,7 +49,9 @@ MQTT_PORT=8883
 MQTT_USER=your-hivemq-username
 MQTT_PASS=your-hivemq-password
 MQTT_TOPIC=nutrixense/sensor
+MQTT_HISTORY_TOPIC=nutrixense/history
 SAVE_INTERVAL_MS=60000
+SAVE_REALTIME_SENSOR_TO_FIRESTORE=false
 FIRESTORE_COLLECTION=sensor_data
 FIREBASE_SERVICE_ACCOUNT=
 ```
@@ -167,6 +170,13 @@ pm2 startup
 ## Payload MQTT yang Didukung
 
 Worker menerima variasi key dari perangkat, lalu menyimpannya sebagai field standar.
+Topic realtime `nutrixense/sensor` tetap dibatasi oleh `SAVE_INTERVAL_MS`, sedangkan
+topic history `nutrixense/history` disimpan satu per satu agar batch LittleFS dari
+ESP32 tidak terlewat. Jika payload history membawa `timestamp` dari ESP32, backend
+akan menyimpannya sebagai timestamp Firestore untuk menu History.
+Untuk sketch ESP32 yang sudah rutin mengirim history, gunakan
+`SAVE_REALTIME_SENSOR_TO_FIRESTORE=false` agar koleksi `sensor_data` tidak berisi
+duplikasi dari topic realtime.
 
 Contoh:
 

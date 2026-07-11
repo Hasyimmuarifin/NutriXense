@@ -11,20 +11,23 @@ import '../models/pump_flow_rate.dart';
 
 class FertilizerSolutionConcentration {
   const FertilizerSolutionConcentration({
-    required this.nitrogenMgPerMl,
-    required this.phosphorusMgPerMl,
-    required this.potassiumMgPerMl,
+    required this.nitrogenMgPerLiter,
+    required this.phosphorusMgPerLiter,
+    required this.potassiumMgPerLiter,
   });
 
-  final double nitrogenMgPerMl;
-  final double phosphorusMgPerMl;
-  final double potassiumMgPerMl;
+  final double nitrogenMgPerLiter;
+  final double phosphorusMgPerLiter;
+  final double potassiumMgPerLiter;
 
   Map<String, dynamic> toJson() {
     return {
-      'nitrogen_mg_per_ml': nitrogenMgPerMl,
-      'phosphorus_mg_per_ml': phosphorusMgPerMl,
-      'potassium_mg_per_ml': potassiumMgPerMl,
+      'unit': 'mg/L',
+      'nitrogen_mg_per_liter': nitrogenMgPerLiter,
+      'phosphorus_mg_per_liter': phosphorusMgPerLiter,
+      'potassium_mg_per_liter': potassiumMgPerLiter,
+      'calculation_note':
+          'Convert mg/L by dividing by 1000 before calculating pump volume in milliliters.',
     };
   }
 }
@@ -127,7 +130,7 @@ class AiRecommendationAgronomicInput {
       'planting_medium': plantingMedium.toJson(),
       'analysis_window': analysisWindow.toJson(),
       'calculation_note':
-          'Media depth is an assumption from the selected planting medium because actual depth is not measured by the app.',
+          'Land area is fixed to 100 cm2 (0.01 m2) to match the local NPK sensor coverage and small pump safety limit. Media depth is an assumption from the selected planting medium because actual depth is not measured by the app.',
     };
   }
 }
@@ -179,7 +182,7 @@ const PlantTypeProfile customPlantTypeProfile = PlantTypeProfile(
   label: 'Lainnya',
   scientificName: 'Profil tanaman kustom',
   contextNote:
-      'Gunakan pilihan ini jika tanaman belum tersedia di daftar. NutriXense akan menyesuaikan rekomendasi dari data sensor, luas lahan, dan media tanam yang Anda masukkan.',
+      'Gunakan pilihan ini jika tanaman belum tersedia di daftar. NutriXense akan menyesuaikan rekomendasi dari data sensor, area sensor tetap 100 cm2, dan media tanam yang Anda masukkan.',
   thresholds: {
     'nitrogen_min': 70,
     'nitrogen_max': 170,
@@ -206,20 +209,20 @@ const List<PlantTypeProfile> plantTypeProfiles = [
     contextNote:
         'Tanaman teh menyukai media asam, drainase baik, dan koreksi nutrisi bertahap agar akar tidak stres.',
     thresholds: {
-      'nitrogen_min': 80,
-      'nitrogen_max': 180,
-      'phosphorus_min': 100,
-      'phosphorus_max': 300,
-      'potassium_min': 250,
-      'potassium_max': 650,
+      'nitrogen_min': 100,
+      'nitrogen_max': 200,
+      'phosphorus_min': 20,
+      'phosphorus_max': 50,
+      'potassium_min': 100,
+      'potassium_max': 200,
       'moisture_min': 40,
       'moisture_max': 70,
       'ph_min': 4.5,
       'ph_max': 5.5,
       'temperature_min': 18,
       'temperature_max': 25,
-      'ec_min': 1.2,
-      'ec_max': 2.5,
+      'ec_min': 0.8,
+      'ec_max': 1.8,
     },
   ),
   PlantTypeProfile(
@@ -300,7 +303,7 @@ const PlantingMediumProfile customPlantingMediumProfile = PlantingMediumProfile(
   assumedDepthCm: 20,
   bulkDensityKgPerM3: 900,
   note:
-      'Gunakan pilihan ini jika media tanam belum tersedia di daftar. NutriXense akan menyesuaikan rekomendasi dari data sensor dan informasi lahan yang Anda masukkan.',
+      'Gunakan pilihan ini jika media tanam belum tersedia di daftar. NutriXense akan menyesuaikan rekomendasi dari data sensor dan jenis tanaman yang Anda pilih.',
 );
 
 const List<PlantingMediumProfile> plantingMediumProfiles = [
@@ -409,8 +412,8 @@ class GeminiRecommendationService {
       apiKey: config.apiKey,
       systemInstruction: Content.system(_systemPrompt),
       generationConfig: GenerationConfig(
-        temperature: 0.2,
-        maxOutputTokens: 3072,
+        temperature: 0.35,
+        maxOutputTokens: 8192,
         responseMimeType: 'application/json',
         responseSchema: _responseSchema,
       ),
@@ -421,6 +424,21 @@ class GeminiRecommendationService {
           'Calculate hybrid Gemini dose recommendations for ${input.plantType.label} and return JSON only.',
       'crop_context':
           '${input.plantType.label} (${input.plantType.scientificName}). ${input.plantType.contextNote}',
+      'selected_plant_context': {
+        'id': input.plantType.id,
+        'label': input.plantType.label,
+        'scientific_name': input.plantType.scientificName,
+        'agronomic_note': input.plantType.contextNote,
+        'thresholds': activeThresholds,
+      },
+      'selected_planting_medium_context': {
+        'id': input.plantingMedium.id,
+        'label': input.plantingMedium.label,
+        'assumed_depth_cm': input.plantingMedium.assumedDepthCm,
+        'bulk_density_kg_per_m3': input.plantingMedium.bulkDensityKgPerM3,
+        'medium_note': input.plantingMedium.note,
+        'estimated_soil_mass_kg': _roundDouble(_estimatedSoilMassKg(input)),
+      },
       'language': 'id',
       'control_policy':
           'Do not directly activate pumps. Return decision support only; the user must confirm and may adjust pump duration.',
@@ -434,7 +452,7 @@ class GeminiRecommendationService {
         'square_meters': input.landAreaSquareMeters,
         'unit': 'm2',
         'calculation_note':
-            'Use this area with the selected planting medium assumption to estimate soil mass.',
+            'This area is fixed to 100 cm2 (0.01 m2) because the RS485 NPK sensor only represents a small local measurement zone and the pump/tube hardware is small.',
       },
       'agronomic_input': input.toJson(),
       'analysis_window': input.analysisWindow.toJson(),
@@ -444,23 +462,35 @@ class GeminiRecommendationService {
         'Do not use markdown.',
         'Keep every string concise and close all quotes.',
         'Use history_summary, agronomic_input, pump_flow_rates_ml_per_second, thresholds, and local_safety_bounds to calculate pump_recommendations.',
-        'Use deterministic_decision_plan only as the local fallback context and status baseline.',
-        'Do not change plant_health_percentage.',
-        'Do not change recommendation item id or status.',
-        'Do not change recommendation group membership.',
-        'Do not change automation trigger booleans.',
+        'Treat selected_plant_context and selected_planting_medium_context as primary decision context, not decoration.',
+        'Recommendations must be specific to ${input.plantType.label}, not generic plant advice.',
+        'Recommendations must be specific to ${input.plantingMedium.label}; explain how the medium depth, bulk density, porosity/drainage note, or estimated soil mass changes watering/fertilizer decisions.',
+        'Use deterministic_decision_plan only as a safety reference and local calculation comparison, not as a fixed template.',
+        'You may determine plant_health_percentage dynamically from current values, averages, trends, thresholds, and plant context.',
+        'You may determine each recommendation item status and group membership dynamically from the sensor history and thresholds.',
+        'You may rewrite message, explanation, recommendation, sensor_summary, automation trigger reason, pump reasons, and schedule reason in your own agronomic wording.',
+        'Keep item ids stable when they refer to the same sensor parameter, but you may adjust title text to be clearer.',
+        'Automation trigger booleans should reflect your decision support, but they will still be safety-checked by the app before any pump action.',
         'Only recommend a pump when the matching current parameter is below its minimum threshold.',
         'For N, P, and K, estimate soil mass as area_m2 * assumed_depth_m * bulk_density_kg_per_m3.',
-        'For N, P, and K, estimate element deficit as threshold_gap_mg_per_kg * soil_mass_kg, then apply gradual_correction_fraction before converting to ml using fertilizer concentration.',
-        'For moisture, estimate water volume from moisture deficit percentage, land area, and safe gradual correction.',
+        'For N, P, and K, estimate element deficit as threshold_gap_mg_per_kg * soil_mass_kg, then apply gradual_correction_fraction before converting to ml using fertilizer concentration in mg/L.',
+        'When calculating pump volume in ml from fertilizer concentration in mg/L, divide the concentration by 1000 first.',
+        'For moisture, estimate water volume from current-to-minimum moisture percentage gap, fixed 100 cm2 area, assumed medium depth, estimated local medium volume, and safe gradual correction.',
         'Calculate recommended_seconds as recommended_volume_ml / pump_flow_rate_ml_per_second rounded to nearest whole second.',
+        'Do not round recommended_seconds down to 1 second when fertilizer concentration is low or nutrient deficit is large. Compare your dose with deterministic_decision_plan.pump_recommendations and keep the same order of magnitude unless you explicitly justify a smaller gradual dose.',
         'Do not exceed local_safety_bounds.max_seconds_per_pump or local_safety_bounds.max_volume_ml_per_pump.',
+        'For daily_schedule_recommendation, choose hour, minute, pump_indexes, and duration_seconds dynamically from history_summary, plant context, pump_recommendations, and pump_flow_rates_ml_per_second.',
+        'daily_schedule_recommendation.duration_seconds may differ from the largest pump_recommendations item when you intentionally recommend a smaller scheduled maintenance dose; explain this in the reason.',
+        'daily_schedule_recommendation.pump_indexes should include only pumps that are useful for the selected schedule; do not include every pump unless every pump should run.',
+        'Prefer morning schedule times for watering or fertilizer correction unless sensor history suggests another safe daytime window.',
         'If a calculation is uncertain, recommend a smaller gradual dose and explain the assumption.',
         'Narasi XAI must explain that depth/media values are estimates from selected planting medium because actual media depth is not measured.',
-        'sensor_summary maximum 2 sentences and must mention the selected analysis window (${input.analysisWindow.label}), not the number of analyzed rows.',
+        'sensor_summary maximum 2 sentences and must mention ${input.plantType.label}, ${input.plantingMedium.label}, and the selected analysis window (${input.analysisWindow.label}), not the number of analyzed rows.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
-        'For each recommendation item, explanation must explain current value, threshold, average, trend, and the dose basis when correction is needed.',
-        'For each recommendation item, recommendation must explain practical follow-up actions for ${input.plantType.label} and require user confirmation before pump activation.',
+        'For each recommendation item, explanation must explain current value, threshold, average, trend, selected plant relevance, selected medium relevance, and the dose basis when correction is needed.',
+        'For each recommendation item, recommendation must explain practical follow-up actions for ${input.plantType.label} on ${input.plantingMedium.label} and require user confirmation before pump activation.',
+        'Pump recommendation reasons must mention the relevant pump flow rate and why the chosen duration fits ${input.plantingMedium.label} and ${input.plantType.label}.',
+        'Daily schedule reason must explain why the chosen time, pump indexes, and duration fit ${input.plantType.label}, ${input.plantingMedium.label}, and recent sensor trends.',
         'Do not mention or assume any specific cultivation container unless the input data explicitly states it.',
         'Return pump_recommendations and daily_schedule_recommendation when pump correction is needed.',
       ],
@@ -569,11 +599,11 @@ class GeminiRecommendationService {
         : localPumpRecommendations;
     final scheduleRecommendation = pumpRecommendations.isEmpty
         ? null
-        : _validateGeminiSchedule(decoded, pumpRecommendations) ??
+        : _validateGeminiSchedule(decoded, pumpRecommendations, input) ??
             DailyFertilizationScheduleRecommendation.fromPlan(
               recommendations: pumpRecommendations,
               reason:
-                  'Jadwal harian ${input.plantType.label} direkomendasikan dari kalkulasi hybrid Gemini dengan validasi batas aman lokal, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, dan asumsi media ${input.plantingMedium.label}.',
+                  'Jadwal harian ${input.plantType.label} direkomendasikan dari kalkulasi hybrid Gemini dengan validasi batas aman lokal, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
             );
 
     return guardedResponse.copyWith(
@@ -789,7 +819,7 @@ class GeminiRecommendationService {
         : DailyFertilizationScheduleRecommendation.fromPlan(
             recommendations: pumpRecommendations,
             reason:
-                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum berdasarkan rentang analisis ${input.analysisWindow.label}, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, dan asumsi media ${input.plantingMedium.label}.',
+                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum berdasarkan rentang analisis ${input.analysisWindow.label}, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
           );
 
     return {
@@ -806,52 +836,13 @@ class GeminiRecommendationService {
     _SensorHistorySummary summary,
     Map<String, dynamic> geminiResponse,
   ) {
-    final deterministicRecommendations =
-        _asMap(deterministicPlan['recommendations']);
     final geminiRecommendations = _asMap(geminiResponse['recommendations']);
-    final geminiItemsById = <String, Map<String, dynamic>>{};
-    final geminiItems = [
-      ..._asMapList(geminiRecommendations['all']),
-      ..._asMapList(geminiRecommendations['kritis']),
-      ..._asMapList(geminiRecommendations['awas']),
-      ..._asMapList(geminiRecommendations['baik']),
-    ];
-
-    for (final item in geminiItems) {
-      final id = _nonEmptyText(item['id']);
-      if (id != null) geminiItemsById[id] = item;
-    }
-
-    Map<String, dynamic> mergeItem(Map<String, dynamic> deterministicItem) {
-      final id = _nonEmptyText(deterministicItem['id']);
-      final geminiItem = id == null ? null : geminiItemsById[id];
-
-      String textField(String key) {
-        return _nonEmptyText(geminiItem?[key]) ??
-            _nonEmptyText(deterministicItem[key]) ??
-            '';
-      }
-
-      return {
-        ...deterministicItem,
-        'id': deterministicItem['id'],
-        'title': deterministicItem['title'],
-        'status': deterministicItem['status'],
-        'message': textField('message'),
-        'explanation': textField('explanation'),
-        'recommendation': textField('recommendation'),
-      };
-    }
-
-    final allItems = _asMapList(deterministicRecommendations['all'])
-        .map(mergeItem)
-        .toList(growable: false);
-
-    List<Map<String, dynamic>> itemsWithStatus(String status) {
-      return allItems
-          .where((item) => item['status']?.toString() == status)
-          .toList(growable: false);
-    }
+    final geminiAutomationTriggers =
+        _asMap(geminiResponse['automation_triggers']);
+    final hasGeminiRecommendations =
+        _hasCompleteRecommendationGroups(geminiRecommendations);
+    final hasGeminiAutomationTriggers =
+        _hasCompleteAutomationTriggers(geminiAutomationTriggers);
 
     return {
       ...deterministicPlan,
@@ -860,28 +851,54 @@ class GeminiRecommendationService {
       if (geminiResponse['daily_schedule_recommendation'] != null)
         'daily_schedule_recommendation':
             geminiResponse['daily_schedule_recommendation'],
-      'plant_health_percentage': deterministicPlan['plant_health_percentage'],
+      'plant_health_percentage': geminiResponse['plant_health_percentage'] ??
+          deterministicPlan['plant_health_percentage'],
       'sensor_summary': _nonEmptyText(geminiResponse['sensor_summary']) ??
           _nonEmptyText(deterministicPlan['sensor_summary']) ??
           'Analisis dibuat dari perhitungan DSS lokal berdasarkan data sensor terbaru.',
-      'recommendations': {
-        'all': allItems,
-        'kritis': itemsWithStatus('kritis'),
-        'awas': itemsWithStatus('awas'),
-        'baik': itemsWithStatus('baik'),
-      },
-      'automation_triggers': deterministicPlan['automation_triggers'],
-      'deterministic_guard': {
-        'source': 'local_app_calculation',
+      'recommendations': hasGeminiRecommendations
+          ? geminiRecommendations
+          : deterministicPlan['recommendations'],
+      'automation_triggers': hasGeminiAutomationTriggers
+          ? geminiAutomationTriggers
+          : deterministicPlan['automation_triggers'],
+      'ai_output_policy': {
+        'source': hasGeminiRecommendations
+            ? 'gemini_dynamic_response'
+            : 'local_fallback_response',
         'history_end': summary.endTime.toIso8601String(),
-        'locked_fields': [
+        'gemini_owned_fields': [
           'plant_health_percentage',
-          'recommendation_status',
-          'recommendation_groups',
-          'automation_triggers',
+          'sensor_summary',
+          'recommendations',
+          'automation_trigger_reason',
+          'pump_recommendation_reason',
+          'daily_schedule_reason',
+        ],
+        'local_safety_guards': [
+          'pump relay validation',
+          'pump duration limit',
+          'automation trigger threshold guard',
+          'safe schedule hour guard',
         ],
       },
     };
+  }
+
+  static bool _hasCompleteRecommendationGroups(Map<String, dynamic> value) {
+    final all = _asMapList(value['all']);
+    return all.isNotEmpty &&
+        value['kritis'] is List &&
+        value['awas'] is List &&
+        value['baik'] is List;
+  }
+
+  static bool _hasCompleteAutomationTriggers(Map<String, dynamic> value) {
+    return value.containsKey('activate_nitrogen_pump') &&
+        value.containsKey('activate_phosphorus_pump') &&
+        value.containsKey('activate_potassium_pump') &&
+        value.containsKey('activate_water_pump') &&
+        _nonEmptyText(value['reason']) != null;
   }
 
   static List<Map<String, dynamic>> _pumpRecommendationsToJson(
@@ -964,7 +981,14 @@ class GeminiRecommendationService {
       if (candidateSeconds <= 0) continue;
 
       final maxSeconds = _maxSafeSecondsForPump(metadata.pumpIndex, input);
-      final safeSeconds = candidateSeconds.clamp(1, maxSeconds).toInt();
+      final localReferenceSeconds =
+          fallbackByRelay[resolvedRelay]?.recommendedSeconds ?? 0;
+      final doseAwareSeconds = localReferenceSeconds > candidateSeconds
+          ? localReferenceSeconds
+          : candidateSeconds;
+      final safeSeconds = doseAwareSeconds.clamp(1, maxSeconds).toInt();
+      final wasRaisedToDoseReference =
+          localReferenceSeconds > 0 && candidateSeconds < localReferenceSeconds;
       final deficit = _roundDouble(metadata.minimum - current);
       final deficitPercent = _roundDouble((deficit / metadata.minimum) * 100);
       final flowRate =
@@ -978,6 +1002,9 @@ class GeminiRecommendationService {
           _nonEmptyText(raw['explanation']) ??
           fallbackByRelay[resolvedRelay]?.reason ??
           '${metadata.nutrient} saat ini ${_formatNumber(current)} ${metadata.unit}, kurang ${_formatNumber(deficit)} ${metadata.unit} dari ambang minimum ${_formatNumber(metadata.minimum)} ${metadata.unit}.';
+      final doseReferenceNote = wasRaisedToDoseReference
+          ? ' Durasi dinaikkan dari rekomendasi mentah ${candidateSeconds.toInt()} detik ke $safeSeconds detik agar tidak lebih rendah dari kalkulasi dosis lokal berbasis defisit, massa media, konsentrasi larutan, dan debit pompa.'
+          : '';
 
       validated.add(
         PumpFertilizationRecommendation(
@@ -992,7 +1019,7 @@ class GeminiRecommendationService {
           deficitPercent: deficitPercent,
           recommendedSeconds: safeSeconds,
           reason:
-              '$reason ${basis == null ? '' : 'Dasar hitung: $basis '}Durasi telah divalidasi dengan batas aman lokal maksimal $maxSeconds detik dan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+              '$reason ${basis == null ? '' : 'Dasar hitung: $basis '}$doseReferenceNote Durasi telah divalidasi dengan batas aman lokal maksimal $maxSeconds detik dan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -1003,6 +1030,7 @@ class GeminiRecommendationService {
   static DailyFertilizationScheduleRecommendation? _validateGeminiSchedule(
     Map<String, dynamic> decoded,
     List<PumpFertilizationRecommendation> recommendations,
+    AiRecommendationAgronomicInput input,
   ) {
     final rawSchedule = _asMap(decoded['daily_schedule_recommendation']);
     final schedule = DailyFertilizationScheduleRecommendation.fromJson(
@@ -1011,19 +1039,44 @@ class GeminiRecommendationService {
     if (schedule == null) return null;
     if (schedule.hour < 5 || schedule.hour > 17) return null;
 
-    final pumpIndexes = recommendations.map((item) => item.pumpIndex).toSet();
-    final durationSeconds = recommendations
-        .map((item) => item.recommendedSeconds)
+    final validPumpIndexes =
+        recommendations.map((item) => item.pumpIndex).toSet();
+    final requestedPumpIndexes = schedule.pumpIndexes
+        .where((pumpIndex) => validPumpIndexes.contains(pumpIndex))
+        .toSet();
+    final pumpIndexes =
+        requestedPumpIndexes.isEmpty ? validPumpIndexes : requestedPumpIndexes;
+    if (pumpIndexes.isEmpty) return null;
+
+    final recommendedByPumpIndex = {
+      for (final item in recommendations)
+        item.pumpIndex: item.recommendedSeconds,
+    };
+    final maxDoseSeconds = pumpIndexes
+        .map((pumpIndex) => recommendedByPumpIndex[pumpIndex] ?? 1)
         .reduce((a, b) => a > b ? a : b);
+    final maxSafeSeconds = pumpIndexes
+        .map((pumpIndex) => _maxSafeSecondsForPump(pumpIndex, input))
+        .reduce((a, b) => a < b ? a : b);
+    final maxAllowedSeconds =
+        maxDoseSeconds < maxSafeSeconds ? maxDoseSeconds : maxSafeSeconds;
+    final durationSeconds =
+        schedule.durationSeconds.clamp(1, maxAllowedSeconds).toInt();
+    final wasAdjusted = durationSeconds != schedule.durationSeconds ||
+        pumpIndexes.length != schedule.pumpIndexes.length;
 
     return DailyFertilizationScheduleRecommendation(
       hour: schedule.hour,
       minute: schedule.minute,
       pumpIndexes: pumpIndexes,
       durationSeconds: durationSeconds,
-      reason: schedule.reason.isEmpty
-          ? 'Jadwal dipilih Gemini dan divalidasi aplikasi pada rentang waktu aman 05:00-17:59.'
-          : schedule.reason,
+      reason: [
+        schedule.reason.isEmpty
+            ? 'Jadwal dipilih Gemini dari data historis, kebutuhan tanaman, dan debit pompa.'
+            : schedule.reason,
+        if (wasAdjusted)
+          'Durasi/pompa dijaga dalam batas aman aplikasi berdasarkan rekomendasi dosis dan debit masing-masing pompa.',
+      ].join(' '),
     );
   }
 
@@ -1037,6 +1090,13 @@ class GeminiRecommendationService {
         for (final item in PumpFlowRates.values)
           item.pumpName:
               _roundDouble(item.averageMlPerSecond * _maxPumpRunSeconds),
+      },
+      'max_safe_seconds_by_pump_index': {
+        for (final item in PumpFlowRates.values)
+          item.pumpIndex.toString(): _maxSafeSecondsForPump(
+            item.pumpIndex,
+            input,
+          ),
       },
       'recommended_schedule_hour_range': '05:00-17:59',
       'estimated_soil_mass_kg': _roundDouble(_estimatedSoilMassKg(input)),
@@ -1350,7 +1410,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Analisis ${input.plantType.label} dibuat dari rentang ${input.analysisWindow.label} terakhir, luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
+          'Analisis ${input.plantType.label} dibuat dari rentang ${input.analysisWindow.label} terakhir, area sensor tetap 100 cm2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
@@ -1415,7 +1475,8 @@ class GeminiRecommendationService {
       final deficitPercent = _roundDouble((deficit / minimum) * 100);
       final targetVolumeMl = key == 'Moisture'
           ? _estimatedWaterVolumeMl(
-              deficitPercent: deficitPercent,
+              currentMoisturePercent: current,
+              targetMinimumPercent: minimum,
               input: input,
             )
           : _estimatedNutrientVolumeMl(
@@ -1446,8 +1507,8 @@ class GeminiRecommendationService {
           deficitPercent: deficitPercent,
           recommendedSeconds: recommendedSeconds,
           reason: key == 'Moisture'
-              ? '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi penyiraman memakai luas tanah ${_formatNumber(input.landAreaSquareMeters)} m2 sebagai koreksi bertahap sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.'
-              : '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi nutrisi memakai media ${input.plantingMedium.label}, kedalaman asumsi ${_formatNumber(input.plantingMedium.assumedDepthCm)} cm, massa tanah sekitar ${_formatNumber(_estimatedSoilMassKg(input))} kg, dan konsentrasi larutan ${_formatNumber(_concentrationForKey(key, input))} mg/ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+              ? '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi penyiraman memakai area sensor 100 cm2, kedalaman media ${_formatNumber(input.plantingMedium.assumedDepthCm)} cm, dan koreksi bertahap sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.'
+              : '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi nutrisi memakai media ${input.plantingMedium.label}, kedalaman asumsi ${_formatNumber(input.plantingMedium.assumedDepthCm)} cm, massa tanah sekitar ${_formatNumber(_estimatedSoilMassKg(input))} kg, dan konsentrasi larutan ${_formatNumber(_concentrationMgPerLiterForKey(key, input))} mg/L; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -1497,13 +1558,15 @@ class GeminiRecommendationService {
     required double deficitMgPerKg,
     required AiRecommendationAgronomicInput input,
   }) {
-    final concentrationMgPerMl = _concentrationForKey(sensorKey, input);
+    final concentrationMgPerMilliliter =
+        _concentrationMgPerMilliliterForCalculation(sensorKey, input);
     final deficitMg = deficitMgPerKg *
         _estimatedSoilMassKg(input) *
         _gradualCorrectionFraction;
-    final volumeMl =
-        (concentrationMgPerMl <= 0 ? 1 : deficitMg / concentrationMgPerMl)
-            .toDouble();
+    final volumeMl = (concentrationMgPerMilliliter <= 0
+            ? 1
+            : deficitMg / concentrationMgPerMilliliter)
+        .toDouble();
     return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
   }
 
@@ -1518,9 +1581,9 @@ class GeminiRecommendationService {
       return 'Pertahankan penyiraman bertahap dan pastikan media ${input.plantType.label} lembap merata tetapi tidak tergenang.';
     }
 
-    final deficitPercent = _roundDouble(((minimum - current) / minimum) * 100);
     final waterVolumeMl = _estimatedWaterVolumeMl(
-      deficitPercent: deficitPercent,
+      currentMoisturePercent: current,
+      targetMinimumPercent: minimum,
       input: input,
     );
     final seconds = PumpFlowRates.secondsForVolume(
@@ -1528,20 +1591,25 @@ class GeminiRecommendationService {
       volumeMl: waterVolumeMl,
     ).clamp(1, _maxSafeSecondsForPump(3, input));
 
-    return 'Aktifkan Pump D Water sekitar $seconds detik sebagai penyiraman bertahap awal untuk luas ${_formatNumber(input.landAreaSquareMeters)} m2 dengan estimasi kebutuhan ${PumpFlowRates.formatMl(waterVolumeMl)} ml. Asumsi media ${input.plantingMedium.label} dipakai karena kedalaman aktual belum tersedia; ukur ulang kelembapan setelah larutan merata.';
+    return 'Aktifkan Pump D Water sekitar $seconds detik sebagai penyiraman bertahap awal untuk area sensor 100 cm2 dengan estimasi kebutuhan ${PumpFlowRates.formatMl(waterVolumeMl)} ml. Asumsi media ${input.plantingMedium.label} dipakai karena kedalaman aktual belum tersedia; ukur ulang kelembapan setelah larutan merata.';
   }
 
   static double _estimatedWaterVolumeMl({
-    required double deficitPercent,
+    required double currentMoisturePercent,
+    required double targetMinimumPercent,
     required AiRecommendationAgronomicInput input,
   }) {
-    const waterMlPerSquareMeterPerMoisturePercent = 50.0;
     final safeArea =
         input.landAreaSquareMeters <= 0 ? 0 : input.landAreaSquareMeters;
-    final volumeMl = safeArea *
-        deficitPercent *
-        waterMlPerSquareMeterPerMoisturePercent *
-        _gradualCorrectionFraction;
+    final depthMeters = input.plantingMedium.assumedDepthCm <= 0
+        ? 0
+        : input.plantingMedium.assumedDepthCm / 100;
+    final localMediumVolumeMl = safeArea * depthMeters * 1000000;
+    final safeCurrent = currentMoisturePercent.clamp(0, 100).toDouble();
+    final safeTarget = targetMinimumPercent.clamp(0, 100).toDouble();
+    final deficitFraction = ((safeTarget - safeCurrent) / 100).clamp(0, 1);
+    final volumeMl =
+        localMediumVolumeMl * deficitFraction * _gradualCorrectionFraction;
     return _roundDouble(volumeMl < 1 ? 1 : volumeMl);
   }
 
@@ -1552,34 +1620,34 @@ class GeminiRecommendationService {
     return safeArea * depthMeters * input.plantingMedium.bulkDensityKgPerM3;
   }
 
-  static double _concentrationForKey(
+  static double _concentrationMgPerLiterForKey(
     String sensorKey,
     AiRecommendationAgronomicInput input,
   ) {
     switch (sensorKey) {
       case 'N':
-        return input.fertilizerConcentration.nitrogenMgPerMl;
+        return input.fertilizerConcentration.nitrogenMgPerLiter;
       case 'P':
-        return input.fertilizerConcentration.phosphorusMgPerMl;
+        return input.fertilizerConcentration.phosphorusMgPerLiter;
       case 'K':
-        return input.fertilizerConcentration.potassiumMgPerMl;
+        return input.fertilizerConcentration.potassiumMgPerLiter;
       default:
         return 1;
     }
+  }
+
+  static double _concentrationMgPerMilliliterForCalculation(
+    String sensorKey,
+    AiRecommendationAgronomicInput input,
+  ) {
+    return _concentrationMgPerLiterForKey(sensorKey, input) / 1000;
   }
 
   static int _maxSafeSecondsForPump(
     int pumpIndex,
     AiRecommendationAgronomicInput input,
   ) {
-    final flowRate = PumpFlowRates.byPumpIndex(pumpIndex).averageMlPerSecond;
-    final areaBasedMaxVolume =
-        (input.landAreaSquareMeters <= 0 ? 1 : input.landAreaSquareMeters) *
-            1000;
-    final maxByVolume = flowRate <= 0
-        ? _maxPumpRunSeconds
-        : (areaBasedMaxVolume / flowRate).round();
-    return maxByVolume.clamp(1, _maxPumpRunSeconds).toInt();
+    return _maxPumpRunSeconds;
   }
 
   static _PumpMetadata? _pumpMetadata(
@@ -1719,7 +1787,7 @@ class _CachedAiRecommendation {
 }
 
 const _systemPrompt =
-    'You are an expert agronomist calculator and an Explainable AI (XAI) narrator. Calculate candidate nutrient and watering doses for the selected plant type from sensor history, crop-specific thresholds, land area, pump flow rates, fertilizer solution concentration, and selected planting medium assumptions. The app will validate your pump recommendations with local safety rules before any user confirmation. Explain that media depth is estimated from the selected medium because actual depth is not measured. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
+    'You are an expert agronomist calculator and an Explainable AI (XAI) narrator. Calculate candidate nutrient and watering doses from sensor history, crop-specific thresholds, the selected plant type, and the selected planting medium. Your explanations and recommendations must be specific to the chosen plant and medium, including how plant tolerance, target thresholds, medium depth, bulk density, drainage/porosity note, and estimated soil mass affect watering and fertilizer decisions. Use the fixed 100 cm2 local sensor coverage area, pump flow rates, and fertilizer solution concentration for dose calculations. The app will validate pump recommendations with local safety rules before any user confirmation. Explain that media depth is estimated from the selected medium because actual depth is not measured. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {

@@ -112,13 +112,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   double get _npkChartMaxY {
     return [
-      _gaugeMaxValue('max_nitrogen', 180, 250),
-      _gaugeMaxValue('max_phosphorus', 300, 400),
-      _gaugeMaxValue('max_potassium', 650, 800),
+      _gaugeMaxValue('max_nitrogen', 200, 250),
+      _gaugeMaxValue('max_phosphorus', 50, 100),
+      _gaugeMaxValue('max_potassium', 200, 250),
     ].reduce((a, b) => a > b ? a : b);
   }
 
-  double get _ecChartMaxY => _gaugeMaxValue('max_ec', 2.5, 4);
+  double get _ecChartMaxY => _gaugeMaxValue('max_ec', 1.8, 4);
 
   double _gaugeMaxValue(
     String maxNormalKey,

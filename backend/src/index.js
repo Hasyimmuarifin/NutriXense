@@ -14,21 +14,14 @@ const scheduleWorker = startScheduleWorker(mqttClient);
 const deviceConfigWorker = startDeviceConfigWorker(mqttClient);
 const thresholdNotificationWorker = startThresholdNotificationWorker();
 
-
-process.on('SIGINT', () => {
+function stopBackend() {
   dssWorker.stop();
   scheduleWorker.stop();
   deviceConfigWorker.stop();
   thresholdNotificationWorker.stop();
   console.log('NutriXense backend stopped.');
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', () => {
-  dssWorker.stop();
-  scheduleWorker.stop();
-  deviceConfigWorker.stop();
-  thresholdNotificationWorker.stop();
-  console.log('NutriXense backend stopped.');
-  process.exit(0);
-});
+process.on('SIGINT', stopBackend);
+process.on('SIGTERM', stopBackend);

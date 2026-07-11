@@ -84,20 +84,20 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription? sensorSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _buzzerConfigSub;
   final Map<String, TextEditingController> _thresholdControllers = {
-    'min_nitrogen': TextEditingController(text: '80'),
-    'max_nitrogen': TextEditingController(text: '180'),
-    'min_phosphorus': TextEditingController(text: '100'),
-    'max_phosphorus': TextEditingController(text: '300'),
-    'min_potassium': TextEditingController(text: '250'),
-    'max_potassium': TextEditingController(text: '650'),
+    'min_nitrogen': TextEditingController(text: '100'),
+    'max_nitrogen': TextEditingController(text: '200'),
+    'min_phosphorus': TextEditingController(text: '20'),
+    'max_phosphorus': TextEditingController(text: '50'),
+    'min_potassium': TextEditingController(text: '100'),
+    'max_potassium': TextEditingController(text: '200'),
     'min_ph': TextEditingController(text: '4.5'),
     'max_ph': TextEditingController(text: '5.5'),
     'min_moisture': TextEditingController(text: '40'),
     'max_moisture': TextEditingController(text: '70'),
     'min_temperature': TextEditingController(text: '18'),
     'max_temperature': TextEditingController(text: '25'),
-    'min_ec': TextEditingController(text: '1.2'),
-    'max_ec': TextEditingController(text: '2.5'),
+    'min_ec': TextEditingController(text: '0.8'),
+    'max_ec': TextEditingController(text: '1.8'),
   };
 
   // chart history
@@ -189,9 +189,9 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Nitrogen",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_nitrogen', 180, 250),
-        minNormal: _thresholdValue('min_nitrogen', 80),
-        maxNormal: _thresholdValue('max_nitrogen', 180),
+        maxValue: _gaugeMaxValue('max_nitrogen', 200, 250),
+        minNormal: _thresholdValue('min_nitrogen', 100),
+        maxNormal: _thresholdValue('max_nitrogen', 200),
         icon: "assets/icons/leaf.png",
         colorHex: 0xFF4CAF50,
       ),
@@ -200,9 +200,9 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Fosfor",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_phosphorus', 300, 400),
-        minNormal: _thresholdValue('min_phosphorus', 100),
-        maxNormal: _thresholdValue('max_phosphorus', 300),
+        maxValue: _gaugeMaxValue('max_phosphorus', 50, 100),
+        minNormal: _thresholdValue('min_phosphorus', 20),
+        maxNormal: _thresholdValue('max_phosphorus', 50),
         icon: "assets/icons/root.png",
         colorHex: 0xFF2196F3,
       ),
@@ -211,9 +211,9 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Kalium",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_potassium', 650, 800),
-        minNormal: _thresholdValue('min_potassium', 250),
-        maxNormal: _thresholdValue('max_potassium', 650),
+        maxValue: _gaugeMaxValue('max_potassium', 200, 250),
+        minNormal: _thresholdValue('min_potassium', 100),
+        maxNormal: _thresholdValue('max_potassium', 200),
         icon: "assets/icons/crop.png",
         colorHex: 0xFFFF9800,
       ),
@@ -255,9 +255,9 @@ class _HomeScreenState extends State<HomeScreen>
         label: "Electrical Conductivity",
         unit: "mS/cm",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_ec', 2.5, 4),
-        minNormal: _thresholdValue('min_ec', 1.2),
-        maxNormal: _thresholdValue('max_ec', 2.5),
+        maxValue: _gaugeMaxValue('max_ec', 1.8, 4),
+        minNormal: _thresholdValue('min_ec', 0.8),
+        maxNormal: _thresholdValue('max_ec', 1.8),
         icon: "assets/icons/ec.png",
         colorHex: 0xFF7C4DFF,
       ),
@@ -276,9 +276,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   double get _npkChartMaxY {
     return [
-      _gaugeMaxValue('max_nitrogen', 180, 250),
-      _gaugeMaxValue('max_phosphorus', 300, 400),
-      _gaugeMaxValue('max_potassium', 650, 800),
+      _gaugeMaxValue('max_nitrogen', 200, 250),
+      _gaugeMaxValue('max_phosphorus', 50, 100),
+      _gaugeMaxValue('max_potassium', 200, 250),
     ].reduce((a, b) => a > b ? a : b);
   }
 

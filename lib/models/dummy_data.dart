@@ -11,9 +11,9 @@ class DummyData {
           unit: 'mg/kg',
           value: 38.5,
           minValue: 0,
-          maxValue: 150,
-          minNormal: 40.0,
-          maxNormal: 80.0,
+          maxValue: 250,
+          minNormal: 100.0,
+          maxNormal: 200.0,
           icon: '🌿',
           colorHex: 0xFF2E7D52,
         ),
@@ -22,9 +22,9 @@ class DummyData {
           unit: 'mg/kg',
           value: 55.2,
           minValue: 0,
-          maxValue: 150,
-          minNormal: 30.0,
-          maxNormal: 70.0,
+          maxValue: 100,
+          minNormal: 20.0,
+          maxNormal: 50.0,
           icon: '🔵',
           colorHex: 0xFF1565C0,
         ),
@@ -33,20 +33,20 @@ class DummyData {
           unit: 'mg/kg',
           value: 92.8,
           minValue: 0,
-          maxValue: 150,
-          minNormal: 60.0,
-          maxNormal: 90.0,
+          maxValue: 250,
+          minNormal: 100.0,
+          maxNormal: 200.0,
           icon: '🟡',
           colorHex: 0xFFFF8F00,
         ),
         const SensorReading(
           label: 'pH Level',
           unit: 'pH',
-          value: 5.8,
+          value: 5.0,
           minValue: 0,
           maxValue: 14,
-          minNormal: 6.0,
-          maxNormal: 7.5,
+          minNormal: 4.5,
+          maxNormal: 5.5,
           icon: '⚗️',
           colorHex: 0xFF7B1FA2,
         ),
@@ -64,11 +64,11 @@ class DummyData {
         const SensorReading(
           label: 'Temperature',
           unit: '°C',
-          value: 28.4,
+          value: 22.4,
           minValue: 0,
           maxValue: 50,
-          minNormal: 20.0,
-          maxNormal: 30.0,
+          minNormal: 18.0,
+          maxNormal: 25.0,
           icon: '🌡️',
           colorHex: 0xFFE53935,
         ),
@@ -90,10 +90,10 @@ class DummyData {
         nitrogen: 38.5 + 15 * _wave(t, 0.0),
         phosphorus: 55.2 + 10 * _wave(t, 1.2),
         potassium: 92.8 + 12 * _wave(t, 2.4),
-        ph: 5.8 + 0.8 * _wave(t, 0.8),
+        ph: 5.0 + 0.4 * _wave(t, 0.8),
         moisture: 64.0 + 12 * _wave(t, 1.6),
-        temperature: 28.4 + 3.0 * _wave(t, 3.0),
-        ec: 1.8 + 0.4 * _wave(t, 2.0),
+        temperature: 22.4 + 2.0 * _wave(t, 3.0),
+        ec: 1.3 + 0.3 * _wave(t, 2.0),
       ));
     }
     return data;
@@ -109,36 +109,38 @@ class DummyData {
         const InsightCard(
           title: 'Low Nitrogen Detected',
           description:
-              'Nitrogen levels are below optimal range (38.5 mg/kg vs 40–80 mg/kg). Plants may show yellowing of older leaves.',
+              'Nitrogen levels are below the tea crop normal range (38.5 mg/kg vs 100–200 mg/kg). Plants may show yellowing of older leaves.',
           icon: '⚠️',
           severity: InsightSeverity.kritis,
           action:
               'Apply nitrogen-rich fertilizer (NPK 20-10-10). Activate Pump A for 5 minutes.',
         ),
         const InsightCard(
-          title: 'pH Too Acidic',
+          title: 'pH Normal untuk Teh',
           description:
-              'Soil pH of 5.8 is below the ideal range of 6.0–7.5. Acidic soil limits nutrient absorption.',
-          icon: '🔴',
-          severity: InsightSeverity.awas,
-          action: 'Apply agricultural lime or dolomite to raise pH gradually.',
+              'Soil pH of 5.0 is within the tea crop normal range of 4.5–5.5.',
+          icon: '✅',
+          severity: InsightSeverity.baik,
+          action:
+              'Maintain the current media acidity and avoid excessive liming.',
         ),
         const InsightCard(
-          title: 'Kadar Kalium Tinggi',
+          title: 'Kadar Kalium Rendah',
           description:
-              'Kalium 92.8 mg/kg melebihi rentang optimal (60–90 mg/kg). K berlebih dapat menghambat penyerapan kalsium.',
+              'Kalium 92.8 mg/kg sedikit di bawah rentang normal teh (100–200 mg/kg). Kekurangan K dapat menurunkan ketahanan tanaman.',
           icon: '🟡',
           severity: InsightSeverity.awas,
           action:
-              'Pause Pump C until K levels normalize. Flush soil with clean water.',
+              'Tambahkan kalium bertahap dan ukur ulang setelah larutan merata.',
         ),
         const InsightCard(
           title: 'Fosfor Optimal',
           description:
-              'Fosfor 55.2 mg/kg berada dalam rentang ideal. Perkembangan akar dan pembungaan tanaman seharusnya sehat.',
+              'Fosfor 55.2 mg/kg sedikit di atas rentang normal teh (20–50 mg/kg). Pantau agar tidak terus meningkat.',
           icon: '✅',
-          severity: InsightSeverity.baik,
-          action: 'Maintain current Pump B schedule.',
+          severity: InsightSeverity.awas,
+          action:
+              'Tunda penambahan fosfor sementara dan pantau pembacaan berikutnya.',
         ),
         const InsightCard(
           title: 'Moisture Levels Good',
@@ -151,7 +153,7 @@ class DummyData {
         const InsightCard(
           title: 'Temperature Normal',
           description:
-              'Soil temperature at 28.4°C is within optimal range. Microbial activity and nutrient cycling are active.',
+              'Soil temperature at 22.4°C is within the tea crop normal range of 18–25°C.',
           icon: '🌡️',
           severity: InsightSeverity.baik,
           action: 'No action required. Monitor during peak afternoon heat.',
@@ -196,9 +198,9 @@ class DummyData {
       'Nitrogen': [42, 40, 37, 35, 38, 36, 38.5],
       'Fosfor': [50, 53, 56, 54, 58, 55, 55.2],
       'Kalium': [85, 88, 90, 93, 91, 95, 92.8],
-      'pH Level': [6.2, 6.0, 5.9, 5.8, 6.0, 5.7, 5.8],
+      'pH Level': [5.1, 5.0, 4.9, 5.0, 5.2, 4.8, 5.0],
       'Soil Moisture': [60, 65, 68, 62, 64, 66, 64.0],
-      'Temperature': [27, 28, 29, 28, 27, 29, 28.4],
+      'Temperature': [21, 22, 23, 22, 21, 23, 22.4],
     };
     return charts[sensor] ?? [0, 0, 0, 0, 0, 0, 0];
   }

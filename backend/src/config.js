@@ -44,6 +44,7 @@ const config = {
       process.env.MQTT_TOPIC ||
       process.env.MQTT_SENSOR_TOPIC ||
       'nutrixense/sensor',
+    historyTopic: process.env.MQTT_HISTORY_TOPIC || 'nutrixense/history',
     controlTopic: process.env.MQTT_CONTROL_TOPIC || 'nutrixense/control',
     configTopic: process.env.MQTT_CONFIG_TOPIC || 'nutrixense/config',
     clientId:
@@ -62,6 +63,8 @@ const config = {
       process.env.FIRESTORE_SENSOR_COLLECTION ||
       'sensor_data',
     saveIntervalMs: readNumberEnv('SAVE_INTERVAL_MS', 60 * 1000),
+    saveRealtimeSensorReadings:
+      (process.env.SAVE_REALTIME_SENSOR_TO_FIRESTORE || 'true') !== 'false',
     automationConfigCollection:
       process.env.FIRESTORE_AUTOMATION_CONFIG_COLLECTION ||
       'automation_config',

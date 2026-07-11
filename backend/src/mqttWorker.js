@@ -14,9 +14,101 @@ function parsePayload(rawPayload) {
   return JSON.parse(message);
 }
 
-async function saveSensorReading(topic, payload) {
+function timestampFromLocalParts(year, month, day, hour, minute, second) {
+  const utcMillis = Date.UTC(year, month - 1, day, hour, minute, second);
+  const checkDate = new Date(utcMillis);
+
+  if (
+    checkDate.getUTCFullYear() !== year ||
+    checkDate.getUTCMonth() !== month - 1 ||
+    checkDate.getUTCDate() !== day ||
+    checkDate.getUTCHours() !== hour ||
+    checkDate.getUTCMinutes() !== minute ||
+    checkDate.getUTCSeconds() !== second
+  ) {
+    return undefined;
+  }
+
+  const deviceUtcMillis =
+    utcMillis - config.automation.timezoneOffsetMinutes * 60 * 1000;
+  return admin.firestore.Timestamp.fromDate(new Date(deviceUtcMillis));
+}
+
+function timestampFromDeviceString(value) {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+
+  const trimmed = value.trim();
+  const localMatch = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/,
+  );
+
+  if (localMatch) {
+    const [, year, month, day, hour, minute, second] = localMatch;
+    return timestampFromLocalParts(
+      Number(year),
+      Number(month),
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    );
+  }
+
+  const parsedMillis = Date.parse(trimmed);
+  if (!Number.isFinite(parsedMillis)) return undefined;
+
+  return admin.firestore.Timestamp.fromDate(new Date(parsedMillis));
+}
+
+function timestampFromRtc(payload) {
+  const rtc = payload.rtc;
+  if (!rtc || typeof rtc !== 'object') return undefined;
+
+  const year = Number(rtc.year);
+  const month = Number(rtc.month);
+  const day = Number(rtc.day);
+  const hour = Number(rtc.hour);
+  const minute = Number(rtc.minute);
+  const second = Number(rtc.second || 0);
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    !Number.isInteger(second)
+  ) {
+    return undefined;
+  }
+
+  return timestampFromLocalParts(year, month, day, hour, minute, second);
+}
+
+function readPayloadTimestamp(payload) {
+  const rawTimestamp = payload.timestamp;
+
+  if (typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp)) {
+    const millis = rawTimestamp < 10000000000
+      ? rawTimestamp * 1000
+      : rawTimestamp;
+    return admin.firestore.Timestamp.fromMillis(millis);
+  }
+
+  return timestampFromDeviceString(rawTimestamp) || timestampFromRtc(payload);
+}
+
+async function saveSensorReading(topic, payload, options = {}) {
+  const {
+    respectSaveInterval = true,
+    usePayloadTimestamp = false,
+    source = 'hivemq',
+  } = options;
   const now = Date.now();
-  if (now - lastSavedTime < config.firestore.saveIntervalMs) {
+  if (
+    respectSaveInterval &&
+    now - lastSavedTime < config.firestore.saveIntervalMs
+  ) {
     console.log('Sensor reading ignored because it is still inside the save interval.');
     return;
   }
@@ -32,20 +124,45 @@ async function saveSensorReading(topic, payload) {
     return;
   }
 
-  await db.collection(config.firestore.sensorCollection).add({
+  const payloadTimestamp = usePayloadTimestamp
+    ? readPayloadTimestamp(payload)
+    : undefined;
+  const document = {
     ...normalized,
-    source: 'hivemq',
+    source,
     mqttTopic: topic,
     rawPayload: payload,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    timestamp: payloadTimestamp || admin.firestore.FieldValue.serverTimestamp(),
     receivedAt: new Date().toISOString(),
+  };
+
+  if (payloadTimestamp) {
+    document.deviceTimestampRaw = payload.timestamp || null;
+  }
+
+  await db.collection(config.firestore.sensorCollection).add({
+    ...document,
   });
 
-  lastSavedTime = now;
-  console.log(`Saved sensor reading with ${fieldCount} field(s).`);
+  if (respectSaveInterval) {
+    lastSavedTime = now;
+  }
+
+  console.log(
+    `Saved ${source} sensor reading with ${fieldCount} field(s) from ${topic}.`,
+  );
 }
 
 function isManualControlPayload(payload) {
+  const commandSource = payload.command_source || payload.commandSource;
+  if (
+    commandSource === 'ai_automation' ||
+    commandSource === 'schedule_worker' ||
+    commandSource === 'dss_worker'
+  ) {
+    return false;
+  }
+
   return payload.source === 'manual' ||
     payload.source === 'manual_control' ||
     payload.manual_override === 1 ||
@@ -218,6 +335,15 @@ function startMqttWorker() {
       console.log(`Subscribed to sensor topic: ${config.mqtt.sensorTopic}`);
     });
 
+    client.subscribe(config.mqtt.historyTopic, { qos: 1 }, (error) => {
+      if (error) {
+        console.error('Failed to subscribe MQTT history topic:', error);
+        return;
+      }
+
+      console.log(`Subscribed to history topic: ${config.mqtt.historyTopic}`);
+    });
+
     client.subscribe(config.mqtt.controlTopic, { qos: 1 }, (error) => {
       if (error) {
         console.error('Failed to subscribe MQTT control topic:', error);
@@ -235,7 +361,21 @@ function startMqttWorker() {
         if (topic === config.mqtt.sensorTopic) {
           return Promise.resolve()
             .then(() => confirmManualPumpCommandsFromSensor(payload))
-            .then(() => saveSensorReading(topic, payload));
+            .then(() => {
+              if (!config.firestore.saveRealtimeSensorReadings) {
+                return undefined;
+              }
+
+              return saveSensorReading(topic, payload);
+            });
+        }
+
+        if (topic === config.mqtt.historyTopic) {
+          return saveSensorReading(topic, payload, {
+            respectSaveInterval: false,
+            usePayloadTimestamp: true,
+            source: payload.source || 'history',
+          });
         }
 
         if (topic === config.mqtt.controlTopic) {

@@ -1,4 +1,21 @@
 const DEFAULT_THRESHOLDS = {
+  min_nitrogen: 100,
+  max_nitrogen: 200,
+  min_phosphorus: 20,
+  max_phosphorus: 50,
+  min_potassium: 100,
+  max_potassium: 200,
+  min_ph: 4.5,
+  max_ph: 5.5,
+  min_moisture: 40,
+  max_moisture: 70,
+  min_temperature: 18,
+  max_temperature: 25,
+  min_ec: 0.8,
+  max_ec: 1.8,
+};
+
+const PREVIOUS_TEA_POT_THRESHOLDS = {
   min_nitrogen: 80,
   max_nitrogen: 180,
   min_phosphorus: 100,
@@ -85,7 +102,10 @@ const SENSOR_DEFINITIONS = [
 ];
 
 function buildThresholds(configData = {}) {
-  if (isLegacyDefaultThresholds(configData.thresholds)) {
+  if (
+    isDefaultThresholds(configData.thresholds, LEGACY_DEFAULT_THRESHOLDS) ||
+    isDefaultThresholds(configData.thresholds, PREVIOUS_TEA_POT_THRESHOLDS)
+  ) {
     return { ...DEFAULT_THRESHOLDS };
   }
 
@@ -95,14 +115,14 @@ function buildThresholds(configData = {}) {
   };
 }
 
-function isLegacyDefaultThresholds(thresholds = {}) {
-  const keys = Object.keys(LEGACY_DEFAULT_THRESHOLDS);
+function isDefaultThresholds(thresholds = {}, defaults = {}) {
+  const keys = Object.keys(defaults);
   if (Object.keys(thresholds).length !== keys.length) return false;
 
   return keys.every((key) => {
     const value = thresholds[key];
     return typeof value === 'number' &&
-      Math.abs(value - LEGACY_DEFAULT_THRESHOLDS[key]) < 0.0001;
+      Math.abs(value - defaults[key]) < 0.0001;
   });
 }
 

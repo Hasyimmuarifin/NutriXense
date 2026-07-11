@@ -90,17 +90,16 @@ class AiPumpAutomationService {
       );
     }
 
-    await _pumpStateService.start();
-    if (!_pumpStateService.isConnected) {
+    final hasDeviceTelemetry =
+        await _pumpStateService.waitForFreshDeviceTelemetry();
+    if (!_pumpStateService.isConnected || !hasDeviceTelemetry) {
       throw StateError(
-          'MQTT is not connected, so AI pump automation was not applied.');
+        'Perangkat IoT tidak terhubung. Rekomendasi AI tidak dijalankan.',
+      );
     }
 
     final startedAt = DateTime.now();
-    final logRef = await _createRunningLog(
-      pumpCommands,
-      startedAt: startedAt,
-    );
+    DocumentReference<Map<String, dynamic>>? logRef;
 
     try {
       for (final command in pumpCommands) {
@@ -108,8 +107,13 @@ class AiPumpAutomationService {
           command.relay,
           true,
           source: _aiSource,
+          requireConfirmation: true,
         );
       }
+      logRef = await _createRunningLog(
+        pumpCommands,
+        startedAt: startedAt,
+      );
 
       final sortedCommands = [...pumpCommands]
         ..sort((a, b) => a.duration.compareTo(b.duration));
@@ -123,22 +127,29 @@ class AiPumpAutomationService {
           command.relay,
           false,
           source: _aiSource,
+          requireConfirmation: true,
         );
       }
     } finally {
       for (final command in pumpCommands) {
-        await _pumpStateService.setRelay(
-          command.relay,
-          false,
-          source: _aiSource,
+        try {
+          await _pumpStateService.setRelay(
+            command.relay,
+            false,
+            source: _aiSource,
+          );
+        } catch (_) {
+          // Best-effort shutdown only. A failed cleanup must not create a success log.
+        }
+      }
+      if (logRef != null) {
+        await _completeLog(
+          logRef,
+          pumpCommands,
+          startedAt: startedAt,
+          finishedAt: DateTime.now(),
         );
       }
-      await _completeLog(
-        logRef,
-        pumpCommands,
-        startedAt: startedAt,
-        finishedAt: DateTime.now(),
-      );
     }
 
     return AiPumpAutomationResult(

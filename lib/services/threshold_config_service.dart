@@ -9,6 +9,22 @@ class ThresholdConfigService extends ChangeNotifier {
   static final ThresholdConfigService instance = ThresholdConfigService._();
   static const String _storageKey = 'nutrixense_threshold_config';
   static const Map<String, double> _teaPotThresholds = {
+    'min_nitrogen': 100,
+    'max_nitrogen': 200,
+    'min_phosphorus': 20,
+    'max_phosphorus': 50,
+    'min_potassium': 100,
+    'max_potassium': 200,
+    'min_ph': 4.5,
+    'max_ph': 5.5,
+    'min_moisture': 40,
+    'max_moisture': 70,
+    'min_temperature': 18,
+    'max_temperature': 25,
+    'min_ec': 0.8,
+    'max_ec': 1.8,
+  };
+  static const Map<String, double> _previousTeaPotThresholds = {
     'min_nitrogen': 80,
     'max_nitrogen': 180,
     'min_phosphorus': 100,
@@ -62,7 +78,8 @@ class ThresholdConfigService extends ChangeNotifier {
       }
     }
 
-    if (_isLegacyDefaultConfig(savedThresholds)) {
+    if (_isDefaultConfig(savedThresholds, _legacyDefaultThresholds) ||
+        _isDefaultConfig(savedThresholds, _previousTeaPotThresholds)) {
       _thresholds
         ..clear()
         ..addAll(_teaPotThresholds);
@@ -88,10 +105,13 @@ class ThresholdConfigService extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool _isLegacyDefaultConfig(Map<String, double> thresholds) {
-    if (thresholds.length != _legacyDefaultThresholds.length) return false;
+  bool _isDefaultConfig(
+    Map<String, double> thresholds,
+    Map<String, double> defaults,
+  ) {
+    if (thresholds.length != defaults.length) return false;
 
-    for (final entry in _legacyDefaultThresholds.entries) {
+    for (final entry in defaults.entries) {
       final value = thresholds[entry.key];
       if (value == null || (value - entry.value).abs() > 0.0001) {
         return false;

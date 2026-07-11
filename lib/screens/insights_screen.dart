@@ -13,6 +13,8 @@ import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/insight_card_widget.dart';
 
+const int _maxCustomPumpDurationSeconds = 30;
+
 class InsightsScreen extends StatefulWidget {
   const InsightsScreen({super.key});
 
@@ -103,7 +105,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
       return 'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
     }
 
-    return raw.replaceFirst(RegExp(r'^Exception:\s*'), '');
+    return raw.replaceFirst(RegExp(r'^(Exception|Bad state):\s*'), '');
   }
 
   Future<void> _promptAndRequestAiRecommendation() async {
@@ -138,7 +140,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
           ..clear()
           ..addEntries(
             response.pumpRecommendations.map(
-              (item) => MapEntry(item.relay, item.recommendedSeconds),
+              (item) => MapEntry(
+                item.relay,
+                _clampCustomPumpDuration(item.recommendedSeconds),
+              ),
             ),
           );
       });
@@ -179,8 +184,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return recommendations
         .map(
           (item) => item.copyWith(
-            recommendedSeconds:
-                _adjustedPumpSeconds[item.relay] ?? item.recommendedSeconds,
+            recommendedSeconds: _clampCustomPumpDuration(
+              _adjustedPumpSeconds[item.relay] ?? item.recommendedSeconds,
+            ),
           ),
         )
         .toList(growable: false);
@@ -188,10 +194,16 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
   int _recommendedScheduleDuration({required int fallback}) {
     final recommendations = _adjustedPumpRecommendations;
-    if (recommendations.isEmpty) return fallback;
-    return recommendations
-        .map((item) => item.recommendedSeconds)
-        .reduce((a, b) => a > b ? a : b);
+    if (recommendations.isEmpty) return _clampCustomPumpDuration(fallback);
+    return _clampCustomPumpDuration(
+      recommendations
+          .map((item) => item.recommendedSeconds)
+          .reduce((a, b) => a > b ? a : b),
+    );
+  }
+
+  int _clampCustomPumpDuration(int seconds) {
+    return seconds.clamp(1, _maxCustomPumpDurationSeconds).toInt();
   }
 
   double? _parseLandAreaSquareMeters(String input) {
@@ -237,6 +249,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     final fixed = value >= 100
         ? value.toStringAsFixed(0)
         : value.toStringAsFixed(value < 0.01 ? 4 : 2);
+    if (!fixed.contains('.')) return fixed;
     return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
@@ -261,6 +274,11 @@ class _InsightsScreenState extends State<InsightsScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _requestError = e);
+      showAppTextSnackBar(
+        context,
+        _requestErrorMessage,
+        AppTheme.statusLow,
+      );
     } finally {
       if (mounted) {
         setState(() => _isApplyingAutomation = false);
@@ -274,14 +292,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
     if (schedule == null || !schedule.hasPumps) return;
 
     final recommendations = _adjustedPumpRecommendations;
-    final durationSeconds = recommendations.isEmpty
-        ? schedule.durationSeconds
-        : recommendations
-            .map((item) => item.recommendedSeconds)
-            .reduce((a, b) => a > b ? a : b);
+    final durationSeconds = _recommendedScheduleDuration(
+      fallback: schedule.durationSeconds,
+    );
     final durationSecondsByPump = {
       for (final item in recommendations)
-        '${item.pumpIndex}': item.recommendedSeconds,
+        '${item.pumpIndex}': _clampCustomPumpDuration(item.recommendedSeconds),
     };
     final id = DateTime.now().microsecondsSinceEpoch;
 
@@ -431,7 +447,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               ),
                               const SizedBox(height: 4),
                               const Text(
-                                'Sesuaikan durasi sebelum menekan Konfirmasi.',
+                                'Sesuaikan durasi maksimal 30 detik sebelum menekan Konfirmasi.',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: AppTheme.textSecondary,
@@ -1134,7 +1150,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '${input.plantType.label} • Analisis ${input.analysisWindow.label} • Luas ${_formatLandArea(input.landAreaSquareMeters)} m² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerMl)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerMl)} mg/ml • ${input.plantingMedium.label}',
+              '${input.plantType.label} • Analisis ${input.analysisWindow.label} • Area sensor 100 cm² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerLiter)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerLiter)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerLiter)} mg/L • ${input.plantingMedium.label}',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -1152,8 +1168,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
   Widget _buildPumpRecommendationTile(
       PumpFertilizationRecommendation recommendation,
       {VoidCallback? onDurationChanged}) {
-    final seconds = _adjustedPumpSeconds[recommendation.relay] ??
-        recommendation.recommendedSeconds;
+    final seconds = _clampCustomPumpDuration(
+      _adjustedPumpSeconds[recommendation.relay] ??
+          recommendation.recommendedSeconds,
+    );
     final flowRate = recommendation.averageFlowRateMlPerSecond;
     final estimatedVolumeMl = flowRate * seconds;
     final sliderMax = _durationSliderMax(seconds);
@@ -1228,7 +1246,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
             activeColor: AppTheme.primaryGreen,
             onChanged: (value) {
               setState(() {
-                _adjustedPumpSeconds[recommendation.relay] = value.round();
+                _adjustedPumpSeconds[recommendation.relay] =
+                    _clampCustomPumpDuration(value.round());
               });
               onDurationChanged?.call();
             },
@@ -1239,8 +1258,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   }
 
   int _durationSliderMax(int seconds) {
-    if (seconds <= 300) return 300;
-    return seconds + 60;
+    return _maxCustomPumpDurationSeconds;
   }
 
   Widget _buildFlowInfoChip({
@@ -1458,39 +1476,24 @@ class _LandAreaInputDialog extends StatefulWidget {
   State<_LandAreaInputDialog> createState() => _LandAreaInputDialogState();
 }
 
-class _LandAreaUnit {
-  const _LandAreaUnit({
-    required this.label,
-    required this.squareMetersPerUnit,
-  });
-
-  final String label;
-  final double squareMetersPerUnit;
-}
-
-const List<_LandAreaUnit> _landAreaUnits = [
-  _LandAreaUnit(label: 'hm² (hektar)', squareMetersPerUnit: 10000),
-  _LandAreaUnit(label: 'dam²', squareMetersPerUnit: 100),
-  _LandAreaUnit(label: 'm²', squareMetersPerUnit: 1),
-  _LandAreaUnit(label: 'dm²', squareMetersPerUnit: 0.01),
-  _LandAreaUnit(label: 'cm²', squareMetersPerUnit: 0.0001),
-];
+const double _fixedAiRecommendationAreaSquareMeters = 0.01;
 
 class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
-  late final TextEditingController _areaController;
   late final TextEditingController _nitrogenController;
   late final TextEditingController _phosphorusController;
   late final TextEditingController _potassiumController;
   late final TextEditingController _customPlantTypeController;
   late final TextEditingController _customMediumController;
-  late _LandAreaUnit _selectedUnit;
+  late final TextEditingController _customDepthController;
+  late final TextEditingController _customBulkDensityController;
   late PlantTypeProfile _selectedPlantType;
   late PlantingMediumProfile _selectedMedium;
   late AiAnalysisWindowProfile _selectedAnalysisWindow;
-  String? _areaErrorText;
+  late bool _manualCustomMediumProfile;
   String? _fertilizerErrorText;
   String? _customPlantTypeErrorText;
   String? _customMediumErrorText;
+  String? _customMediumProfileErrorText;
 
   @override
   void initState() {
@@ -1498,26 +1501,24 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     final initial = widget.initialInput;
     final initialConcentration = initial?.fertilizerConcentration ??
         const FertilizerSolutionConcentration(
-          nitrogenMgPerMl: 10,
-          phosphorusMgPerMl: 10,
-          potassiumMgPerMl: 10,
+          nitrogenMgPerLiter: 100,
+          phosphorusMgPerLiter: 100,
+          potassiumMgPerLiter: 100,
         );
-    _selectedUnit = _landAreaUnits[2];
     _selectedPlantType = _initialPlantType(initial?.plantType);
     _selectedMedium = _initialMedium(initial?.plantingMedium);
     _selectedAnalysisWindow =
         initial?.analysisWindow ?? defaultAnalysisWindowProfile;
-    _areaController = TextEditingController(
-      text: widget.formatLandArea(initial?.landAreaSquareMeters ?? 0),
-    );
+    _manualCustomMediumProfile =
+        _hasManualCustomMediumProfile(initial?.plantingMedium);
     _nitrogenController = TextEditingController(
-      text: widget.formatLandArea(initialConcentration.nitrogenMgPerMl),
+      text: widget.formatLandArea(initialConcentration.nitrogenMgPerLiter),
     );
     _phosphorusController = TextEditingController(
-      text: widget.formatLandArea(initialConcentration.phosphorusMgPerMl),
+      text: widget.formatLandArea(initialConcentration.phosphorusMgPerLiter),
     );
     _potassiumController = TextEditingController(
-      text: widget.formatLandArea(initialConcentration.potassiumMgPerMl),
+      text: widget.formatLandArea(initialConcentration.potassiumMgPerLiter),
     );
     _customPlantTypeController = TextEditingController(
       text: _selectedPlantType.id == customPlantTypeProfile.id
@@ -1529,16 +1530,29 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
           ? initial?.plantingMedium.label ?? ''
           : '',
     );
+    _customDepthController = TextEditingController(
+      text: widget.formatLandArea(
+        initial?.plantingMedium.assumedDepthCm ??
+            customPlantingMediumProfile.assumedDepthCm,
+      ),
+    );
+    _customBulkDensityController = TextEditingController(
+      text: widget.formatLandArea(
+        initial?.plantingMedium.bulkDensityKgPerM3 ??
+            customPlantingMediumProfile.bulkDensityKgPerM3,
+      ),
+    );
   }
 
   @override
   void dispose() {
-    _areaController.dispose();
     _nitrogenController.dispose();
     _phosphorusController.dispose();
     _potassiumController.dispose();
     _customPlantTypeController.dispose();
     _customMediumController.dispose();
+    _customDepthController.dispose();
+    _customBulkDensityController.dispose();
     super.dispose();
   }
 
@@ -1564,21 +1578,26 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
   bool get _usesCustomMedium =>
       _selectedMedium.id == customPlantingMediumProfile.id;
 
+  bool _hasManualCustomMediumProfile(PlantingMediumProfile? initial) {
+    if (initial == null || !initial.id.startsWith('custom_medium_')) {
+      return false;
+    }
+
+    return (initial.assumedDepthCm - customPlantingMediumProfile.assumedDepthCm)
+                .abs() >
+            0.0001 ||
+        (initial.bulkDensityKgPerM3 -
+                    customPlantingMediumProfile.bulkDensityKgPerM3)
+                .abs() >
+            0.0001;
+  }
+
   void _cancel() {
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop();
   }
 
   void _confirm() {
-    final parsed = widget.parseLandAreaNumber(_areaController.text);
-    if (parsed == null || parsed <= 0) {
-      setState(() {
-        _areaErrorText =
-            'Masukkan luas tanah lebih dari 0, contoh 0.0044 atau 10.000.';
-      });
-      return;
-    }
-
     final nitrogen = _parsePositiveNumber(_nitrogenController.text);
     final phosphorus = _parsePositiveNumber(_phosphorusController.text);
     final potassium = _parsePositiveNumber(_potassiumController.text);
@@ -1589,8 +1608,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
         phosphorus <= 0 ||
         potassium <= 0) {
       setState(() {
-        _fertilizerErrorText =
-            'Isi konsentrasi N, P, dan K lebih dari 0 mg/ml.';
+        _fertilizerErrorText = 'Isi konsentrasi N, P, dan K lebih dari 0 mg/L.';
       });
       return;
     }
@@ -1599,16 +1617,15 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     final medium = _buildSelectedMedium();
     if (plantType == null || medium == null) return;
 
-    final squareMeters = parsed * _selectedUnit.squareMetersPerUnit;
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
       AiRecommendationAgronomicInput(
         plantType: plantType,
-        landAreaSquareMeters: squareMeters,
+        landAreaSquareMeters: _fixedAiRecommendationAreaSquareMeters,
         fertilizerConcentration: FertilizerSolutionConcentration(
-          nitrogenMgPerMl: nitrogen,
-          phosphorusMgPerMl: phosphorus,
-          potassiumMgPerMl: potassium,
+          nitrogenMgPerLiter: nitrogen,
+          phosphorusMgPerLiter: phosphorus,
+          potassiumMgPerLiter: potassium,
         ),
         plantingMedium: medium,
         analysisWindow: _selectedAnalysisWindow,
@@ -1632,7 +1649,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
       label: label,
       scientificName: 'Tanaman kustom',
       contextNote:
-          'Tanaman ini dimasukkan manual oleh pengguna. NutriXense akan menyesuaikan rekomendasi dari data sensor, luas lahan, dan media tanam yang Anda masukkan.',
+          'Tanaman ini dimasukkan manual oleh pengguna. NutriXense akan menyesuaikan rekomendasi dari data sensor dan media tanam yang Anda masukkan.',
       thresholds: customPlantTypeProfile.thresholds,
     );
   }
@@ -1648,13 +1665,45 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
       return null;
     }
 
+    var depth = customPlantingMediumProfile.assumedDepthCm;
+    var bulkDensity = customPlantingMediumProfile.bulkDensityKgPerM3;
+    if (_manualCustomMediumProfile) {
+      final manualDepth = _parsePositiveNumber(_customDepthController.text);
+      final manualBulkDensity =
+          _parsePositiveNumber(_customBulkDensityController.text);
+      if (manualDepth == null ||
+          manualBulkDensity == null ||
+          manualDepth < 1 ||
+          manualDepth > 50 ||
+          manualBulkDensity < 100 ||
+          manualBulkDensity > 2000) {
+        setState(() {
+          _customMediumProfileErrorText =
+              'Isi kedalaman 1-50 cm dan bulk density 100-2000 kg/m3.';
+        });
+        return null;
+      }
+
+      depth = manualDepth;
+      bulkDensity = manualBulkDensity;
+    }
+
+    if (depth < 1 || depth > 50 || bulkDensity < 100 || bulkDensity > 2000) {
+      setState(() {
+        _customMediumProfileErrorText =
+            'Isi kedalaman 1-50 cm dan bulk density 100-2000 kg/m3.';
+      });
+      return null;
+    }
+
     return PlantingMediumProfile(
       id: _customProfileId('custom_medium', label),
       label: label,
-      assumedDepthCm: customPlantingMediumProfile.assumedDepthCm,
-      bulkDensityKgPerM3: customPlantingMediumProfile.bulkDensityKgPerM3,
-      note:
-          'Media tanam ini dimasukkan manual oleh pengguna. NutriXense akan menyesuaikan rekomendasi dari data sensor dan informasi lahan yang Anda masukkan.',
+      assumedDepthCm: depth,
+      bulkDensityKgPerM3: bulkDensity,
+      note: _manualCustomMediumProfile
+          ? 'Media tanam ini dimasukkan manual oleh pengguna. NutriXense memakai kedalaman dan bulk density yang Anda masukkan sebagai input perhitungan terkontrol.'
+          : 'Media tanam ini dimasukkan manual oleh pengguna. NutriXense memakai asumsi standar kedalaman 20 cm dan bulk density 900 kg/m3.',
     );
   }
 
@@ -1670,30 +1719,35 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     return slug.isEmpty ? prefix : '${prefix}_$slug';
   }
 
-  void _changeUnit(_LandAreaUnit? nextUnit) {
-    if (nextUnit == null || nextUnit == _selectedUnit) return;
-
-    final parsed = widget.parseLandAreaNumber(_areaController.text);
-    final squareMeters =
-        parsed == null ? null : parsed * _selectedUnit.squareMetersPerUnit;
-
-    setState(() {
-      _selectedUnit = nextUnit;
-      _areaErrorText = null;
-      if (squareMeters != null) {
-        final converted = squareMeters / nextUnit.squareMetersPerUnit;
-        final text = widget.formatLandArea(converted);
-        _areaController.value = TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: text.length),
-        );
-      }
-    });
-  }
-
   double? _parsePositiveNumber(String input) {
     final parsed = widget.parseLandAreaNumber(input);
     return parsed == null || parsed <= 0 ? null : parsed;
+  }
+
+  double get _displayDepthCm {
+    if (!_usesCustomMedium) return _selectedMedium.assumedDepthCm;
+    if (!_manualCustomMediumProfile) {
+      return customPlantingMediumProfile.assumedDepthCm;
+    }
+    return _parsePositiveNumber(_customDepthController.text) ??
+        customPlantingMediumProfile.assumedDepthCm;
+  }
+
+  double get _displayBulkDensityKgPerM3 {
+    if (!_usesCustomMedium) return _selectedMedium.bulkDensityKgPerM3;
+    if (!_manualCustomMediumProfile) {
+      return customPlantingMediumProfile.bulkDensityKgPerM3;
+    }
+    return _parsePositiveNumber(_customBulkDensityController.text) ??
+        customPlantingMediumProfile.bulkDensityKgPerM3;
+  }
+
+  String get _displayMediumNote {
+    if (!_usesCustomMedium) return _selectedMedium.note;
+    if (_manualCustomMediumProfile) {
+      return 'Nilai kedalaman dan bulk density mengikuti input manual.';
+    }
+    return 'Jika tidak tahu, biarkan otomatis memakai asumsi standar.';
   }
 
   InputDecoration _inputDecoration({
@@ -1737,11 +1791,45 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     return TextField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: _inputDecoration(label: '$label mg/ml', hint: '10'),
+      decoration: _inputDecoration(label: '$label mg/L', hint: '100'),
       onChanged: (_) {
         if (_fertilizerErrorText == null) return;
         setState(() => _fertilizerErrorText = null);
       },
+    );
+  }
+
+  Widget _buildFixedAreaInfoBox() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryGreen.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.2)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.crop_free_rounded,
+            size: 18,
+            color: AppTheme.primaryGreen,
+          ),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Area rekomendasi dikunci 100 cm² atau 0,01 m² sesuai area efektif pembacaan sensor NPK RS485 dan batas aman pompa kecil.',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 11,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1768,7 +1856,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Isi data dasar agar Gemini menghitung dosis kandidat, lalu aplikasi memvalidasi batas amannya.',
+              'Isi data dasar di bawah ini agar Gemini AI memberikan hasil Rekomendasi yang sesuai.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 12,
@@ -1854,58 +1942,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
               ),
             ),
             const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _areaController,
-                    autofocus: true,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: _inputDecoration(
-                      label: 'Luas tanah',
-                      hint: '0',
-                      errorText: _areaErrorText,
-                    ),
-                    onSubmitted: (_) => _confirm(),
-                    onChanged: (_) {
-                      if (_areaErrorText == null) return;
-                      setState(() => _areaErrorText = null);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                SizedBox(
-                  width: 124,
-                  child: DropdownButtonFormField<_LandAreaUnit>(
-                    value: _selectedUnit,
-                    isExpanded: true,
-                    decoration: _inputDecoration(label: 'Satuan'),
-                    items: _landAreaUnits.map((unit) {
-                      return DropdownMenuItem<_LandAreaUnit>(
-                        value: unit,
-                        child: Text(
-                          unit.label,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: _changeUnit,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Contoh: 0.0044 m2 untuk pot kecil atau 1 hm2 (hektar) untuk lahan 10.000 m2.',
-              style: TextStyle(
-                color: AppTheme.textLight,
-                fontSize: 11,
-                height: 1.35,
-              ),
-            ),
+            _buildFixedAreaInfoBox(),
             const SizedBox(height: 16),
             const Text(
               'Konsentrasi larutan pupuk',
@@ -1953,7 +1990,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
             ],
             const SizedBox(height: 8),
             const Text(
-              'Satuan mg/ml. Jika belum punya angka lab, gunakan nilai bawaan dulu lalu sesuaikan saat data pupuk tersedia.',
+              'Biarkan 0 jika tidak menggunakan pupuk tertentu. Nilai ini akan digunakan untuk menghitung rekomendasi pemupukan.',
               style: TextStyle(
                 color: AppTheme.textLight,
                 fontSize: 11,
@@ -1979,6 +2016,10 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
                 setState(() {
                   _selectedMedium = value;
                   _customMediumErrorText = null;
+                  _customMediumProfileErrorText = null;
+                  if (value.id != customPlantingMediumProfile.id) {
+                    _manualCustomMediumProfile = false;
+                  }
                 });
               },
             ),
@@ -1986,7 +2027,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
               const SizedBox(height: 10),
               TextField(
                 controller: _customMediumController,
-                textInputAction: TextInputAction.done,
+                textInputAction: TextInputAction.next,
                 decoration: _inputDecoration(
                   label: 'Nama media tanam lainnya',
                   hint: 'Contoh: Cocopeat, Rockwool, Hidroton',
@@ -1998,10 +2039,93 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
                   setState(() => _customMediumErrorText = null);
                 },
               ),
+              const SizedBox(height: 10),
+              SwitchListTile(
+                value: _manualCustomMediumProfile,
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: const Text(
+                  'Atur manual kedalaman & kepadatan media tanam',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Matikan jika tidak tahu. NutriXense memakai 20 cm dan 900 kg/m3.',
+                  style: TextStyle(
+                    color: AppTheme.textLight,
+                    fontSize: 11,
+                    height: 1.3,
+                  ),
+                ),
+                activeColor: AppTheme.primaryGreen,
+                onChanged: (value) {
+                  setState(() {
+                    _manualCustomMediumProfile = value;
+                    _customMediumProfileErrorText = null;
+                  });
+                },
+              ),
+              if (_manualCustomMediumProfile) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _customDepthController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textInputAction: TextInputAction.next,
+                        decoration: _inputDecoration(
+                          label: 'Kedalaman cm',
+                          hint: '20',
+                        ),
+                        onChanged: (_) {
+                          if (_customMediumProfileErrorText == null) return;
+                          setState(() => _customMediumProfileErrorText = null);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _customBulkDensityController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textInputAction: TextInputAction.done,
+                        decoration: _inputDecoration(
+                          label: 'Bulk density kg/m3',
+                          hint: '900',
+                        ),
+                        onSubmitted: (_) => _confirm(),
+                        onChanged: (_) {
+                          if (_customMediumProfileErrorText == null) return;
+                          setState(() => _customMediumProfileErrorText = null);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                if (_customMediumProfileErrorText != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _customMediumProfileErrorText!,
+                    style: const TextStyle(
+                      color: AppTheme.statusLow,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
             ],
             const SizedBox(height: 8),
             Text(
-              'Asumsi: kedalaman ${widget.formatLandArea(_selectedMedium.assumedDepthCm)} cm, bulk density ${widget.formatLandArea(_selectedMedium.bulkDensityKgPerM3)} kg/m3. ${_selectedMedium.note}',
+              'Asumsi: kedalaman ${widget.formatLandArea(_displayDepthCm)} cm, bulk density ${widget.formatLandArea(_displayBulkDensityKgPerM3)} kg/m3. $_displayMediumNote',
               style: const TextStyle(
                 color: AppTheme.textLight,
                 fontSize: 11,
