@@ -55,12 +55,16 @@ class _HomeScreenState extends State<HomeScreen>
   int totalPumps = 4;
 
   bool isInternetConnected = true;
-  bool isMqttConnected = false;
+  bool isMqttBrokerConnected = false;
+  bool isIotDeviceOnline = false;
   bool get isFullyConnected {
-    return isInternetConnected && isMqttConnected;
+    return isInternetConnected && isMqttBrokerConnected && isIotDeviceOnline;
   }
 
+  static const Duration _iotDeviceOnlineTimeout = Duration(seconds: 5);
   DateTime? lastDataReceived;
+  DateTime? lastDeviceStatusReceived;
+  bool _latestIotDeviceStatus = false;
   Timer? connectionTimer;
   Map<String, dynamic> _latestSensorData = const {};
   final Map<String, bool> _buzzerMuted = {
@@ -82,6 +86,7 @@ class _HomeScreenState extends State<HomeScreen>
       ThresholdConfigService.instance;
 
   StreamSubscription? sensorSub;
+  StreamSubscription<bool>? deviceStatusSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _buzzerConfigSub;
   final Map<String, TextEditingController> _thresholdControllers = {
     'min_nitrogen': TextEditingController(text: '100'),
@@ -107,29 +112,76 @@ class _HomeScreenState extends State<HomeScreen>
   List<DateTime> chartTimes = [];
 
   void initMQTT() async {
-    await mqttService.init();
-
     mqttService.onConnectionChanged = (status) {
       if (!mounted) return;
 
       setState(() {
-        isMqttConnected = status;
+        isMqttBrokerConnected = status;
+        if (!status) {
+          isIotDeviceOnline = false;
+        }
       });
 
       if (status) {
+        _subscribeHomeMqttTopics();
         _publishBuzzerMuteConfig();
       }
     };
 
-    mqttService.subscribe("nutrixense/sensor");
-
     sensorSub = mqttService.sensorStream.listen((data) {
       lastDataReceived = DateTime.now();
-      setState(() {
-        isMqttConnected = true;
-      });
+      _setIotDeviceOnline(true);
       updateSensorData(data);
     });
+
+    deviceStatusSub = mqttService.deviceStatusStream.listen((online) {
+      lastDeviceStatusReceived = DateTime.now();
+      _latestIotDeviceStatus = online;
+      _setIotDeviceOnline(_hasFreshIotOnlineSignal());
+    });
+
+    await mqttService.init();
+
+    if (!mounted) return;
+    setState(() {
+      isMqttBrokerConnected = mqttService.isConnected;
+      if (!mqttService.isConnected) {
+        isIotDeviceOnline = false;
+      }
+    });
+
+    if (mqttService.isConnected) {
+      _subscribeHomeMqttTopics();
+    }
+  }
+
+  void _subscribeHomeMqttTopics() {
+    mqttService.subscribe("nutrixense/sensor");
+    mqttService.subscribe("nutrixense/status");
+  }
+
+  void _setIotDeviceOnline(bool online) {
+    if (!mounted || isIotDeviceOnline == online) return;
+    setState(() {
+      isIotDeviceOnline = online;
+    });
+  }
+
+  bool _hasFreshIotOnlineSignal([DateTime? now]) {
+    final currentTime = now ?? DateTime.now();
+    final hasFreshSensorData = lastDataReceived != null &&
+        currentTime.difference(lastDataReceived!) < _iotDeviceOnlineTimeout;
+    final hasNewerSensorDataThanOfflineStatus = _latestIotDeviceStatus ||
+        lastDeviceStatusReceived == null ||
+        (lastDataReceived != null &&
+            lastDataReceived!.isAfter(lastDeviceStatusReceived!));
+    final hasFreshOnlineStatus = _latestIotDeviceStatus &&
+        lastDeviceStatusReceived != null &&
+        currentTime.difference(lastDeviceStatusReceived!) <
+            _iotDeviceOnlineTimeout;
+
+    return (hasFreshSensorData && hasNewerSensorDataThanOfflineStatus) ||
+        hasFreshOnlineStatus;
   }
 
   void initConnectivity() {
@@ -146,7 +198,8 @@ class _HomeScreenState extends State<HomeScreen>
 
       if (!hasInternet) {
         setState(() {
-          isMqttConnected = false;
+          isMqttBrokerConnected = false;
+          isIotDeviceOnline = false;
         });
       }
     });
@@ -156,15 +209,9 @@ class _HomeScreenState extends State<HomeScreen>
     connectionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
 
-      setState(() {
-        // If data is stale for more than 3 seconds, consider MQTT disconnected
-        if (lastDataReceived != null) {
-          final diff = DateTime.now().difference(lastDataReceived!);
-          if (diff.inSeconds >= 3) {
-            isMqttConnected = false;
-          }
-        }
-      });
+      final nextOnline =
+          isMqttBrokerConnected && _hasFreshIotOnlineSignal(DateTime.now());
+      _setIotDeviceOnline(nextOnline);
     });
   }
 
@@ -930,6 +977,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     sensorSub?.cancel();
+    deviceStatusSub?.cancel();
     _buzzerConfigSub?.cancel();
     connectivitySub.cancel();
     connectionTimer?.cancel();
@@ -1021,11 +1069,11 @@ class _HomeScreenState extends State<HomeScreen>
                                   ),
                                   const SizedBox(width: 10),
 
-                                  // ─── MQTT Badge + WiFi Icon ───────────────────────
+                                  // ─── IoT Badge + WiFi Icon ───────────────────────
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      // Small MQTT Badge
+                                      // Small IoT device badge
                                       AnimatedContainer(
                                         duration:
                                             const Duration(milliseconds: 300),
@@ -1034,7 +1082,7 @@ class _HomeScreenState extends State<HomeScreen>
                                           vertical: 4,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: isMqttConnected
+                                          color: isIotDeviceOnline
                                               ? Colors.green
                                               : Colors.orange,
                                           borderRadius:
@@ -1044,7 +1092,7 @@ class _HomeScreenState extends State<HomeScreen>
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Icon(
-                                              isMqttConnected
+                                              isIotDeviceOnline
                                                   ? Icons.check_circle
                                                   : Icons.access_time_rounded,
                                               color: Colors.white,
@@ -1052,7 +1100,7 @@ class _HomeScreenState extends State<HomeScreen>
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              isMqttConnected
+                                              isIotDeviceOnline
                                                   ? 'Terhubung'
                                                   : 'Menunggu',
                                               style: const TextStyle(

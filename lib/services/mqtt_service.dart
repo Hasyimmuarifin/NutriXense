@@ -12,8 +12,10 @@ class MQTTService {
   final Set<String> _subscribedTopics = {};
   final _sensorStreamController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _deviceStatusStreamController = StreamController<bool>.broadcast();
   Stream<Map<String, dynamic>> get sensorStream =>
       _sensorStreamController.stream;
+  Stream<bool> get deviceStatusStream => _deviceStatusStreamController.stream;
   Function(bool)? onConnectionChanged;
 
   bool get isConnected =>
@@ -93,11 +95,60 @@ class MQTTService {
 
         if (topic == 'nutrixense/sensor' && data is Map<String, dynamic>) {
           _sensorStreamController.add(data);
+        } else if (topic == 'nutrixense/status') {
+          final status = _parseDeviceOnlineStatus(data);
+          if (status != null) {
+            _deviceStatusStreamController.add(status);
+          }
         }
       } catch (e) {
-        debugPrint("JSON ERROR: $e");
+        if (topic == 'nutrixense/status') {
+          final status = _parseDeviceOnlineStatus(msg);
+          if (status != null) {
+            _deviceStatusStreamController.add(status);
+          }
+        } else {
+          debugPrint("JSON ERROR: $e");
+        }
       }
     });
+  }
+
+  bool? _parseDeviceOnlineStatus(dynamic payload) {
+    if (payload is bool) return payload;
+    if (payload is num) return payload != 0;
+
+    if (payload is String) {
+      final normalized = payload.trim().toLowerCase();
+      if (['online', 'connected', 'on', 'true', '1', 'aktif'].contains(
+        normalized,
+      )) {
+        return true;
+      }
+      if (['offline', 'disconnected', 'off', 'false', '0', 'mati'].contains(
+        normalized,
+      )) {
+        return false;
+      }
+    }
+
+    if (payload is Map<String, dynamic>) {
+      for (final key in [
+        'online',
+        'connected',
+        'device_online',
+        'iot_online',
+        'status',
+        'state',
+      ]) {
+        if (payload.containsKey(key)) {
+          final status = _parseDeviceOnlineStatus(payload[key]);
+          if (status != null) return status;
+        }
+      }
+    }
+
+    return null;
   }
 
   void publish(String topic, String message, {bool retain = false}) {

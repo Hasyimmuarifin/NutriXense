@@ -34,9 +34,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
   static const MethodChannel _downloadsChannel =
       MethodChannel('com.example.nutrixense/alerts');
 
-  int _selectedFilter = 0; // 0=Hari ini, 1=7 Hari, 2=30 Hari
+  static const int _customFilterIndex = 3;
+
+  int _selectedFilter = 0; // 0=Hari ini, 1=7 Hari, 2=30 Hari, 3=Filter
   int _selectedSensor = 0; // 0=NPK, 1=pH, 2=Moisture, 3=Temp, 4=EC
   List<SensorDataPoint> _data = [];
+  List<SensorDataPoint> _rangeData = [];
   int _pageIndex = 0;
   int _totalRows = 0;
   static const int _pageSize = 100;
@@ -52,13 +55,40 @@ class _HistoryScreenState extends State<HistoryScreen> {
   bool _isDeletingHistory = false;
   Object? _historyError;
   DateTime? _latestHistorySyncTime;
+  DateTime? _customStartDate;
+  DateTime? _customEndDate;
   final OfflineDataCacheService _offlineCache =
       OfflineDataCacheService.instance;
   final ThresholdConfigService _thresholdConfigService =
       ThresholdConfigService.instance;
 
-  final List<String> _filters = ['Hari ini', '7 Hari', '30 Hari'];
+  final List<String> _filters = ['Hari ini', '7 Hari', '30 Hari', 'Filter'];
   final List<int> _filterDays = [1, 7, 30];
+
+  bool get _isCustomFilter => _selectedFilter == _customFilterIndex;
+
+  String get _selectedRangeLabel {
+    if (_isCustomFilter && _customStartDate != null && _customEndDate != null) {
+      final formatter = DateFormat('dd/MM/yyyy HH:mm');
+      return '${formatter.format(_customStartDate!)} - '
+          '${formatter.format(_customEndDate!)}';
+    }
+
+    return _filters[_selectedFilter];
+  }
+
+  String get _selectedRangeFileToken {
+    if (_isCustomFilter && _customStartDate != null && _customEndDate != null) {
+      final formatter = DateFormat('yyyyMMdd_HHmm');
+      return 'filter_${formatter.format(_customStartDate!)}_'
+          '${formatter.format(_customEndDate!)}';
+    }
+
+    return _selectedRangeLabel
+        .toLowerCase()
+        .replaceAll(' ', '_')
+        .replaceAll(RegExp(r'[^a-z0-9_]'), '');
+  }
 
   int get _totalPages {
     final pages = _totalRows == 0 ? 1 : ((_totalRows - 1) ~/ _pageSize) + 1;
@@ -160,6 +190,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _isLoadingHistory = true;
       _historyError = null;
       _data = [];
+      _rangeData = [];
       _pageData = [];
       _pageIndex = 0;
       _totalRows = 0;
@@ -183,15 +214,33 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Query _historyBaseQuery() {
     final startDate = _historyStartDate();
+    final endDate = _historyEndDate();
 
-    return FirebaseFirestore.instance.collection('sensor_data').where(
+    var query = FirebaseFirestore.instance.collection('sensor_data').where(
           'timestamp',
           isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
         );
+
+    if (endDate != null) {
+      query = query.where(
+        'timestamp',
+        isLessThanOrEqualTo: Timestamp.fromDate(endDate),
+      );
+    }
+
+    return query;
   }
 
   DateTime _historyStartDate() {
     final now = DateTime.now();
+    if (_isCustomFilter && _customStartDate != null) {
+      return _customStartDate!;
+    }
+
+    if (_isCustomFilter) {
+      return now.subtract(const Duration(days: 1));
+    }
+
     if (_selectedFilter == 0) {
       return DateTime(now.year, now.month, now.day);
     }
@@ -199,32 +248,83 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return now.subtract(Duration(days: _filterDays[_selectedFilter]));
   }
 
+  DateTime? _historyEndDate() {
+    if (_isCustomFilter) return _customEndDate;
+    return null;
+  }
+
+  bool _isInHistoryRange(DateTime time) {
+    final startDate = _historyStartDate();
+    final endDate = _historyEndDate();
+
+    if (time.isBefore(startDate)) return false;
+    if (endDate != null && time.isAfter(endDate)) return false;
+    return true;
+  }
+
   List<SensorDataPoint> _applySampling(List<SensorDataPoint> source) {
     if (source.isEmpty) return [];
+    final maxNodes = _chartNodeLimitForRange();
+    final meaningfulSource = source
+        .where((item) => _chartPriorityScore(item) > 0)
+        .toList(growable: false);
+    final chartSource = meaningfulSource.isEmpty ? source : meaningfulSource;
 
-    // TODAY → tampilkan semua data
-    if (_selectedFilter == 0) {
-      return source;
+    if (chartSource.length <= maxNodes) return chartSource;
+    if (maxNodes <= 1) return [source.first];
+
+    final sampled = <SensorDataPoint>[];
+
+    for (var index = 0; index < maxNodes; index++) {
+      final start = (index * chartSource.length / maxNodes).floor();
+      final end = (((index + 1) * chartSource.length / maxNodes).ceil())
+          .clamp(start + 1, chartSource.length);
+      final bucket = chartSource.sublist(start, end);
+
+      sampled.add(
+        bucket.reduce((best, item) {
+          final bestScore = _chartPriorityScore(best);
+          final itemScore = _chartPriorityScore(item);
+          if (itemScore > bestScore) return item;
+          if (itemScore == bestScore && item.time.isAfter(best.time)) {
+            return item;
+          }
+          return best;
+        }),
+      );
     }
 
-    // 7 DAYS → ambil 1 data tiap 15 menit
-    final Duration interval = _selectedFilter == 1
-        ? const Duration(minutes: 15)
+    return sampled..sort((a, b) => a.time.compareTo(b.time));
+  }
+
+  double _chartPriorityScore(SensorDataPoint item) {
+    return switch (_selectedSensor) {
+      0 => [
+          item.nitrogen,
+          item.phosphorus,
+          item.potassium,
+        ].reduce((a, b) => a > b ? a : b),
+      1 => item.ph,
+      2 => item.moisture,
+      3 => item.temperature,
+      4 => item.ec,
+      _ => 0,
+    };
+  }
+
+  int _chartNodeLimitForRange() {
+    final startDate = _historyStartDate();
+    final endDate = _historyEndDate() ?? DateTime.now();
+    final duration = endDate.isAfter(startDate)
+        ? endDate.difference(startDate)
         : const Duration(hours: 1);
 
-    final List<SensorDataPoint> sampled = [];
-
-    DateTime? lastIncluded;
-
-    for (final item in source) {
-      if (lastIncluded == null ||
-          item.time.difference(lastIncluded).abs() >= interval) {
-        sampled.add(item);
-        lastIncluded = item.time;
-      }
-    }
-
-    return sampled;
+    if (duration <= const Duration(hours: 1)) return 120;
+    if (duration <= const Duration(hours: 6)) return 180;
+    if (duration <= const Duration(days: 1)) return 240;
+    if (duration <= const Duration(days: 7)) return 288;
+    if (duration <= const Duration(days: 30)) return 360;
+    return 420;
   }
 
   Future<void> _loadInitialHistory() async {
@@ -254,13 +354,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   void _listenForLatestHistory() {
     final startAfter = _latestHistorySyncTime ?? _historyStartDate();
+    final endDate = _historyEndDate();
 
-    _latestSubscription = FirebaseFirestore.instance
-        .collection('sensor_data')
-        .where(
+    var query = FirebaseFirestore.instance.collection('sensor_data').where(
           'timestamp',
           isGreaterThan: Timestamp.fromDate(startAfter),
-        )
+        );
+
+    if (endDate != null) {
+      query = query.where(
+        'timestamp',
+        isLessThanOrEqualTo: Timestamp.fromDate(endDate),
+      );
+    }
+
+    _latestSubscription = query
         .orderBy('timestamp', descending: false)
         .snapshots()
         .listen((snapshot) {
@@ -297,10 +405,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<CachedSensorDataPoint> _historyEntriesInRange(
     List<CachedSensorDataPoint> entries,
   ) {
-    final startDate = _historyStartDate();
-    return entries
-        .where((entry) => !entry.data.time.isBefore(startDate))
-        .toList()
+    return entries.where((entry) => _isInHistoryRange(entry.data.time)).toList()
       ..sort((a, b) => a.data.time.compareTo(b.data.time));
   }
 
@@ -325,7 +430,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (!until.isAfter(from)) return const [];
 
     try {
-      final snapshot = await FirebaseFirestore.instance
+      var query = FirebaseFirestore.instance
           .collection('sensor_data')
           .where(
             'timestamp',
@@ -334,7 +439,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
           .where(
             'timestamp',
             isLessThan: Timestamp.fromDate(until),
-          )
+          );
+      final endDate = _historyEndDate();
+      if (endDate != null) {
+        query = query.where(
+          'timestamp',
+          isLessThanOrEqualTo: Timestamp.fromDate(endDate),
+        );
+      }
+
+      final snapshot = await query
           .orderBy('timestamp', descending: false)
           .get(const GetOptions(source: Source.server));
 
@@ -364,6 +478,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
             'timestamp',
             isGreaterThan: Timestamp.fromDate(boundary),
           );
+    final endDate = _historyEndDate();
+    if (endDate != null) {
+      query = query.where(
+        'timestamp',
+        isLessThanOrEqualTo: Timestamp.fromDate(endDate),
+      );
+    }
 
     try {
       final snapshot = await query
@@ -397,6 +518,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         .skip(nextPageIndex * _pageSize)
         .take(_pageSize)
         .toList(growable: false);
+    final nextRangeData =
+        rangeEntries.map((entry) => entry.data).toList(growable: false);
 
     setState(() {
       _knownHistoryDocIds
@@ -409,9 +532,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _totalRows = nextTotalRows;
       _latestHistorySyncTime =
           rangeEntries.isEmpty ? null : rangeEntries.last.data.time;
-      _data = _applySampling(
-        rangeEntries.map((entry) => entry.data).toList(growable: false),
-      );
+      _rangeData = nextRangeData;
+      _data = _applySampling(nextRangeData);
       _pageData = pageSlice.map((entry) => entry.data).toList(growable: false);
     });
   }
@@ -426,7 +548,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _confirmDeleteCurrentHistoryRange() async {
     if (_isDeletingHistory) return;
 
-    final rangeLabel = _filters[_selectedFilter];
+    final rangeLabel = _selectedRangeLabel;
     final confirmed = await _showDeleteConfirmation(
       title: 'Hapus histori $rangeLabel?',
       message:
@@ -469,8 +591,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Future<int> _deleteHistoryRange() async {
     var deletedCount = 0;
-    final startDate = _historyStartDate();
-
     while (true) {
       final snapshot = await _historyBaseQuery()
           .orderBy('timestamp', descending: false)
@@ -490,7 +610,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     await _offlineCache.removeSensorHistoryWhere(
-      (item) => !item.data.time.isBefore(startDate),
+      (item) => _isInHistoryRange(item.data.time),
     );
 
     return deletedCount;
@@ -531,10 +651,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     List<SensorDataPoint> exportData,
   ) async {
     final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final range = _filters[_selectedFilter]
-        .toLowerCase()
-        .replaceAll(' ', '_')
-        .replaceAll(RegExp(r'[^a-z0-9_]'), '');
+    final range = _selectedRangeFileToken;
     final extension = switch (format) {
       _HistoryExportFormat.pdf => 'pdf',
       _HistoryExportFormat.csv => 'csv',
@@ -851,7 +968,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
             pw.SizedBox(height: 4),
             pw.Text(
-              'Filter: ${_filters[_selectedFilter]}',
+              'Filter: $_selectedRangeLabel',
               style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
             ),
             pw.Text(
@@ -1116,6 +1233,274 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  Future<void> _handleFilterTap(int index) async {
+    if (index == _customFilterIndex) {
+      await _showCustomFilterDialog();
+      return;
+    }
+
+    if (_selectedFilter == index) return;
+    setState(() => _selectedFilter = index);
+    await _refreshHistory();
+  }
+
+  Future<void> _showCustomFilterDialog() async {
+    final now = DateTime.now();
+    final initialEnd = _customEndDate ?? now;
+    final initialStart =
+        _customStartDate ?? initialEnd.subtract(const Duration(days: 1));
+
+    final result = await showDialog<_HistoryDateRange>(
+      context: context,
+      builder: (dialogContext) {
+        var start = DateTime(
+          initialStart.year,
+          initialStart.month,
+          initialStart.day,
+          initialStart.hour,
+          initialStart.minute,
+        );
+        var end = DateTime(
+          initialEnd.year,
+          initialEnd.month,
+          initialEnd.day,
+          initialEnd.hour,
+          initialEnd.minute,
+        );
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> pickDate({
+              required bool isStart,
+            }) async {
+              final current = isStart ? start : end;
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: current,
+                firstDate: DateTime(2020),
+                lastDate: now.add(const Duration(days: 365)),
+              );
+              if (picked == null) return;
+
+              setDialogState(() {
+                final next = DateTime(
+                  picked.year,
+                  picked.month,
+                  picked.day,
+                  current.hour,
+                  current.minute,
+                );
+                if (isStart) {
+                  start = next;
+                } else {
+                  end = next;
+                }
+              });
+            }
+
+            Future<void> pickTime({
+              required bool isStart,
+            }) async {
+              final current = isStart ? start : end;
+              final picked = await showTimePicker(
+                context: context,
+                initialTime: TimeOfDay.fromDateTime(current),
+              );
+              if (picked == null) return;
+
+              setDialogState(() {
+                final next = DateTime(
+                  current.year,
+                  current.month,
+                  current.day,
+                  picked.hour,
+                  picked.minute,
+                );
+                if (isStart) {
+                  start = next;
+                } else {
+                  end = next;
+                }
+              });
+            }
+
+            Widget dateTimeRow({
+              required String label,
+              required DateTime value,
+              required VoidCallback onDateTap,
+              required VoidCallback onTimeTap,
+            }) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildDialogDateTimeButton(
+                          icon: Icons.calendar_month_rounded,
+                          label: DateFormat('dd/MM/yyyy').format(value),
+                          onTap: onDateTap,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 112,
+                        child: _buildDialogDateTimeButton(
+                          icon: Icons.schedule_rounded,
+                          label: DateFormat('HH:mm').format(value),
+                          onTap: onTimeTap,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            }
+
+            return AlertDialog(
+              titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+              contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              title: const Row(
+                children: [
+                  Icon(
+                    Icons.filter_alt_rounded,
+                    color: AppTheme.primaryGreen,
+                  ),
+                  SizedBox(width: 8),
+                  Text('Filter Timestamp'),
+                ],
+              ),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 340),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    dateTimeRow(
+                      label: 'Mulai',
+                      value: start,
+                      onDateTap: () => pickDate(isStart: true),
+                      onTimeTap: () => pickTime(isStart: true),
+                    ),
+                    const SizedBox(height: 14),
+                    dateTimeRow(
+                      label: 'Sampai',
+                      value: end,
+                      onDateTap: () => pickDate(isStart: false),
+                      onTimeTap: () => pickTime(isStart: false),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Batal'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final normalizedStart = DateTime(
+                      start.year,
+                      start.month,
+                      start.day,
+                      start.hour,
+                      start.minute,
+                    );
+                    final normalizedEnd = DateTime(
+                      end.year,
+                      end.month,
+                      end.day,
+                      end.hour,
+                      end.minute,
+                      59,
+                      999,
+                    );
+
+                    Navigator.of(dialogContext).pop(
+                      _HistoryDateRange(normalizedStart, normalizedEnd),
+                    );
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryGreen,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Terapkan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null || !mounted) return;
+
+    if (!result.end.isAfter(result.start)) {
+      _showHistorySnackBar(
+        'Rentang filter tidak valid. Waktu akhir harus setelah waktu mulai.',
+        backgroundColor: AppTheme.statusHigh,
+      );
+      return;
+    }
+
+    setState(() {
+      _selectedFilter = _customFilterIndex;
+      _customStartDate = result.start;
+      _customEndDate = result.end;
+    });
+    await _refreshHistory();
+  }
+
+  Widget _buildDialogDateTimeButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: AppTheme.bgPrimary,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 17, color: AppTheme.primaryGreen),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   final List<Map<String, dynamic>> _sensors = [
     {'label': 'NPK', 'icon': Icons.eco_rounded},
     {'label': 'pH', 'icon': Icons.science_rounded},
@@ -1128,70 +1513,50 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<LineChartBarData> get _chartLines {
     if (_data.isEmpty) return [];
 
-    double xValueFromTime(DateTime time) {
+    double xValueAtIndex(int index) {
       if (_selectedFilter == 0) {
         // Today → jam desimal (0–24)
+        final time = _data[index].time;
         return time.hour + (time.minute / 60.0);
       }
-      return _data.indexOf(_data.firstWhere((d) => d.time == time)).toDouble();
+      return index.toDouble();
     }
 
-    List<FlSpot> toSpots(List<double> vals, List<DateTime> times) {
+    List<FlSpot> toSpots(List<double> vals) {
       return List.generate(
         vals.length,
-        (i) => FlSpot(xValueFromTime(times[i]), vals[i]),
+        (i) => FlSpot(xValueAtIndex(i), vals[i]),
       );
     }
 
     switch (_selectedSensor) {
       case 0: // NPK
         return [
-          _bar(
-              toSpots(_data.map((d) => d.nitrogen).toList(),
-                  _data.map((d) => d.time).toList()),
-              AppTheme.primaryGreen,
-              'N'),
-          _bar(
-              toSpots(_data.map((d) => d.phosphorus).toList(),
-                  _data.map((d) => d.time).toList()),
-              AppTheme.primaryBlue,
-              'P'),
-          _bar(
-              toSpots(_data.map((d) => d.potassium).toList(),
-                  _data.map((d) => d.time).toList()),
-              AppTheme.statusHigh,
-              'K'),
+          _bar(toSpots(_data.map((d) => d.nitrogen).toList()),
+              AppTheme.primaryGreen, 'N'),
+          _bar(toSpots(_data.map((d) => d.phosphorus).toList()),
+              AppTheme.primaryBlue, 'P'),
+          _bar(toSpots(_data.map((d) => d.potassium).toList()),
+              AppTheme.statusHigh, 'K'),
         ];
       case 1: // pH
         return [
-          _bar(
-              toSpots(_data.map((d) => d.ph).toList(),
-                  _data.map((d) => d.time).toList()),
-              const Color(0xFF7B1FA2),
-              'pH'),
+          _bar(toSpots(_data.map((d) => d.ph).toList()),
+              const Color(0xFF7B1FA2), 'pH'),
         ];
       case 2: // Moisture
         return [
-          _bar(
-              toSpots(_data.map((d) => d.moisture).toList(),
-                  _data.map((d) => d.time).toList()),
-              AppTheme.lightBlue,
-              'Moisture'),
+          _bar(toSpots(_data.map((d) => d.moisture).toList()),
+              AppTheme.lightBlue, 'Moisture'),
         ];
       case 3: // Temperature
         return [
-          _bar(
-              toSpots(_data.map((d) => d.temperature).toList(),
-                  _data.map((d) => d.time).toList()),
-              AppTheme.statusLow,
-              'Temp'),
+          _bar(toSpots(_data.map((d) => d.temperature).toList()),
+              AppTheme.statusLow, 'Temp'),
         ];
       case 4: // EC
         return [
-          _bar(
-              toSpots(_data.map((d) => d.ec).toList(),
-                  _data.map((d) => d.time).toList()),
-              AppTheme.statusNormal,
+          _bar(toSpots(_data.map((d) => d.ec).toList()), AppTheme.statusNormal,
               'EC'),
         ];
       default:
@@ -1381,7 +1746,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     return IconButton(
-      tooltip: 'Hapus histori ${_filters[_selectedFilter]}',
+      tooltip: 'Hapus histori $_selectedRangeLabel',
       onPressed: _isLoadingHistory ? null : _confirmDeleteCurrentHistoryRange,
       icon: const Icon(
         Icons.delete_sweep_outlined,
@@ -1425,31 +1790,48 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     _filters.length,
                     (i) => Expanded(
                       child: GestureDetector(
-                        onTap: () {
-                          if (_selectedFilter == i) return;
-                          setState(() => _selectedFilter = i);
-                          _refreshHistory();
-                        },
+                        onTap: () => _handleFilterTap(i),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
                           margin: EdgeInsets.only(
                               right: i < _filters.length - 1 ? 8 : 0),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: _selectedFilter == i
                                 ? AppTheme.primaryGreen
                                 : AppTheme.bgPrimary,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Text(
-                            _filters[i],
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: _selectedFilter == i
-                                  ? Colors.white
-                                  : AppTheme.textSecondary,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                if (i == _customFilterIndex) ...[
+                                  Icon(
+                                    Icons.filter_alt_rounded,
+                                    size: 15,
+                                    color: _selectedFilter == i
+                                        ? Colors.white
+                                        : AppTheme.textSecondary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
+                                Text(
+                                  _filters[i],
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: _selectedFilter == i
+                                        ? Colors.white
+                                        : AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -1495,8 +1877,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   children: List.generate(
                                     _sensors.length,
                                     (i) => GestureDetector(
-                                      onTap: () =>
-                                          setState(() => _selectedSensor = i),
+                                      onTap: () => setState(() {
+                                        _selectedSensor = i;
+                                        _data = _applySampling(_rangeData);
+                                      }),
                                       child: AnimatedContainer(
                                         duration:
                                             const Duration(milliseconds: 250),
@@ -1676,8 +2060,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                                 reservedSize: 24,
                                                 interval: _selectedFilter == 0
                                                     ? 3
-                                                    : (_data.length / 4)
-                                                        .ceilToDouble(),
+                                                    : _chartXAxisInterval,
                                                 getTitlesWidget: (v, _) {
                                                   if (_data.isEmpty) {
                                                     return const SizedBox();
@@ -1699,11 +2082,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                                     );
                                                   }
 
-                                                  // 7 & 30 days → tetap tanggal
                                                   final idx = v.toInt().clamp(
                                                       0, _data.length - 1);
                                                   return Text(
-                                                    DateFormat('d/M').format(
+                                                    _formatChartXAxisLabel(
                                                         _data[idx].time),
                                                     style: const TextStyle(
                                                         fontSize: 9,
@@ -1759,6 +2141,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ],
       ),
     );
+  }
+
+  double get _chartXAxisInterval {
+    if (_data.length <= 4) return 1;
+    return (_data.length / 4).ceilToDouble();
+  }
+
+  String _formatChartXAxisLabel(DateTime time) {
+    final startDate = _historyStartDate();
+    final endDate = _historyEndDate() ?? DateTime.now();
+    final duration = endDate.isAfter(startDate)
+        ? endDate.difference(startDate)
+        : const Duration(hours: 1);
+
+    if (duration <= const Duration(days: 1)) {
+      return DateFormat('HH:mm').format(time);
+    }
+    if (duration <= const Duration(days: 31)) {
+      return DateFormat('d/M').format(time);
+    }
+    return DateFormat('d/M/yy').format(time);
   }
 
   String _formatYAxisLabel(double value) {
@@ -1981,6 +2384,13 @@ class _StatItem {
   final String value;
   final Color color;
   const _StatItem(this.label, this.value, this.color);
+}
+
+class _HistoryDateRange {
+  const _HistoryDateRange(this.start, this.end);
+
+  final DateTime start;
+  final DateTime end;
 }
 
 class _PdfTrendSeries {

@@ -5,9 +5,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:intl/intl.dart';
 
 import '../models/ai_recommendation.dart';
 import '../models/pump_flow_rate.dart';
+
+String _formatAiDateTime(DateTime value) {
+  return DateFormat('yyyy-MM-dd HH:mm').format(value);
+}
+
+String _formatAiDateTimeRange(DateTime start, DateTime end) {
+  return '${_formatAiDateTime(start)} sampai ${_formatAiDateTime(end)}';
+}
 
 class FertilizerSolutionConcentration {
   const FertilizerSolutionConcentration({
@@ -88,21 +97,90 @@ class AiAnalysisWindowProfile {
   const AiAnalysisWindowProfile({
     required this.id,
     required this.label,
-    required this.rowLimit,
+    required this.duration,
     required this.description,
+    this.customStartAt,
+    this.customEndAt,
   });
+
+  factory AiAnalysisWindowProfile.customRange({
+    required DateTime startAt,
+    required DateTime endAt,
+  }) {
+    return AiAnalysisWindowProfile(
+      id: 'custom',
+      label: 'Custom',
+      duration: null,
+      description:
+          'Analisis manual berdasarkan rentang tanggal dan jam yang dipilih.',
+      customStartAt: startAt,
+      customEndAt: endAt,
+    );
+  }
 
   final String id;
   final String label;
-  final int rowLimit;
+  final Duration? duration;
   final String description;
+  final DateTime? customStartAt;
+  final DateTime? customEndAt;
+
+  bool get isCustom => id == 'custom';
+
+  String get xaiLabel {
+    final start = customStartAt;
+    final end = customEndAt;
+    if (!isCustom || start == null || end == null) return label;
+    return '$label ${_formatAiDateTimeRange(start, end)}';
+  }
+
+  AiAnalysisTimestampRange resolveRange(DateTime now) {
+    final start = customStartAt;
+    final end = customEndAt;
+    if (isCustom && start != null && end != null) {
+      return AiAnalysisTimestampRange(start: start, end: end);
+    }
+
+    final windowDuration = duration ?? const Duration(hours: 12);
+    return AiAnalysisTimestampRange(
+      start: now.subtract(windowDuration),
+      end: now,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'label': label,
-      'row_limit': rowLimit,
+      'filter_method': 'timestamp_range',
+      if (duration != null) 'duration_minutes': duration!.inMinutes,
+      if (customStartAt != null)
+        'custom_start_at': customStartAt!.toIso8601String(),
+      if (customEndAt != null) 'custom_end_at': customEndAt!.toIso8601String(),
+      if (customStartAt != null && customEndAt != null)
+        'display_range': _formatAiDateTimeRange(customStartAt!, customEndAt!),
+      'display_format': 'yyyy-MM-dd HH:mm',
       'description': description,
+    };
+  }
+}
+
+class AiAnalysisTimestampRange {
+  const AiAnalysisTimestampRange({
+    required this.start,
+    required this.end,
+  });
+
+  final DateTime start;
+  final DateTime end;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'start': start.toIso8601String(),
+      'end': end.toIso8601String(),
+      'display_range': _formatAiDateTimeRange(start, end),
+      'display_format': 'yyyy-MM-dd HH:mm',
+      'basis': 'Firestore timestamp field',
     };
   }
 }
@@ -139,42 +217,52 @@ const AiAnalysisWindowProfile defaultAnalysisWindowProfile =
     AiAnalysisWindowProfile(
   id: '12h',
   label: '12 jam',
-  rowLimit: 720,
+  duration: Duration(hours: 12),
   description: 'Analisis stabilitas setengah hari terakhir.',
+);
+
+const AiAnalysisWindowProfile customAnalysisWindowProfile =
+    AiAnalysisWindowProfile(
+  id: 'custom',
+  label: 'Custom',
+  duration: null,
+  description:
+      'Analisis manual berdasarkan rentang tanggal dan jam yang dipilih.',
 );
 
 const List<AiAnalysisWindowProfile> analysisWindowProfiles = [
   AiAnalysisWindowProfile(
     id: '1h',
     label: '1 jam',
-    rowLimit: 60,
+    duration: Duration(hours: 1),
     description: 'Analisis cepat untuk kondisi sensor terbaru.',
   ),
   AiAnalysisWindowProfile(
     id: '6h',
     label: '6 jam',
-    rowLimit: 360,
+    duration: Duration(hours: 6),
     description: 'Analisis perubahan kondisi dalam beberapa jam terakhir.',
   ),
   defaultAnalysisWindowProfile,
   AiAnalysisWindowProfile(
     id: '24h',
     label: '24 jam',
-    rowLimit: 1440,
+    duration: Duration(hours: 24),
     description: 'Analisis pola harian penuh.',
   ),
   AiAnalysisWindowProfile(
     id: '7d',
     label: '7 hari',
-    rowLimit: 10080,
+    duration: Duration(days: 7),
     description: 'Analisis tren mingguan untuk melihat kestabilan nutrisi.',
   ),
   AiAnalysisWindowProfile(
     id: '30d',
     label: '30 hari',
-    rowLimit: 43200,
+    duration: Duration(days: 30),
     description: 'Analisis tren jangka panjang satu bulan.',
   ),
+  customAnalysisWindowProfile,
 ];
 
 const PlantTypeProfile customPlantTypeProfile = PlantTypeProfile(
@@ -363,7 +451,7 @@ class GeminiRecommendationService {
   static const _requestTimeout = Duration(minutes: 1);
   static const _responseCacheTtl = Duration(minutes: 2);
   static const _gradualCorrectionFraction = 0.25;
-  static const _maxPumpRunSeconds = 300;
+  static const _maxPumpRunSeconds = 30;
   static _CachedAiRecommendation? _cachedRecommendation;
 
   // Default threshold target keeps the original tea-plant behavior.
@@ -385,11 +473,23 @@ class GeminiRecommendationService {
       );
     }
 
-    final readings = await _fetchRecentReadings(
-      limit: input.analysisWindow.rowLimit,
+    final requestedTimestampRange =
+        input.analysisWindow.resolveRange(DateTime.now());
+    if (!requestedTimestampRange.end.isAfter(requestedTimestampRange.start)) {
+      throw StateError(
+        'Rentang analisis timestamp tidak valid. Waktu akhir harus setelah waktu mulai.',
+      );
+    }
+
+    final readings = await _fetchReadingsByTimestampRange(
+      requestedTimestampRange,
     );
     if (readings.isEmpty) {
-      throw StateError('Belum ada data sensor di koleksi $_collection.');
+      throw StateError(
+        'Belum ada data sensor di koleksi $_collection pada rentang timestamp '
+        '${requestedTimestampRange.start.toIso8601String()} sampai '
+        '${requestedTimestampRange.end.toIso8601String()}.',
+      );
     }
 
     final summary = _SensorHistorySummary.fromReadings(readings);
@@ -456,6 +556,7 @@ class GeminiRecommendationService {
       },
       'agronomic_input': input.toJson(),
       'analysis_window': input.analysisWindow.toJson(),
+      'selected_timestamp_filter': requestedTimestampRange.toJson(),
       'pump_flow_rates_ml_per_second': PumpFlowRates.toPromptJson(),
       'output_rules': [
         'Return one complete JSON object only.',
@@ -485,7 +586,8 @@ class GeminiRecommendationService {
         'Prefer morning schedule times for watering or fertilizer correction unless sensor history suggests another safe daytime window.',
         'If a calculation is uncertain, recommend a smaller gradual dose and explain the assumption.',
         'Narasi XAI must explain that depth/media values are estimates from selected planting medium because actual media depth is not measured.',
-        'sensor_summary maximum 2 sentences and must mention ${input.plantType.label}, ${input.plantingMedium.label}, and the selected analysis window (${input.analysisWindow.label}), not the number of analyzed rows.',
+        'sensor_summary maximum 2 sentences and must mention ${input.plantType.label}, ${input.plantingMedium.label}, and the selected analysis window (${input.analysisWindow.xaiLabel}), not the number of analyzed rows.',
+        'When writing dates or times for users, use the provided display_range/display_format (yyyy-MM-dd HH:mm). Do not expose ISO timestamps with T, seconds, milliseconds, or timezone suffixes in sensor_summary.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
         'For each recommendation item, explanation must explain current value, threshold, average, trend, selected plant relevance, selected medium relevance, and the dose basis when correction is needed.',
         'For each recommendation item, recommendation must explain practical follow-up actions for ${input.plantType.label} on ${input.plantingMedium.label} and require user confirmation before pump activation.',
@@ -509,7 +611,7 @@ class GeminiRecommendationService {
     } on Object catch (error) {
       if (_shouldUseLocalFallback(error)) {
         debugPrint(
-          'Gemini unavailable, using local DSS/XAI fallback: $error',
+          'Gemini daily request limit reached, using local DSS/XAI fallback: $error',
         );
         final fallbackResponse = _responseWithDecisionPlan(
           _buildAiUnavailableFallbackResponse(
@@ -543,7 +645,6 @@ class GeminiRecommendationService {
       summary: summary,
       input: input,
       activeThresholds: activeThresholds,
-      deterministicPlan: deterministicPlan,
     );
     final merged = _mergeGeminiNarrativeWithDecisionPlan(
       deterministicPlan,
@@ -570,8 +671,9 @@ class GeminiRecommendationService {
     required Map<String, num> activeThresholds,
     required bool useGeminiPumpRecommendations,
   }) {
+    final displayDecoded = _decodedWithReadableSensorSummary(decoded);
     final guardedResponse =
-        AiRecommendationResponse.fromJson(decoded).withAutomationGuard(
+        AiRecommendationResponse.fromJson(displayDecoded).withAutomationGuard(
       canActivateWaterPump: summary.canActivateWaterPump(activeThresholds),
       canActivateNitrogenPump:
           summary.canActivateNitrogenPump(activeThresholds),
@@ -609,6 +711,27 @@ class GeminiRecommendationService {
     return guardedResponse.copyWith(
       pumpRecommendations: pumpRecommendations,
       dailyScheduleRecommendation: scheduleRecommendation,
+    );
+  }
+
+  static Map<String, dynamic> _decodedWithReadableSensorSummary(
+    Map<String, dynamic> decoded,
+  ) {
+    final sensorSummary = decoded['sensor_summary'];
+    if (sensorSummary is! String || sensorSummary.isEmpty) return decoded;
+
+    return {
+      ...decoded,
+      'sensor_summary': _replaceIsoTimestampsForDisplay(sensorSummary),
+    };
+  }
+
+  static String _replaceIsoTimestampsForDisplay(String value) {
+    return value.replaceAllMapped(
+      RegExp(
+        r'(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?',
+      ),
+      (match) => '${match.group(1)} ${match.group(2)}',
     );
   }
 
@@ -653,20 +776,26 @@ class GeminiRecommendationService {
     return fallback;
   }
 
-  Future<List<_SensorReadingSnapshot>> _fetchRecentReadings({
-    required int limit,
-  }) async {
+  Future<List<_SensorReadingSnapshot>> _fetchReadingsByTimestampRange(
+    AiAnalysisTimestampRange range,
+  ) async {
     final query = _firestore
         .collection(_collection)
-        .orderBy('timestamp', descending: true)
-        .limit(limit);
+        .where(
+          'timestamp',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(range.start),
+        )
+        .where(
+          'timestamp',
+          isLessThanOrEqualTo: Timestamp.fromDate(range.end),
+        )
+        .orderBy('timestamp', descending: false);
 
     final snapshot = await query.get();
     return snapshot.docs
         .map((doc) => _SensorReadingSnapshot.fromFirestore(doc.data()))
         .where((item) => item.hasAnySensorValue)
-        .toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        .toList();
   }
 
   static String _buildRequestFingerprint(
@@ -721,7 +850,6 @@ class GeminiRecommendationService {
     required _SensorHistorySummary summary,
     required AiRecommendationAgronomicInput input,
     required Map<String, num> activeThresholds,
-    required Map<String, dynamic> deterministicPlan,
   }) async {
     final cleaned = _stripCodeFence(rawText);
     final decoded = _tryDecodeJsonObject(cleaned);
@@ -781,7 +909,7 @@ class GeminiRecommendationService {
     } on Object catch (error) {
       if (_shouldUseLocalFallback(error)) {
         debugPrint(
-          'Gemini repair unavailable, using local DSS/XAI fallback: $error',
+          'Gemini repair unavailable because daily request limit was reached, using local DSS/XAI fallback: $error',
         );
         return _buildAiUnavailableFallbackResponse(
           summary,
@@ -797,11 +925,10 @@ class GeminiRecommendationService {
     final repaired = _tryDecodeJsonObject(_stripCodeFence(repairedText ?? ''));
     if (repaired != null) return repaired;
 
-    debugPrint(
-      'Gemini returned malformed JSON after repair. Using local fallback. '
+    throw StateError(
+      'Gemini mengembalikan JSON yang belum valid setelah repair. '
       'Preview: ${_shortPreview(cleaned)}',
     );
-    return deterministicPlan;
   }
 
   static Map<String, dynamic> _buildDeterministicDecisionPlan(
@@ -819,7 +946,7 @@ class GeminiRecommendationService {
         : DailyFertilizationScheduleRecommendation.fromPlan(
             recommendations: pumpRecommendations,
             reason:
-                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum berdasarkan rentang analisis ${input.analysisWindow.label}, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
+                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum berdasarkan rentang analisis ${input.analysisWindow.xaiLabel}, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
           );
 
     return {
@@ -1141,21 +1268,26 @@ class GeminiRecommendationService {
   }
 
   static bool _shouldUseLocalFallback(Object error) {
-    return error is AiRecommendationException ||
-        _isQuotaOrRateLimitError(error);
+    return _isDailyRequestLimitError(error);
   }
 
-  static bool _isQuotaOrRateLimitError(Object error) {
+  static bool _isDailyRequestLimitError(Object error) {
     final text = error.toString().toLowerCase();
-    return text.contains('429') ||
+    final compact = text.replaceAll(RegExp(r'[\s_\-]'), '');
+    final hasLimitSignal = text.contains('429') ||
         text.contains('quota') ||
-        text.contains('rate limit') ||
-        text.contains('rate-limit') ||
         text.contains('resource exhausted') ||
-        text.contains('free_tier') ||
-        text.contains('free tier') ||
-        text.contains('retrydelay') ||
-        text.contains('retry in');
+        text.contains('rate limit') ||
+        text.contains('rate-limit');
+    final hasDailySignal = text.contains('requests per day') ||
+        text.contains('request per day') ||
+        text.contains('per day') ||
+        text.contains('daily') ||
+        text.contains('rpd') ||
+        compact.contains('requestsperday') ||
+        compact.contains('requestperday');
+
+    return hasLimitSignal && hasDailySignal;
   }
 
   static Future<dynamic> _generateContentWithRetry(
@@ -1203,11 +1335,9 @@ class GeminiRecommendationService {
 
   static Duration _retryDelay(int attempt) {
     const delays = [
-      Duration(seconds: 2),
-      Duration(seconds: 4),
-      Duration(seconds: 8),
-      Duration(seconds: 12),
       Duration(seconds: 15),
+      Duration(seconds: 30),
+      Duration(seconds: 45),
     ];
     if (attempt <= delays.length) return delays[attempt - 1];
     return delays.last;
@@ -1410,7 +1540,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Analisis ${input.plantType.label} dibuat dari rentang ${input.analysisWindow.label} terakhir, area sensor tetap 100 cm2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
+          'Analisis ${input.plantType.label} dibuat dari rentang ${input.analysisWindow.xaiLabel}, area sensor tetap 100 cm2, konsentrasi NPK, dan asumsi media ${input.plantingMedium.label}. Kedalaman media belum diukur langsung, sehingga dosis dihitung sebagai koreksi bertahap berbasis estimasi.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
@@ -1442,8 +1572,8 @@ class GeminiRecommendationService {
       input,
       activeThresholds,
     );
-    final prefix = _isQuotaOrRateLimitError(error)
-        ? 'Kuota atau rate limit Gemini API sedang tercapai, sehingga rekomendasi sementara dibuat memakai analisis DSS/XAI lokal.'
+    final prefix = _isDailyRequestLimitError(error)
+        ? 'Kuota harian Gemini API (RPD) sudah tercapai, sehingga rekomendasi sementara dibuat memakai analisis DSS/XAI lokal.'
         : 'Rekomendasi dibuat memakai analisis DSS/XAI lokal.';
 
     return {
@@ -1549,6 +1679,39 @@ class GeminiRecommendationService {
       unit: '%',
       minimum: activeThresholds['moisture_min']!.toDouble(),
     );
+    if (!recommendations.any((item) => item.pumpIndex == 3)) {
+      final currentTemperature = summary.parameters['Temp']?.current;
+      final maxTemperature = activeThresholds['temperature_max']!.toDouble();
+      if (currentTemperature != null && currentTemperature > maxTemperature) {
+        final excess = _roundDouble(currentTemperature - maxTemperature);
+        final excessPercent = _roundDouble((excess / maxTemperature) * 100);
+        final maxSafeSeconds = _maxSafeSecondsForPump(3, input);
+        final recommendedSeconds =
+            (3 + (excess * 1.5)).round().clamp(3, maxSafeSeconds).toInt();
+        final flowRate = PumpFlowRates.byPumpIndex(3).averageMlPerSecond;
+        final estimatedVolumeMl = PumpFlowRates.volumeForDuration(
+          pumpIndex: 3,
+          seconds: recommendedSeconds,
+        );
+
+        recommendations.add(
+          PumpFertilizationRecommendation(
+            relay: 4,
+            pumpIndex: 3,
+            pumpName: 'Pompa D',
+            nutrient: 'Suhu Tinggi',
+            unit: '°C',
+            currentValue: currentTemperature,
+            targetMinimum: maxTemperature,
+            deficit: excess,
+            deficitPercent: excessPercent,
+            recommendedSeconds: recommendedSeconds,
+            reason:
+                'Suhu saat ini ${_formatNumber(currentTemperature)} °C, lebih tinggi ${_formatNumber(excess)} °C dari ambang maksimum ${_formatNumber(maxTemperature)} °C. Pompa D Air direkomendasikan sebagai penyiraman bertahap ringan untuk membantu menurunkan stres panas dan menjaga kelembapan media ${input.plantingMedium.label}; durasi dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+          ),
+        );
+      }
+    }
 
     return recommendations;
   }
@@ -2044,6 +2207,8 @@ class _SensorHistorySummary {
       'time_range': {
         'start': startTime.toIso8601String(),
         'end': endTime.toIso8601String(),
+        'display_range': _formatAiDateTimeRange(startTime, endTime),
+        'display_format': 'yyyy-MM-dd HH:mm',
       },
       'parameters': parameters.map((key, value) => MapEntry(
             key,

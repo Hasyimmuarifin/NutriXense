@@ -1,8 +1,12 @@
 // lib/screens/insights_screen.dart
 // AI Insights page – displays smart recommendations, plant health summary, and actions
 
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/ai_recommendation.dart';
 import '../models/pump_flow_rate.dart';
 import '../models/sensor_data.dart';
@@ -14,6 +18,308 @@ import '../utils/snackbar_helper.dart';
 import '../widgets/insight_card_widget.dart';
 
 const int _maxCustomPumpDurationSeconds = 30;
+
+class _XaiContributionItem {
+  const _XaiContributionItem({
+    required this.label,
+    required this.detail,
+    required this.score,
+    required this.share,
+    required this.featureValueRatio,
+    required this.color,
+  });
+
+  final String label;
+  final String detail;
+  final double score;
+  final double share;
+  final double featureValueRatio;
+  final Color color;
+}
+
+class _XaiBeeswarmPainter extends CustomPainter {
+  const _XaiBeeswarmPainter(this.items);
+
+  final List<_XaiContributionItem> items;
+
+  static const Color _lowFeatureColor = Color(0xFF0B8CE8);
+  static const Color _midFeatureColor = Color(0xFF7B5CD6);
+  static const Color _highFeatureColor = Color(0xFFE6005C);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (items.isEmpty || size.width <= 0 || size.height <= 0) return;
+
+    final leftLabelWidth = size.width < 360 ? 82.0 : 102.0;
+    const rightLegendWidth = 48.0;
+    const topPadding = 28.0;
+    const bottomPadding = 34.0;
+    final plotLeft = leftLabelWidth;
+    final plotRight = math.max(plotLeft + 80, size.width - rightLegendWidth);
+    final plotWidth = plotRight - plotLeft;
+    final plotCenterX = plotLeft + (plotWidth / 2);
+    final rowHeight = (size.height - topPadding - bottomPadding) / items.length;
+    const maxImpact = 6.0;
+    final maxScore = items
+        .map((item) => item.score.abs())
+        .fold<double>(0, (max, score) => math.max(max, score));
+
+    _drawText(
+      canvas,
+      'Ringkasan penjelasan lokal',
+      const Offset(0, 0),
+      const TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w800,
+      ),
+      maxWidth: plotRight,
+    );
+
+    final gridPaint = Paint()
+      ..color = AppTheme.textLight.withOpacity(0.18)
+      ..strokeWidth = 1;
+    final zeroPaint = Paint()
+      ..color = AppTheme.textSecondary.withOpacity(0.42)
+      ..strokeWidth = 1.2;
+
+    for (var index = 0; index < items.length; index++) {
+      final rowCenterY = topPadding + (rowHeight * (index + 0.5));
+      _drawDashedLine(
+        canvas,
+        Offset(plotLeft, rowCenterY),
+        Offset(plotRight, rowCenterY),
+        gridPaint,
+      );
+      _drawText(
+        canvas,
+        items[index].label,
+        Offset(0, rowCenterY - 7),
+        const TextStyle(
+          color: AppTheme.textSecondary,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w800,
+        ),
+        maxWidth: leftLabelWidth - 8,
+        maxLines: 1,
+      );
+      canvas.drawCircle(
+        Offset(leftLabelWidth - 6, rowCenterY),
+        2.4,
+        Paint()..color = items[index].color.withOpacity(0.85),
+      );
+    }
+
+    canvas.drawLine(
+      Offset(plotCenterX, topPadding - 6),
+      Offset(plotCenterX, size.height - bottomPadding + 4),
+      zeroPaint,
+    );
+
+    for (var index = 0; index < items.length; index++) {
+      final item = items[index];
+      final rowCenterY = topPadding + (rowHeight * (index + 0.5));
+      final normalizedScore =
+          maxScore <= 0 ? item.share.clamp(0.0, 1.0) : item.score / maxScore;
+      final rowImpact = 1.2 + (normalizedScore.clamp(0.0, 1.0) * 4.8);
+      final pointCount = 16 + (normalizedScore * 12).round();
+
+      for (var pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+        final noiseA = _unitNoise(index, pointIndex, 1);
+        final noiseB = _unitNoise(index, pointIndex, 2);
+        final noiseC = _unitNoise(index, pointIndex, 3);
+        final noiseD = _unitNoise(index, pointIndex, 4);
+        final positiveSide = noiseA > 0.25;
+        final sideMultiplier = positiveSide ? 1.0 : -0.62;
+        final magnitude = rowImpact * (0.18 + (noiseB * 0.82));
+        final xImpact = (sideMultiplier * magnitude).clamp(
+          -maxImpact,
+          maxImpact,
+        );
+        final x = plotCenterX + (xImpact / maxImpact) * (plotWidth / 2);
+        final yJitter = (noiseC - 0.5) * rowHeight * 0.54;
+        final y = rowCenterY + yJitter;
+        final featureValue =
+            (item.featureValueRatio * 0.72 + noiseD * 0.28).clamp(0.0, 1.0);
+        final color = _featureColor(featureValue).withOpacity(0.82);
+
+        canvas.drawCircle(
+          Offset(x.toDouble(), y),
+          2.25 + (noiseD * 0.75),
+          Paint()..color = color,
+        );
+      }
+    }
+
+    _drawAxis(canvas, size, plotLeft, plotCenterX, plotRight);
+    _drawFeatureValueLegend(canvas, size, plotRight + 8, topPadding);
+  }
+
+  void _drawAxis(
+    Canvas canvas,
+    Size size,
+    double plotLeft,
+    double plotCenterX,
+    double plotRight,
+  ) {
+    final axisY = size.height - 24;
+    final tickPaint = Paint()
+      ..color = AppTheme.textLight.withOpacity(0.55)
+      ..strokeWidth = 1;
+
+    canvas.drawLine(
+        Offset(plotLeft, axisY), Offset(plotRight, axisY), tickPaint);
+    for (final tick in [
+      (x: plotLeft, label: '-6'),
+      (x: plotCenterX, label: '0'),
+      (x: plotRight, label: '6'),
+    ]) {
+      canvas.drawLine(
+        Offset(tick.x, axisY - 3),
+        Offset(tick.x, axisY + 3),
+        tickPaint,
+      );
+      _drawText(
+        canvas,
+        tick.label,
+        Offset(tick.x - 7, axisY + 5),
+        const TextStyle(
+          color: AppTheme.textSecondary,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+        ),
+        maxWidth: 18,
+      );
+    }
+
+    _drawText(
+      canvas,
+      'Kontribusi XAI pada keputusan pompa',
+      Offset(plotLeft, size.height - 10),
+      const TextStyle(
+        color: AppTheme.textSecondary,
+        fontSize: 7,
+        fontWeight: FontWeight.w900,
+      ),
+      maxWidth: size.width - plotLeft - 2,
+      maxLines: 1,
+    );
+  }
+
+  void _drawFeatureValueLegend(
+    Canvas canvas,
+    Size size,
+    double x,
+    double top,
+  ) {
+    final barHeight = size.height - top - 42;
+    if (barHeight <= 40) return;
+
+    final barRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(x, top, 5, barHeight),
+      const Radius.circular(999),
+    );
+    final gradient = const LinearGradient(
+      begin: Alignment.bottomCenter,
+      end: Alignment.topCenter,
+      colors: [_lowFeatureColor, _midFeatureColor, _highFeatureColor],
+    ).createShader(barRect.outerRect);
+
+    canvas.drawRRect(barRect, Paint()..shader = gradient);
+    _drawText(
+      canvas,
+      'Tinggi',
+      Offset(x + 9, top - 2),
+      const TextStyle(
+        color: AppTheme.textSecondary,
+        fontSize: 6.5,
+        fontWeight: FontWeight.w800,
+      ),
+      maxWidth: 30,
+    );
+    _drawText(
+      canvas,
+      'Rendah',
+      Offset(x + 9, top + barHeight - 8),
+      const TextStyle(
+        color: AppTheme.textSecondary,
+        fontSize: 6.5,
+        fontWeight: FontWeight.w800,
+      ),
+      maxWidth: 34,
+    );
+
+    canvas.save();
+    canvas.translate(x + 22, top + (barHeight / 2) + 26);
+    canvas.rotate(-math.pi / 2);
+    _drawText(
+      canvas,
+      'Nilai fitur',
+      Offset.zero,
+      const TextStyle(
+        color: AppTheme.textSecondary,
+        fontSize: 8,
+        fontWeight: FontWeight.w800,
+      ),
+      maxWidth: barHeight,
+    );
+    canvas.restore();
+  }
+
+  void _drawDashedLine(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Paint paint,
+  ) {
+    const dashWidth = 4.0;
+    const dashSpace = 4.0;
+    var x = start.dx;
+    while (x < end.dx) {
+      canvas.drawLine(
+        Offset(x, start.dy),
+        Offset(math.min(x + dashWidth, end.dx), end.dy),
+        paint,
+      );
+      x += dashWidth + dashSpace;
+    }
+  }
+
+  void _drawText(
+    Canvas canvas,
+    String text,
+    Offset offset,
+    TextStyle style, {
+    required double maxWidth,
+    int maxLines = 1,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      maxLines: maxLines,
+      ellipsis: '...',
+      textDirection: ui.TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    painter.paint(canvas, offset);
+  }
+
+  double _unitNoise(int row, int point, int salt) {
+    final value = math.sin((row + 1) * 12.9898 + (point + 1) * 78.233 + salt);
+    final scaled = value * 43758.5453;
+    return scaled - scaled.floorToDouble();
+  }
+
+  Color _featureColor(double value) {
+    if (value < 0.5) {
+      return Color.lerp(_lowFeatureColor, _midFeatureColor, value * 2)!;
+    }
+    return Color.lerp(_midFeatureColor, _highFeatureColor, (value - 0.5) * 2)!;
+  }
+
+  @override
+  bool shouldRepaint(covariant _XaiBeeswarmPainter oldDelegate) {
+    return oldDelegate.items != items;
+  }
+}
 
 class InsightsScreen extends StatefulWidget {
   const InsightsScreen({super.key});
@@ -85,6 +391,24 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
     final raw = error.toString();
     final lower = raw.toLowerCase();
+    final compact = lower.replaceAll(RegExp(r'[\s_\-]'), '');
+    final isDailyLimit = (lower.contains('429') ||
+            lower.contains('quota') ||
+            lower.contains('resource exhausted') ||
+            lower.contains('rate limit') ||
+            lower.contains('rate-limit')) &&
+        (lower.contains('requests per day') ||
+            lower.contains('request per day') ||
+            lower.contains('per day') ||
+            lower.contains('daily') ||
+            lower.contains('rpd') ||
+            compact.contains('requestsperday') ||
+            compact.contains('requestperday'));
+
+    if (isDailyLimit) {
+      return 'Kuota harian Gemini API (RPD) sudah tercapai. Aplikasi memakai analisis DSS/XAI lokal agar rekomendasi tetap tersedia.';
+    }
+
     if (lower.contains('429') ||
         lower.contains('quota') ||
         lower.contains('rate limit') ||
@@ -92,7 +416,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
         lower.contains('resource exhausted') ||
         lower.contains('free_tier') ||
         lower.contains('free tier')) {
-      return 'Kuota Gemini API sedang habis atau terkena rate limit. Aplikasi akan memakai analisis DSS lokal bila data sensor tersedia; coba lagi nanti untuk respons penuh dari Gemini.';
+      return 'Gemini API terkena limit sementara (RPM/TPM) atau kuota non-harian. Aplikasi tidak memakai fallback lokal otomatis; tunggu beberapa saat lalu coba lagi.';
     }
 
     if (lower.contains('503') ||
@@ -253,6 +577,21 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
+  String _formatAnalysisWindowLabel(AiAnalysisWindowProfile window) {
+    final start = window.customStartAt;
+    final end = window.customEndAt;
+    if (!window.isCustom || start == null || end == null) return window.label;
+
+    final sameDay = start.year == end.year &&
+        start.month == end.month &&
+        start.day == end.day;
+    if (sameDay) {
+      return 'Custom ${DateFormat('dd/MM/yyyy HH:mm').format(start)}-${DateFormat('HH:mm').format(end)}';
+    }
+
+    return 'Custom ${DateFormat('dd/MM HH:mm').format(start)}-${DateFormat('dd/MM HH:mm').format(end)}';
+  }
+
   Future<void> _confirmPumpRecommendation() async {
     final recommendations = _adjustedPumpRecommendations;
     if (recommendations.isEmpty) {
@@ -372,12 +711,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 16, 12, 10),
+                      padding: const EdgeInsets.fromLTRB(18, 16, 12, 12),
                       child: Row(
                         children: [
                           Container(
-                            width: 38,
-                            height: 38,
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
                               color: AppTheme.primaryGreen.withOpacity(0.12),
                               borderRadius: BorderRadius.circular(12),
@@ -385,7 +724,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                             child: const Icon(
                               Icons.auto_awesome_rounded,
                               color: AppTheme.primaryGreen,
-                              size: 21,
+                              size: 22,
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -395,7 +734,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 16,
+                                fontSize: 21,
                                 color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -418,43 +757,66 @@ class _InsightsScreenState extends State<InsightsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            _buildXaiVisualizationPanel(response),
+                            const SizedBox(height: 12),
                             Text(
                               response.sensorSummary,
                               style: const TextStyle(
-                                fontSize: 12,
+                                fontSize: 13.5,
                                 color: AppTheme.textSecondary,
-                                height: 1.45,
+                                height: 1.5,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            if (_lastAgronomicInput != null) ...[
-                              const SizedBox(height: 10),
-                              _buildAgronomicInputInfoBox(
-                                _lastAgronomicInput!,
-                              ),
-                            ],
+                            // if (_lastAgronomicInput != null) ...[
+                            //   const SizedBox(height: 10),
+                            //   _buildAgronomicInputInfoBox(
+                            //     _lastAgronomicInput!,
+                            //   ),
+                            // ],
                             const SizedBox(height: 14),
                             if (recommendations.isEmpty)
                               _buildNoPumpRecommendationBox()
                             else ...[
-                              const Text(
-                                'Rencana Pemupukan',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  color: AppTheme.textPrimary,
-                                  fontWeight: FontWeight.w800,
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      AppTheme.primaryGreen.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color:
+                                        AppTheme.primaryGreen.withOpacity(0.18),
+                                  ),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(
+                                      Icons.water_drop_rounded,
+                                      size: 20,
+                                      color: AppTheme.primaryGreen,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Rencana Pemupukan',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 19,
+                                          color: AppTheme.textPrimary,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Sesuaikan durasi maksimal 30 detik sebelum menekan Konfirmasi.',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: AppTheme.textSecondary,
-                                  height: 1.35,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 12),
                               ...recommendations.map(
                                 (item) => _buildPumpRecommendationTile(
                                   item,
@@ -512,6 +874,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: AppTheme.primaryBlue,
+                                  textStyle: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                   side: BorderSide(
                                     color:
                                         AppTheme.primaryBlue.withOpacity(0.35),
@@ -533,6 +899,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       : () => Navigator.of(dialogContext).pop(),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: AppTheme.textSecondary,
+                                    textStyle: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),
@@ -568,6 +938,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                   style: FilledButton.styleFrom(
                                     backgroundColor: AppTheme.primaryGreen,
                                     foregroundColor: Colors.white,
+                                    textStyle: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),
@@ -960,7 +1334,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     final triggers = _aiResponse?.automationTriggers;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppTheme.primaryGreen.withOpacity(0.06),
         borderRadius: BorderRadius.circular(16),
@@ -968,95 +1342,103 @@ class _InsightsScreenState extends State<InsightsScreen> {
           color: AppTheme.primaryGreen.withOpacity(0.2),
         ),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGreen.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.smart_toy_rounded,
-              size: 20,
-              color: AppTheme.primaryGreen,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGreen.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.smart_toy_rounded,
+                  size: 21,
+                  color: AppTheme.primaryGreen,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
                   'Ringkasan Gemini AI',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
                     color: AppTheme.primaryGreen,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  summary,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                    height: 1.5,
-                  ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: Text(
+              summary,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppTheme.textSecondary,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          if (triggers != null) ...[
+            const SizedBox(height: 12),
+            _buildAutomationTriggerRow(triggers),
+          ],
+          if (_aiResponse != null) ...[
+            const SizedBox(height: 12),
+            _buildXaiVisualizationPanel(_aiResponse!),
+            const SizedBox(height: 12),
+            _buildPumpRecommendationPanel(_aiResponse!),
+          ],
+          if (_lastAgronomicInput != null) ...[
+            const SizedBox(height: 10),
+            _buildAgronomicInputInfoBox(_lastAgronomicInput!),
+          ],
+          if (_lastAutomationResult != null) ...[
+            const SizedBox(height: 10),
+            _buildAutomationResult(_lastAutomationResult!),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed:
+                  _isRequesting || _isApplyingAutomation || _isAddingSchedule
+                      ? null
+                      : _promptAndRequestAiRecommendation,
+              icon: _isRequesting || _isApplyingAutomation
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: Text(
+                _isRequesting ? 'Menganalisis...' : 'Minta Rekomendasi AI',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryGreen,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                textStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
                 ),
-                if (triggers != null) ...[
-                  const SizedBox(height: 12),
-                  _buildAutomationTriggerRow(triggers),
-                ],
-                if (_aiResponse != null) ...[
-                  const SizedBox(height: 12),
-                  _buildPumpRecommendationPanel(_aiResponse!),
-                ],
-                if (_lastAgronomicInput != null) ...[
-                  const SizedBox(height: 10),
-                  _buildAgronomicInputInfoBox(_lastAgronomicInput!),
-                ],
-                if (_lastAutomationResult != null) ...[
-                  const SizedBox(height: 10),
-                  _buildAutomationResult(_lastAutomationResult!),
-                ],
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _isRequesting ||
-                            _isApplyingAutomation ||
-                            _isAddingSchedule
-                        ? null
-                        : _promptAndRequestAiRecommendation,
-                    icon: _isRequesting || _isApplyingAutomation
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_awesome_rounded, size: 18),
-                    label: Text(
-                      _isRequesting
-                          ? 'Menganalisis...'
-                          : 'Minta Rekomendasi AI',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryGreen,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -1132,6 +1514,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   }
 
   Widget _buildAgronomicInputInfoBox(AiRecommendationAgronomicInput input) {
+    final analysisLabel = _formatAnalysisWindowLabel(input.analysisWindow);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1150,7 +1533,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '${input.plantType.label} • Analisis ${input.analysisWindow.label} • Area sensor 100 cm² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerLiter)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerLiter)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerLiter)} mg/L • ${input.plantingMedium.label}',
+              '${input.plantType.label} • Analisis $analysisLabel • Area sensor 100 cm² • N/P/K ${_formatLandArea(input.fertilizerConcentration.nitrogenMgPerLiter)}/${_formatLandArea(input.fertilizerConcentration.phosphorusMgPerLiter)}/${_formatLandArea(input.fertilizerConcentration.potassiumMgPerLiter)} mg/L • ${input.plantingMedium.label}',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -1165,6 +1548,273 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
+  Widget _buildXaiVisualizationPanel(AiRecommendationResponse response) {
+    final items = _buildXaiContributionItems(response);
+    final hasPumpCorrection = items.isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryBlue.withOpacity(0.055),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(
+                  Icons.analytics_rounded,
+                  size: 17,
+                  color: AppTheme.primaryBlue,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Visualisasi XAI',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              _buildXaiMethodPill('Post-Hoc'),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hasPumpCorrection
+                ? 'Kontribusi dihitung dari besar defisit sensor terhadap ambang minimum pada rentang timestamp terpilih. Skor ini menjelaskan keputusan lokal untuk rekomendasi saat ini.'
+                : 'Tidak ada koreksi pompa yang dominan pada rentang timestamp terpilih. Penjelasan lokal tetap diturunkan dari skor kesehatan tanaman dan status ambang sensor.',
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 11,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (hasPumpCorrection)
+            _buildXaiBeeswarmPlot(items)
+          else
+            _buildNoXaiCorrectionRow(response),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _buildXaiMethodPill('Local Explainable'),
+              _buildXaiMethodPill('SHAP-style Contribution'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildXaiBeeswarmPlot(List<_XaiContributionItem> items) {
+    final plotHeight = (items.length * 34.0 + 82).clamp(190.0, 290.0);
+
+    return Container(
+      width: double.infinity,
+      height: plotHeight,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.82),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.14)),
+      ),
+      child: CustomPaint(
+        painter: _XaiBeeswarmPainter(items),
+        child: const SizedBox.expand(),
+      ),
+    );
+  }
+
+  Widget _buildNoXaiCorrectionRow(AiRecommendationResponse response) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.16)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.check_circle_rounded,
+            color: AppTheme.statusNormal,
+            size: 17,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Skor kesehatan ${response.plantHealthPercentage}%. Tidak ada defisit N/P/K atau kelembapan yang membutuhkan durasi pompa.',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 11,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildXaiMethodPill(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.16)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: AppTheme.primaryBlue,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+
+  List<_XaiContributionItem> _buildXaiContributionItems(
+    AiRecommendationResponse response,
+  ) {
+    final recommendations = response.pumpRecommendations;
+    if (recommendations.isEmpty) return const [];
+
+    final normalizedScores = recommendations
+        .map((item) {
+          final score = _xaiRawScore(item);
+          return score > 0 ? score : item.recommendedSeconds.toDouble();
+        })
+        .where((score) => score > 0)
+        .toList(growable: false);
+    final totalScore = normalizedScores.isEmpty
+        ? 0.0
+        : normalizedScores.reduce((a, b) => a + b);
+    if (totalScore <= 0) return const [];
+
+    final items = recommendations.map((item) {
+      final score = _xaiRawScore(item);
+      final normalizedScore =
+          score > 0 ? score : item.recommendedSeconds.toDouble();
+      return _XaiContributionItem(
+        label: _xaiContributionLabel(item),
+        detail: _xaiContributionDetail(item),
+        score: normalizedScore,
+        share: normalizedScore / totalScore,
+        featureValueRatio: _xaiFeatureValueRatio(item),
+        color: _xaiContributionColor(item),
+      );
+    }).toList()
+      ..sort((a, b) => b.score.compareTo(a.score));
+
+    return items;
+  }
+
+  double _xaiRawScore(PumpFertilizationRecommendation item) {
+    final deficitPercent = item.deficitPercent.abs();
+    if (deficitPercent > 0) return deficitPercent;
+    final target = item.targetMinimum.abs();
+    if (target > 0) return (item.deficit.abs() / target) * 100;
+    return item.recommendedSeconds.toDouble();
+  }
+
+  String _xaiContributionDetail(PumpFertilizationRecommendation item) {
+    final current = _formatLandArea(item.currentValue);
+    final target = _formatLandArea(item.targetMinimum);
+    final seconds = _clampCustomPumpDuration(item.recommendedSeconds);
+    final context = _xaiContributionContext(item);
+
+    if (context.contains('suhu') ||
+        context.contains('temperature') ||
+        context.contains('temp')) {
+      return 'Nilai $current ${item.unit} > batas $target ${item.unit}; durasi $seconds detik.';
+    }
+
+    return 'Nilai $current ${item.unit} < target $target ${item.unit}; durasi $seconds detik.';
+  }
+
+  double _xaiFeatureValueRatio(PumpFertilizationRecommendation item) {
+    final target = item.targetMinimum.abs();
+    if (target <= 0) return 0.5;
+    return (item.currentValue / target).clamp(0.0, 1.4) / 1.4;
+  }
+
+  String _xaiContributionLabel(PumpFertilizationRecommendation item) {
+    final context = _xaiContributionContext(item);
+    if (context.contains('suhu') ||
+        context.contains('temperature') ||
+        context.contains('temp')) {
+      return 'Suhu Tinggi (Penyiraman)';
+    }
+    if (context.contains('nitrogen')) return 'Defisit Nitrogen (N)';
+    if (context.contains('fosfor') || context.contains('phosphorus')) {
+      return 'Defisit Fosfor (P)';
+    }
+    if (context.contains('kalium') || context.contains('potassium')) {
+      return 'Defisit Kalium (K)';
+    }
+    if (context.contains('air') ||
+        context.contains('water') ||
+        context.contains('moisture') ||
+        context.contains('kelembapan')) {
+      return 'Defisit Kelembapan';
+    }
+    return 'Defisit ${item.nutrient}';
+  }
+
+  Color _xaiContributionColor(PumpFertilizationRecommendation item) {
+    final context = _xaiContributionContext(item);
+    if (context.contains('suhu') ||
+        context.contains('temperature') ||
+        context.contains('temp')) {
+      return AppTheme.statusLow;
+    }
+    if (context.contains('nitrogen')) return AppTheme.primaryGreen;
+    if (context.contains('fosfor') || context.contains('phosphorus')) {
+      return AppTheme.primaryBlue;
+    }
+    if (context.contains('kalium') || context.contains('potassium')) {
+      return AppTheme.statusHigh;
+    }
+    if (context.contains('air') ||
+        context.contains('water') ||
+        context.contains('moisture') ||
+        context.contains('kelembapan')) {
+      return AppTheme.lightBlue;
+    }
+    return AppTheme.textSecondary;
+  }
+
+  String _xaiContributionContext(PumpFertilizationRecommendation item) {
+    return '${item.nutrient} ${item.pumpName} ${item.reason}'.toLowerCase();
+  }
+
   Widget _buildPumpRecommendationTile(
       PumpFertilizationRecommendation recommendation,
       {VoidCallback? onDurationChanged}) {
@@ -1177,11 +1827,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
     final sliderMax = _durationSliderMax(seconds);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppTheme.bgPrimary,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1194,7 +1845,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     color: AppTheme.textPrimary,
                     fontWeight: FontWeight.w800,
                   ),
@@ -1203,23 +1854,24 @@ class _InsightsScreenState extends State<InsightsScreen> {
               Text(
                 '$seconds detik',
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: 14,
                   color: AppTheme.primaryGreen,
                   fontWeight: FontWeight.w900,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             '${recommendation.reason} Defisit ${recommendation.formattedDeficitPercent}.',
             style: const TextStyle(
-              fontSize: 11,
+              fontSize: 12.5,
               color: AppTheme.textSecondary,
-              height: 1.35,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1236,7 +1888,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Slider(
             value: seconds.toDouble(),
             min: 1,
@@ -1266,7 +1918,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     required String label,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
       decoration: BoxDecoration(
         color: AppTheme.bgCard,
         borderRadius: BorderRadius.circular(10),
@@ -1275,12 +1927,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: AppTheme.primaryGreen),
+          Icon(icon, size: 14, color: AppTheme.primaryGreen),
           const SizedBox(width: 5),
           Text(
             label,
             style: const TextStyle(
-              fontSize: 10,
+              fontSize: 11.5,
               color: AppTheme.textSecondary,
               fontWeight: FontWeight.w700,
             ),
@@ -1302,9 +1954,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: const Text(
         'Tidak ada pompa yang perlu dijalankan. Semua nilai utama sudah berada pada ambang aman atau tidak membutuhkan koreksi langsung.',
         style: TextStyle(
-          fontSize: 12,
+          fontSize: 13,
           color: AppTheme.textSecondary,
-          height: 1.4,
+          height: 1.45,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -1329,7 +1981,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const Text(
             'Jadwal Harian yang Disarankan',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 14,
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.w800,
             ),
@@ -1338,9 +1990,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
           Text(
             'Rekomendasi jadwal harian pukul ${schedule.formattedTime} selama $durationSeconds detik. Gunakan tombol di bawah popup untuk menambahkan jadwal ke menu Control.',
             style: const TextStyle(
-              fontSize: 11,
+              fontSize: 12.5,
               color: AppTheme.textSecondary,
-              height: 1.35,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -1489,8 +2142,11 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
   late PlantTypeProfile _selectedPlantType;
   late PlantingMediumProfile _selectedMedium;
   late AiAnalysisWindowProfile _selectedAnalysisWindow;
+  late DateTime _customAnalysisStartAt;
+  late DateTime _customAnalysisEndAt;
   late bool _manualCustomMediumProfile;
   String? _fertilizerErrorText;
+  String? _customAnalysisWindowErrorText;
   String? _customPlantTypeErrorText;
   String? _customMediumErrorText;
   String? _customMediumProfileErrorText;
@@ -1507,8 +2163,12 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
         );
     _selectedPlantType = _initialPlantType(initial?.plantType);
     _selectedMedium = _initialMedium(initial?.plantingMedium);
-    _selectedAnalysisWindow =
-        initial?.analysisWindow ?? defaultAnalysisWindowProfile;
+    _selectedAnalysisWindow = _initialAnalysisWindow(initial?.analysisWindow);
+    final initialCustomEnd = initial?.analysisWindow.customEndAt;
+    final customEnd = initialCustomEnd ?? DateTime.now();
+    _customAnalysisEndAt = customEnd;
+    _customAnalysisStartAt = initial?.analysisWindow.customStartAt ??
+        customEnd.subtract(const Duration(hours: 12));
     _manualCustomMediumProfile =
         _hasManualCustomMediumProfile(initial?.plantingMedium);
     _nitrogenController = TextEditingController(
@@ -1572,11 +2232,29 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     );
   }
 
+  AiAnalysisWindowProfile _initialAnalysisWindow(
+    AiAnalysisWindowProfile? initial,
+  ) {
+    if (initial == null) return defaultAnalysisWindowProfile;
+    if (initial.isCustom) return initial;
+    return analysisWindowProfiles.firstWhere(
+      (profile) => profile.id == initial.id && !profile.isCustom,
+      orElse: () => defaultAnalysisWindowProfile,
+    );
+  }
+
   bool get _usesCustomPlantType =>
       _selectedPlantType.id == customPlantTypeProfile.id;
 
   bool get _usesCustomMedium =>
       _selectedMedium.id == customPlantingMediumProfile.id;
+
+  bool get _usesCustomAnalysisWindow => _selectedAnalysisWindow.isCustom;
+
+  AiAnalysisWindowProfile get _analysisWindowDropdownValue =>
+      _usesCustomAnalysisWindow
+          ? customAnalysisWindowProfile
+          : _selectedAnalysisWindow;
 
   bool _hasManualCustomMediumProfile(PlantingMediumProfile? initial) {
     if (initial == null || !initial.id.startsWith('custom_medium_')) {
@@ -1616,6 +2294,8 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     final plantType = _buildSelectedPlantType();
     final medium = _buildSelectedMedium();
     if (plantType == null || medium == null) return;
+    final analysisWindow = _buildSelectedAnalysisWindow();
+    if (analysisWindow == null) return;
 
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
@@ -1628,8 +2308,42 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
           potassiumMgPerLiter: potassium,
         ),
         plantingMedium: medium,
-        analysisWindow: _selectedAnalysisWindow,
+        analysisWindow: analysisWindow,
       ),
+    );
+  }
+
+  AiAnalysisWindowProfile? _buildSelectedAnalysisWindow() {
+    if (!_usesCustomAnalysisWindow) return _selectedAnalysisWindow;
+
+    final start = DateTime(
+      _customAnalysisStartAt.year,
+      _customAnalysisStartAt.month,
+      _customAnalysisStartAt.day,
+      _customAnalysisStartAt.hour,
+      _customAnalysisStartAt.minute,
+    );
+    final end = DateTime(
+      _customAnalysisEndAt.year,
+      _customAnalysisEndAt.month,
+      _customAnalysisEndAt.day,
+      _customAnalysisEndAt.hour,
+      _customAnalysisEndAt.minute,
+      59,
+      999,
+    );
+
+    if (!end.isAfter(start)) {
+      setState(() {
+        _customAnalysisWindowErrorText =
+            'Waktu akhir harus setelah waktu mulai.';
+      });
+      return null;
+    }
+
+    return AiAnalysisWindowProfile.customRange(
+      startAt: start,
+      endAt: end,
     );
   }
 
@@ -1833,6 +2547,187 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     );
   }
 
+  Future<void> _pickCustomAnalysisDate({required bool isStart}) async {
+    final current = isStart ? _customAnalysisStartAt : _customAnalysisEndAt;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+    );
+    if (picked == null) return;
+
+    _setCustomAnalysisDateTime(
+      isStart: isStart,
+      value: DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        current.hour,
+        current.minute,
+      ),
+    );
+  }
+
+  Future<void> _pickCustomAnalysisTime({required bool isStart}) async {
+    final current = isStart ? _customAnalysisStartAt : _customAnalysisEndAt;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current),
+    );
+    if (picked == null) return;
+
+    _setCustomAnalysisDateTime(
+      isStart: isStart,
+      value: DateTime(
+        current.year,
+        current.month,
+        current.day,
+        picked.hour,
+        picked.minute,
+      ),
+    );
+  }
+
+  void _setCustomAnalysisDateTime({
+    required bool isStart,
+    required DateTime value,
+  }) {
+    setState(() {
+      _customAnalysisWindowErrorText = null;
+      if (isStart) {
+        _customAnalysisStartAt = value;
+        if (!_customAnalysisEndAt.isAfter(_customAnalysisStartAt)) {
+          _customAnalysisEndAt =
+              _customAnalysisStartAt.add(const Duration(hours: 1));
+        }
+        return;
+      }
+
+      _customAnalysisEndAt = value;
+      if (!_customAnalysisEndAt.isAfter(_customAnalysisStartAt)) {
+        _customAnalysisStartAt =
+            _customAnalysisEndAt.subtract(const Duration(hours: 1));
+      }
+    });
+  }
+
+  Widget _buildCustomAnalysisRangeFields() {
+    Widget dateTimeRow({
+      required String label,
+      required DateTime value,
+      required VoidCallback onDateTap,
+      required VoidCallback onTimeTap,
+    }) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDateTimeButton(
+                  icon: Icons.calendar_month_rounded,
+                  label: DateFormat('dd/MM/yyyy').format(value),
+                  onTap: onDateTap,
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 112,
+                child: _buildDateTimeButton(
+                  icon: Icons.schedule_rounded,
+                  label: DateFormat('HH:mm').format(value),
+                  onTap: onTimeTap,
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 10),
+        dateTimeRow(
+          label: 'Mulai',
+          value: _customAnalysisStartAt,
+          onDateTap: () => _pickCustomAnalysisDate(isStart: true),
+          onTimeTap: () => _pickCustomAnalysisTime(isStart: true),
+        ),
+        const SizedBox(height: 12),
+        dateTimeRow(
+          label: 'Sampai',
+          value: _customAnalysisEndAt,
+          onDateTap: () => _pickCustomAnalysisDate(isStart: false),
+          onTimeTap: () => _pickCustomAnalysisTime(isStart: false),
+        ),
+        if (_customAnalysisWindowErrorText != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _customAnalysisWindowErrorText!,
+            style: const TextStyle(
+              color: AppTheme.statusLow,
+              fontSize: 11,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDateTimeButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: AppTheme.bgPrimary,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.22)),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: AppTheme.primaryGreen),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -1866,7 +2761,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
             ),
             const SizedBox(height: 14),
             DropdownButtonFormField<AiAnalysisWindowProfile>(
-              value: _selectedAnalysisWindow,
+              value: _analysisWindowDropdownValue,
               isExpanded: true,
               decoration: _inputDecoration(label: 'Rentang analisis'),
               items: analysisWindowProfiles.map((window) {
@@ -1880,7 +2775,15 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
               }).toList(),
               onChanged: (value) {
                 if (value == null) return;
-                setState(() => _selectedAnalysisWindow = value);
+                setState(() {
+                  _selectedAnalysisWindow = value.isCustom
+                      ? AiAnalysisWindowProfile.customRange(
+                          startAt: _customAnalysisStartAt,
+                          endAt: _customAnalysisEndAt,
+                        )
+                      : value;
+                  _customAnalysisWindowErrorText = null;
+                });
               },
             ),
             const SizedBox(height: 8),
@@ -1892,6 +2795,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
                 height: 1.35,
               ),
             ),
+            if (_usesCustomAnalysisWindow) _buildCustomAnalysisRangeFields(),
             const SizedBox(height: 14),
             DropdownButtonFormField<PlantTypeProfile>(
               value: _selectedPlantType,
