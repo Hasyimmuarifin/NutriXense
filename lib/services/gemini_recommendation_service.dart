@@ -449,6 +449,16 @@ class GeminiRecommendationService {
   static const _busyMessage =
       'AI sedang sibuk karena trafik tinggi. Silakan coba lagi dalam beberapa saat.';
   static const _requestTimeout = Duration(minutes: 1);
+  static const _singleAttemptTimeout = Duration(seconds: 25);
+  static const _maxRetryAttempts = 3;
+  static const _defaultModelName = 'gemini-3.6-flash';
+  static const _fallbackModelNames = [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+  ];
   static const _responseCacheTtl = Duration(minutes: 2);
   static const _gradualCorrectionFraction = 0.25;
   static const _maxPumpRunSeconds = 30;
@@ -507,18 +517,6 @@ class GeminiRecommendationService {
       input,
       activeThresholds,
     );
-    final model = GenerativeModel(
-      model: config.modelName,
-      apiKey: config.apiKey,
-      systemInstruction: Content.system(_systemPrompt),
-      generationConfig: GenerationConfig(
-        temperature: 0.35,
-        maxOutputTokens: 8192,
-        responseMimeType: 'application/json',
-        responseSchema: _responseSchema,
-      ),
-    );
-
     final payload = jsonEncode({
       'task':
           'Calculate hybrid Gemini dose recommendations for ${input.plantType.label} and return JSON only.',
@@ -602,10 +600,10 @@ class GeminiRecommendationService {
       'deterministic_decision_plan': deterministicPlan,
     });
 
-    dynamic response;
+    late final _GeminiContentResult geminiResult;
     try {
-      response = await _generateContentWithRetry(
-        model,
+      geminiResult = await _generateContentWithModelFallback(
+        config,
         [Content.text(payload)],
       );
     } on Object catch (error) {
@@ -633,13 +631,13 @@ class GeminiRecommendationService {
       rethrow;
     }
 
-    final text = response.text;
+    final text = geminiResult.response.text;
     if (text == null || text.trim().isEmpty) {
       throw StateError('Gemini tidak mengembalikan teks JSON.');
     }
 
     final decoded = await _decodeJsonResponse(
-      model: model,
+      config: config,
       rawText: text,
       originalPayload: payload,
       summary: summary,
@@ -748,7 +746,7 @@ class GeminiRecommendationService {
         _modelNameOverride,
         _dartDefineModelName,
         localConfig.modelName,
-      ], fallback: 'gemini-3.5-flash'),
+      ], fallback: _defaultModelName),
     );
   }
 
@@ -844,7 +842,7 @@ class GeminiRecommendationService {
   }
 
   static Future<Map<String, dynamic>> _decodeJsonResponse({
-    required GenerativeModel model,
+    required _GeminiRuntimeConfig config,
     required String rawText,
     required String originalPayload,
     required _SensorHistorySummary summary,
@@ -857,8 +855,8 @@ class GeminiRecommendationService {
 
     dynamic repairResponse;
     try {
-      repairResponse = await _generateContentWithRetry(
-        model,
+      final repairResult = await _generateContentWithModelFallback(
+        config,
         [
           Content.text(jsonEncode({
             'task':
@@ -906,6 +904,7 @@ class GeminiRecommendationService {
           })),
         ],
       );
+      repairResponse = repairResult.response;
     } on Object catch (error) {
       if (_shouldUseLocalFallback(error)) {
         debugPrint(
@@ -946,7 +945,7 @@ class GeminiRecommendationService {
         : DailyFertilizationScheduleRecommendation.fromPlan(
             recommendations: pumpRecommendations,
             reason:
-                'Jadwal harian ${input.plantType.label} direkomendasikan dari selisih parameter terbaru terhadap ambang minimum berdasarkan rentang analisis ${input.analysisWindow.xaiLabel}, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
+                'Jadwal harian ${input.plantType.label} direkomendasikan dari kebutuhan koreksi EC/air terbaru berdasarkan rentang analisis ${input.analysisWindow.xaiLabel}, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
           );
 
     return {
@@ -1290,42 +1289,136 @@ class GeminiRecommendationService {
     return hasLimitSignal && hasDailySignal;
   }
 
-  static Future<dynamic> _generateContentWithRetry(
-    GenerativeModel model,
+  static Future<_GeminiContentResult> _generateContentWithModelFallback(
+    _GeminiRuntimeConfig config,
     List<Content> contents,
   ) async {
+    Object? lastError;
+
+    for (final modelName in _candidateModelNames(config.modelName)) {
+      final model = _buildModel(config, modelName);
+      try {
+        final response = await _generateContentWithRetry(
+          model,
+          contents,
+          modelName: modelName,
+        );
+        return _GeminiContentResult(
+          modelName: modelName,
+          response: response,
+        );
+      } on Object catch (error) {
+        lastError = error;
+        if (_shouldUseLocalFallback(error) || !_shouldTryFallbackModel(error)) {
+          rethrow;
+        }
+        debugPrint(
+          'Gemini model $modelName failed, trying fallback model: $error',
+        );
+      }
+    }
+
+    debugPrint('All Gemini fallback models failed: $lastError');
+    throw AiRecommendationException(
+      '$_busyMessage Semua model Gemini cadangan sudah dicoba otomatis.',
+    );
+  }
+
+  static GenerativeModel _buildModel(
+    _GeminiRuntimeConfig config,
+    String modelName,
+  ) {
+    final generationConfig = _shouldSendTemperature(modelName)
+        ? GenerationConfig(
+            temperature: 0.35,
+            maxOutputTokens: 8192,
+            responseMimeType: 'application/json',
+            responseSchema: _responseSchema,
+          )
+        : GenerationConfig(
+            maxOutputTokens: 8192,
+            responseMimeType: 'application/json',
+            responseSchema: _responseSchema,
+          );
+
+    return GenerativeModel(
+      model: modelName,
+      apiKey: config.apiKey,
+      systemInstruction: Content.system(_systemPrompt),
+      generationConfig: generationConfig,
+    );
+  }
+
+  static List<String> _candidateModelNames(String primaryModelName) {
+    final names = <String>[];
+
+    void addIfMissing(String modelName) {
+      final normalized = modelName.trim();
+      if (normalized.isEmpty || names.contains(normalized)) return;
+      names.add(normalized);
+    }
+
+    addIfMissing(primaryModelName);
+    for (final fallbackModelName in _fallbackModelNames) {
+      addIfMissing(fallbackModelName);
+    }
+    return names;
+  }
+
+  static Future<dynamic> _generateContentWithRetry(
+    GenerativeModel model,
+    List<Content> contents, {
+    required String modelName,
+  }) async {
     final startedAt = DateTime.now();
     var attempt = 0;
     Object? lastError;
 
-    while (DateTime.now().difference(startedAt) < _requestTimeout) {
+    while (attempt < _maxRetryAttempts &&
+        DateTime.now().difference(startedAt) < _requestTimeout) {
       attempt += 1;
       final remaining = _requestTimeout - DateTime.now().difference(startedAt);
       if (remaining <= Duration.zero) break;
+      final attemptTimeout =
+          remaining < _singleAttemptTimeout ? remaining : _singleAttemptTimeout;
 
       try {
-        return await model.generateContent(contents).timeout(remaining);
+        return await model.generateContent(contents).timeout(attemptTimeout);
       } on Object catch (error) {
         lastError = error;
         if (!_shouldRetryAiRequest(error)) rethrow;
+        if (attempt >= _maxRetryAttempts) break;
 
         final delay = _retryDelay(attempt);
         final remainingAfterDelay =
             _requestTimeout - DateTime.now().difference(startedAt);
         if (remainingAfterDelay <= delay) break;
+        debugPrint(
+          'Gemini $modelName attempt $attempt failed, retrying in '
+          '${delay.inSeconds}s: $error',
+        );
         await Future<void>.delayed(delay);
       }
     }
 
-    debugPrint('Gemini request failed after retry: $lastError');
-    throw const AiRecommendationException(_busyMessage);
+    debugPrint(
+      'Gemini $modelName failed after $attempt attempt(s): $lastError',
+    );
+    throw AiRecommendationException(
+      '$_busyMessage Gemini $modelName sudah dicoba otomatis beberapa kali.',
+    );
   }
 
   static bool _shouldRetryAiRequest(Object error) {
     if (error is TimeoutException) return true;
+    if (_isDailyRequestLimitError(error)) return false;
 
     final text = error.toString().toLowerCase();
     return text.contains('503') ||
+        text.contains('429') ||
+        text.contains('rate limit') ||
+        text.contains('rate-limit') ||
+        text.contains('resource exhausted') ||
         text.contains('server error') ||
         text.contains('unavailable') ||
         text.contains('overloaded') ||
@@ -1333,11 +1426,32 @@ class GeminiRecommendationService {
         text.contains('timeout');
   }
 
+  static bool _shouldTryFallbackModel(Object error) {
+    if (_isDailyRequestLimitError(error)) return false;
+    if (error is TimeoutException || error is AiRecommendationException) {
+      return true;
+    }
+
+    final text = error.toString().toLowerCase();
+    return _shouldRetryAiRequest(error) ||
+        text.contains('400') ||
+        text.contains('404') ||
+        text.contains('invalid argument') ||
+        text.contains('model not found') ||
+        text.contains('not found') ||
+        text.contains('not supported');
+  }
+
+  static bool _shouldSendTemperature(String modelName) {
+    final normalized = modelName.toLowerCase();
+    return !normalized.contains('3.6') &&
+        !normalized.contains('3.5-flash-lite');
+  }
+
   static Duration _retryDelay(int attempt) {
     const delays = [
-      Duration(seconds: 15),
-      Duration(seconds: 30),
-      Duration(seconds: 45),
+      Duration(seconds: 2),
+      Duration(seconds: 5),
     ];
     if (attempt <= delays.length) return delays[attempt - 1];
     return delays.last;
@@ -2069,6 +2183,16 @@ class _GeminiRuntimeConfig {
 
   final String apiKey;
   final String modelName;
+}
+
+class _GeminiContentResult {
+  const _GeminiContentResult({
+    required this.modelName,
+    required this.response,
+  });
+
+  final String modelName;
+  final dynamic response;
 }
 
 class _SensorReadingSnapshot {

@@ -1,4 +1,4 @@
 {
   "apiKey": "YOUR_GEMINI_API_KEY",
-  "modelName": "gemini-3.5-flash"
+  "modelName": "gemini-3.6-flash"
 }
