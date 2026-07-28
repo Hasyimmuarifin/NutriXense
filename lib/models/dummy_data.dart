@@ -7,7 +7,7 @@ class DummyData {
   // ─── Current Sensor Readings ─────────────────────────────────────────────────
   static List<SensorReading> getCurrentReadings() => [
         const SensorReading(
-          label: 'Nitrogen',
+          label: 'Estimasi Nitrogen',
           unit: 'mg/kg',
           value: 38.5,
           minValue: 0,
@@ -18,7 +18,7 @@ class DummyData {
           colorHex: 0xFF2E7D52,
         ),
         const SensorReading(
-          label: 'Fosfor',
+          label: 'Estimasi Fosfor',
           unit: 'mg/kg',
           value: 55.2,
           minValue: 0,
@@ -29,7 +29,7 @@ class DummyData {
           colorHex: 0xFF1565C0,
         ),
         const SensorReading(
-          label: 'Kalium',
+          label: 'Estimasi Kalium',
           unit: 'mg/kg',
           value: 92.8,
           minValue: 0,
@@ -107,13 +107,13 @@ class DummyData {
   // ─── AI Insights ─────────────────────────────────────────────────────────────
   static List<InsightCard> getInsights() => [
         const InsightCard(
-          title: 'Low Nitrogen Detected',
+          title: 'Estimasi Nitrogen Rendah',
           description:
-              'Nitrogen levels are below the tea crop normal range (38.5 mg/kg vs 100–200 mg/kg). Plants may show yellowing of older leaves.',
+              'Nilai N dari sensor cepat terbaca sebagai tren rendah (38.5 mg/kg vs 100–200 mg/kg), sehingga perlu dibaca bersama EC dan kondisi tanaman.',
           icon: '⚠️',
           severity: InsightSeverity.kritis,
           action:
-              'Apply nitrogen-rich fertilizer (NPK 20-10-10). Activate Pump A for 5 minutes.',
+              'Gunakan koreksi nutrisi berbasis EC dan resep larutan stok, lalu ukur ulang setelah larutan merata.',
         ),
         const InsightCard(
           title: 'pH Normal untuk Teh',
@@ -125,22 +125,22 @@ class DummyData {
               'Maintain the current media acidity and avoid excessive liming.',
         ),
         const InsightCard(
-          title: 'Kadar Kalium Rendah',
+          title: 'Tren Kalium Rendah',
           description:
-              'Kalium 92.8 mg/kg sedikit di bawah rentang normal teh (100–200 mg/kg). Kekurangan K dapat menurunkan ketahanan tanaman.',
+              'Estimasi Kalium 92.8 mg/kg berada di bawah rentang target, namun keputusan pompa tetap divalidasi oleh EC.',
           icon: '🟡',
           severity: InsightSeverity.awas,
           action:
-              'Tambahkan kalium bertahap dan ukur ulang setelah larutan merata.',
+              'Pantau tren K bersama EC; koreksi pupuk dilakukan melalui recipe dosing jika EC rendah.',
         ),
         const InsightCard(
-          title: 'Fosfor Optimal',
+          title: 'Tren Fosfor Optimal',
           description:
-              'Fosfor 55.2 mg/kg sedikit di atas rentang normal teh (20–50 mg/kg). Pantau agar tidak terus meningkat.',
+              'Estimasi Fosfor 55.2 mg/kg terbaca sedikit di atas rentang target, sehingga cukup dipantau sebagai tren.',
           icon: '✅',
           severity: InsightSeverity.awas,
           action:
-              'Tunda penambahan fosfor sementara dan pantau pembacaan berikutnya.',
+              'Jangan jadikan nilai estimasi P sebagai satu-satunya dasar kontrol; pantau EC dan pH sebelum koreksi.',
         ),
         const InsightCard(
           title: 'Moisture Levels Good',
@@ -165,21 +165,21 @@ class DummyData {
         PumpController(
           id: 'pump_a',
           name: 'Pompa A',
-          nutrient: 'Nitrogen (N)',
+          nutrient: 'Larutan stok Nitrogen (N)',
           iconPath: 'assets/icons/leaf.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_b',
           name: 'Pompa B',
-          nutrient: 'Fosfor (P)',
+          nutrient: 'Larutan stok Fosfor (P)',
           iconPath: 'assets/icons/root.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_c',
           name: 'Pompa C',
-          nutrient: 'Kalium (K)',
+          nutrient: 'Larutan stok Kalium (K)',
           iconPath: 'assets/icons/crop.png',
           isOn: false,
         ),
@@ -195,9 +195,9 @@ class DummyData {
   // ─── Mini chart data for Home screen ─────────────────────────────────────────
   static List<double> getMiniChartData(String sensor) {
     final Map<String, List<double>> charts = {
-      'Nitrogen': [42, 40, 37, 35, 38, 36, 38.5],
-      'Fosfor': [50, 53, 56, 54, 58, 55, 55.2],
-      'Kalium': [85, 88, 90, 93, 91, 95, 92.8],
+      'Estimasi Nitrogen': [42, 40, 37, 35, 38, 36, 38.5],
+      'Estimasi Fosfor': [50, 53, 56, 54, 58, 55, 55.2],
+      'Estimasi Kalium': [85, 88, 90, 93, 91, 95, 92.8],
       'pH Level': [5.1, 5.0, 4.9, 5.0, 5.2, 4.8, 5.0],
       'Soil Moisture': [60, 65, 68, 62, 64, 66, 64.0],
       'Temperature': [21, 22, 23, 22, 21, 23, 22.4],

@@ -2,9 +2,9 @@ const { admin, db } = require('./firebase');
 const { config } = require('./config');
 
 const RELAY_LABELS = {
-  1: 'Pompa A (N)',
-  2: 'Pompa B (P)',
-  3: 'Pompa C (K)',
+  1: 'Pompa A (Stok N)',
+  2: 'Pompa B (Stok P)',
+  3: 'Pompa C (Stok K)',
   4: 'Pompa D (Air)',
 };
 

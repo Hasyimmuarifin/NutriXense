@@ -41,6 +41,11 @@ class RuleBasedPumpAutomationService {
   static const int _minPulseSeconds = 3;
   static const int _mediumPulseSeconds = 5;
   static const int _maxPulseSeconds = 10;
+  static const Map<String, double> _defaultRecipeRelayRatios = {
+    '1': 1,
+    '2': 1,
+    '3': 1,
+  };
 
   final ValueNotifier<Set<int>> activeRelays = ValueNotifier(<int>{});
 
@@ -103,7 +108,22 @@ class RuleBasedPumpAutomationService {
       'mediumPulseMs': _mediumPulseSeconds * 1000,
       'maxPulseMs': _maxPulseSeconds * 1000,
       'cooldownMs': FieldValue.delete(),
-      'automationMode': 'fuzzy_logic',
+      'automationMode': 'ec_recipe_dosing',
+      'sensorInterpretation': {
+        'npk': 'estimated_trend',
+        'primaryNutrientControl': 'electrical_conductivity',
+        'description':
+            'Nilai N/P/K dari sensor RS485 diperlakukan sebagai estimasi/tren berbasis EC. Kontrol otomatis pompa N/P/K memakai resep larutan stok saat EC rendah, bukan pembacaan unsur N/P/K terpisah.',
+      },
+      'recipeDosing': {
+        'trigger': 'ec_low',
+        'relayRatios': _defaultRecipeRelayRatios,
+        'relayLabels': {
+          '1': 'Pompa A - Larutan stok Nitrogen (N)',
+          '2': 'Pompa B - Larutan stok Fosfor (P)',
+          '3': 'Pompa C - Larutan stok Kalium (K)',
+        },
+      },
       'fuzzyLogic': {
         'minPulseSeconds': _minPulseSeconds,
         'mediumPulseSeconds': _mediumPulseSeconds,
@@ -111,7 +131,7 @@ class RuleBasedPumpAutomationService {
         'cooldownSeconds': FieldValue.delete(),
         'checkIntervalSeconds': checkInterval.inSeconds,
         'description':
-            'Durasi pompa otomatis mengikuti fuzzy: Minimum 3 detik, Sedang 5 detik, Maksimum 10 detik berdasarkan tingkat pelanggaran ambang sensor.',
+            'Durasi pompa otomatis mengikuti fuzzy: Minimum 3 detik, Sedang 5 detik, Maksimum 10 detik. Pompa air mengikuti kelembapan/suhu, sedangkan Pompa N/P/K mengikuti resep dosing saat EC rendah.',
       },
       'updatedAt': FieldValue.serverTimestamp(),
     };

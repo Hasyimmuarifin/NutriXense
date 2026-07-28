@@ -152,6 +152,7 @@ class NutrixenseBackgroundService : Service() {
     private val fuzzyMinPulseMillis = 3_000L
     private val fuzzyMediumPulseMillis = 5_000L
     private val fuzzyMaxPulseMillis = 10_000L
+    private val nutrientRecipeRatios = mapOf(1 to 1.0, 2 to 1.0, 3 to 1.0)
     private val notificationColor = Color.rgb(46, 125, 50)
 
     override fun onCreate() {
@@ -333,9 +334,9 @@ class NutrixenseBackgroundService : Service() {
     private fun handleThresholdAlerts(reading: SensorReading) {
         val alertLines = mutableListOf<String>()
 
-        addAlertLine(alertLines, "nitrogen", "Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
-        addAlertLine(alertLines, "phosphorus", "Fosfor", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
-        addAlertLine(alertLines, "potassium", "Kalium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
+        addAlertLine(alertLines, "nitrogen", "Estimasi Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
+        addAlertLine(alertLines, "phosphorus", "Estimasi Fosfor", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
+        addAlertLine(alertLines, "potassium", "Estimasi Kalium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
         addAlertLine(alertLines, "ph", "pH", reading.ph, "pH", "min_ph", "max_ph")
         addAlertLine(alertLines, "moisture", "Kelembapan", reading.moisture, "%", "min_moisture", "max_moisture")
         addAlertLine(alertLines, "temperature", "Suhu", reading.temperature, "°C", "min_temperature", "max_temperature")
@@ -440,24 +441,6 @@ class NutrixenseBackgroundService : Service() {
 
         addFuzzyLowDuration(
             durationsByRelay,
-            relay = 1,
-            value = reading.nitrogen,
-            minKey = "min_nitrogen"
-        )
-        addFuzzyLowDuration(
-            durationsByRelay,
-            relay = 2,
-            value = reading.phosphorus,
-            minKey = "min_phosphorus"
-        )
-        addFuzzyLowDuration(
-            durationsByRelay,
-            relay = 3,
-            value = reading.potassium,
-            minKey = "min_potassium"
-        )
-        addFuzzyLowDuration(
-            durationsByRelay,
             relay = 4,
             value = reading.moisture,
             minKey = "min_moisture"
@@ -471,8 +454,9 @@ class NutrixenseBackgroundService : Service() {
 
         val ecDuration = fuzzyLowDurationMillis(reading.ec, "min_ec")
         if (ecDuration != null) {
-            listOf(1, 2, 3).forEach { relay ->
-                durationsByRelay[relay] = maxOf(durationsByRelay[relay] ?: 0L, ecDuration)
+            nutrientRecipeRatios.forEach { (relay, ratio) ->
+                val duration = (ecDuration * ratio).toLong().coerceAtLeast(1_000L)
+                durationsByRelay[relay] = maxOf(durationsByRelay[relay] ?: 0L, duration)
             }
         }
 
@@ -526,9 +510,6 @@ class NutrixenseBackgroundService : Service() {
     private fun relaysForRule(reading: SensorReading): Set<Int> {
         val relays = mutableSetOf<Int>()
 
-        if (isLow(reading.nitrogen, "min_nitrogen")) relays.add(1)
-        if (isLow(reading.phosphorus, "min_phosphorus")) relays.add(2)
-        if (isLow(reading.potassium, "min_potassium")) relays.add(3)
         if (isLow(reading.moisture, "min_moisture")) relays.add(4)
         if (isHigh(reading.temperature, "max_temperature")) relays.add(4)
         if (isLow(reading.ec, "min_ec")) relays.addAll(setOf(1, 2, 3))

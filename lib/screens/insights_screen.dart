@@ -1454,22 +1454,22 @@ class _InsightsScreenState extends State<InsightsScreen> {
         _buildTriggerChip(
           Icons.eco_rounded,
           triggers.activateNitrogenPump
-              ? 'Pompa A N: Direkomendasikan'
-              : 'Pompa A N: Normal',
+              ? 'Stok N: Direkomendasikan'
+              : 'Stok N: Normal',
           triggers.activateNitrogenPump,
         ),
         _buildTriggerChip(
           Icons.grass_rounded,
           triggers.activatePhosphorusPump
-              ? 'Pompa B P: Direkomendasikan'
-              : 'Pompa B P: Normal',
+              ? 'Stok P: Direkomendasikan'
+              : 'Stok P: Normal',
           triggers.activatePhosphorusPump,
         ),
         _buildTriggerChip(
           Icons.local_florist_rounded,
           triggers.activatePotassiumPump
-              ? 'Pompa C K: Direkomendasikan'
-              : 'Pompa C K: Normal',
+              ? 'Stok K: Direkomendasikan'
+              : 'Stok K: Normal',
           triggers.activatePotassiumPump,
         ),
         _buildTriggerChip(
@@ -1772,12 +1772,20 @@ class _InsightsScreenState extends State<InsightsScreen> {
         context.contains('temp')) {
       return 'Suhu Tinggi (Penyiraman)';
     }
-    if (context.contains('nitrogen')) return 'Defisit Nitrogen (N)';
+    if (context.contains('ec') &&
+        (context.contains('nitrogen') || context.contains('stok n'))) {
+      return 'Recipe Stok N (EC Rendah)';
+    }
+    if (context.contains('nitrogen')) return 'Tren Nitrogen (N)';
     if (context.contains('fosfor') || context.contains('phosphorus')) {
-      return 'Defisit Fosfor (P)';
+      return context.contains('ec')
+          ? 'Recipe Stok P (EC Rendah)'
+          : 'Tren Fosfor (P)';
     }
     if (context.contains('kalium') || context.contains('potassium')) {
-      return 'Defisit Kalium (K)';
+      return context.contains('ec')
+          ? 'Recipe Stok K (EC Rendah)'
+          : 'Tren Kalium (K)';
     }
     if (context.contains('air') ||
         context.contains('water') ||
@@ -2533,7 +2541,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Area rekomendasi dikunci 100 cm² atau 0,01 m² sesuai area efektif pembacaan sensor NPK RS485 dan batas aman pompa kecil.',
+              'Area rekomendasi dikunci 100 cm² atau 0,01 m² sesuai area efektif sensor RS485. N/P/K dipakai sebagai tren estimasi, sedangkan dosis stok nutrisi divalidasi terutama dari EC dan batas aman pompa kecil.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 11,

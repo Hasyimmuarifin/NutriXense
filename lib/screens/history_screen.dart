@@ -1046,17 +1046,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<_PdfTrendSeries> _pdfTrendSeries(List<SensorDataPoint> chartData) {
     return [
       _PdfTrendSeries(
-        'Nitrogen (mg/kg)',
+        'Estimasi Nitrogen (mg/kg)',
         AppTheme.primaryGreen,
         chartData.map((item) => item.nitrogen).toList(),
       ),
       _PdfTrendSeries(
-        'Fosfor (mg/kg)',
+        'Estimasi Fosfor (mg/kg)',
         AppTheme.primaryBlue,
         chartData.map((item) => item.phosphorus).toList(),
       ),
       _PdfTrendSeries(
-        'Kalium (mg/kg)',
+        'Estimasi Kalium (mg/kg)',
         AppTheme.statusHigh,
         chartData.map((item) => item.potassium).toList(),
       ),
@@ -1085,9 +1085,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   List<String> get _historyTableHeaders => const [
         'Waktu',
-        'Nitrogen (mg/kg)',
-        'Fosfor (mg/kg)',
-        'Kalium (mg/kg)',
+        'Estimasi Nitrogen (mg/kg)',
+        'Estimasi Fosfor (mg/kg)',
+        'Estimasi Kalium (mg/kg)',
         'pH',
         'Kelembapan (%)',
         'Suhu (C)',
@@ -1502,7 +1502,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   final List<Map<String, dynamic>> _sensors = [
-    {'label': 'NPK', 'icon': Icons.eco_rounded},
+    {'label': 'Est. NPK', 'icon': Icons.eco_rounded},
     {'label': 'pH', 'icon': Icons.science_rounded},
     {'label': 'Kelembapan', 'icon': Icons.water_drop_rounded},
     {'label': 'Suhu', 'icon': Icons.thermostat_rounded},
@@ -2117,14 +2117,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                         alignment: WrapAlignment.center,
                                         runSpacing: 8,
                                         children: [
-                                          _legend('Nitrogen',
+                                          _legend('Est. Nitrogen',
                                               AppTheme.primaryGreen),
                                           const SizedBox(width: 16),
-                                          _legend(
-                                              'Fosfor', AppTheme.primaryBlue),
+                                          _legend('Est. Fosfor',
+                                              AppTheme.primaryBlue),
                                           const SizedBox(width: 16),
-                                          _legend(
-                                              'Kalium', AppTheme.statusHigh),
+                                          _legend('Est. Kalium',
+                                              AppTheme.statusHigh),
                                         ],
                                       ),
                                     ],

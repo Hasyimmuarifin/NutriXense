@@ -826,7 +826,7 @@ class _ControlScreenState extends State<ControlScreen> {
           child: SizedBox(
             width: 220,
             child: Text(
-              'DSS membantu menyalakan pompa secara otomatis berdasarkan kondisi nutrisi, kelembapan, dan suhu tanaman. Aktifkan DSS jika ingin sistem membantu perawatan tanaman.',
+              'DSS otomatis memakai EC sebagai acuan utama kebutuhan larutan stok N/P/K, sedangkan kelembapan dan suhu mengatur Pompa Air. Nilai N/P/K sensor dipakai sebagai estimasi/tren pendukung, bukan pemicu pompa unsur secara terpisah.',
               style: TextStyle(
                 fontSize: 12,
                 height: 1.35,

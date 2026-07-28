@@ -94,16 +94,51 @@ function highDecision(reading, sensorKey, maxKey, relay, thresholds, durations) 
   }];
 }
 
+function readRecipeRatio(data = {}) {
+  const recipe = data.recipeDosing || data.nutrientRecipe || {};
+  const ratios = recipe.relayRatios || recipe.ratios || {};
+  return {
+    1: Number(ratios[1] ?? ratios.relay1 ?? ratios.nitrogen ?? 1),
+    2: Number(ratios[2] ?? ratios.relay2 ?? ratios.phosphorus ?? 1),
+    3: Number(ratios[3] ?? ratios.relay3 ?? ratios.potassium ?? 1),
+  };
+}
+
+function recipeDurationsFromEc(reading, thresholds, durations, recipeRatios) {
+  const ec = reading.ec;
+  const minimum = thresholds.min_ec;
+  if (!isLow(ec, minimum) || minimum <= 0) return [];
+
+  const gapRatio = Math.min(Math.max((minimum - ec) / minimum, 0), 1);
+  const fuzzy = fuzzyLevelForRatio(gapRatio);
+  const baseDurationMs = durations[fuzzy.durationKey];
+
+  return [1, 2, 3].flatMap((relay) => {
+    const ratio = Number(recipeRatios[relay]);
+    if (!Number.isFinite(ratio) || ratio <= 0) return [];
+
+    return [{
+      sensorKey: 'ec',
+      direction: 'low',
+      relay,
+      threshold: minimum,
+      value: ec,
+      gapRatio,
+      fuzzyCondition: fuzzy.condition,
+      fuzzyOutput: fuzzy.label,
+      durationMs: Math.max(1000, Math.round(baseDurationMs * ratio)),
+      dosingMode: 'ec_recipe',
+      recipeRatio: ratio,
+      note:
+        'NPK relay is activated from EC-based stock-solution recipe dosing; CWT NPK values are treated as estimated trends, not independent elemental measurements.',
+    }];
+  });
+}
+
 function fuzzyDecisionsForReading(reading, thresholds, durations) {
   return [
-    ...lowDecision(reading, 'nitrogen', 'min_nitrogen', 1, thresholds, durations),
-    ...lowDecision(reading, 'phosphorus', 'min_phosphorus', 2, thresholds, durations),
-    ...lowDecision(reading, 'potassium', 'min_potassium', 3, thresholds, durations),
     ...lowDecision(reading, 'moisture', 'min_moisture', 4, thresholds, durations),
     ...highDecision(reading, 'temperature', 'max_temperature', 4, thresholds, durations),
-    ...lowDecision(reading, 'ec', 'min_ec', 1, thresholds, durations),
-    ...lowDecision(reading, 'ec', 'min_ec', 2, thresholds, durations),
-    ...lowDecision(reading, 'ec', 'min_ec', 3, thresholds, durations),
   ];
 }
 
@@ -142,6 +177,7 @@ async function loadDssConfig() {
     enabled: data.enabled === true,
     thresholds: buildThresholds(data),
     durations,
+    recipeRatios: readRecipeRatio(data),
   };
 }
 
@@ -218,11 +254,19 @@ function startDssWorker(mqttClient) {
         return;
       }
 
-      const decisions = fuzzyDecisionsForReading(
-        reading,
-        dssConfig.thresholds,
-        dssConfig.durations,
-      );
+      const decisions = [
+        ...fuzzyDecisionsForReading(
+          reading,
+          dssConfig.thresholds,
+          dssConfig.durations,
+        ),
+        ...recipeDurationsFromEc(
+          reading,
+          dssConfig.thresholds,
+          dssConfig.durations,
+          dssConfig.recipeRatios,
+        ),
+      ];
 
       if (decisions.length === 0) {
         await writeDssRuntimeStatus({
@@ -249,6 +293,7 @@ function startDssWorker(mqttClient) {
           source: 'dss_worker',
           sensorReadingId: reading.id,
           thresholds: dssConfig.thresholds,
+          recipeRatios: dssConfig.recipeRatios,
           fuzzyDurations: dssConfig.durations,
           decisions,
         },
