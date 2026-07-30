@@ -38,13 +38,13 @@ class AiPumpAutomationService {
     return _applyCommands(
       <_PumpCommand>[
         if (triggers.activateNitrogenPump)
-          const _PumpCommand(relay: 1, label: 'Pompa A (Stok N)'),
+          const _PumpCommand(relay: 1, label: 'Pompa A (N)'),
         if (triggers.activatePhosphorusPump)
-          const _PumpCommand(relay: 2, label: 'Pompa B (Stok P)'),
+          const _PumpCommand(relay: 2, label: 'Pompa B (P)'),
         if (triggers.activatePotassiumPump)
-          const _PumpCommand(relay: 3, label: 'Pompa C (Stok K)'),
+          const _PumpCommand(relay: 3, label: 'Pompa C (K)'),
         if (triggers.activateWaterPump)
-          const _PumpCommand(relay: 4, label: 'Pompa D (Water)'),
+          const _PumpCommand(relay: 4, label: 'Pompa D (Air)'),
       ],
       reason: triggers.reason,
     );
@@ -237,19 +237,19 @@ class AiPumpAutomationService {
       case 1:
         return _PumpCommand(
           relay: 1,
-          label: 'Pompa A (Stok N)',
+          label: 'Pompa A (N)',
           duration: pulseDuration,
         );
       case 2:
         return _PumpCommand(
           relay: 2,
-          label: 'Pompa B (Stok P)',
+          label: 'Pompa B (P)',
           duration: pulseDuration,
         );
       case 3:
         return _PumpCommand(
           relay: 3,
-          label: 'Pompa C (Stok K)',
+          label: 'Pompa C (K)',
           duration: pulseDuration,
         );
       case 4:

@@ -113,15 +113,15 @@ class RuleBasedPumpAutomationService {
         'npk': 'estimated_trend',
         'primaryNutrientControl': 'electrical_conductivity',
         'description':
-            'Nilai N/P/K dari sensor RS485 diperlakukan sebagai estimasi/tren berbasis EC. Kontrol otomatis pompa N/P/K memakai resep larutan stok saat EC rendah, bukan pembacaan unsur N/P/K terpisah.',
+            'Nilai N/P/K dari sensor RS485 diperlakukan sebagai estimasi/tren berbasis EC. Kontrol otomatis pompa N/P/K memakai resep larutan saat EC rendah, bukan pembacaan unsur N/P/K terpisah.',
       },
       'recipeDosing': {
         'trigger': 'ec_low',
         'relayRatios': _defaultRecipeRelayRatios,
         'relayLabels': {
-          '1': 'Pompa A - Larutan stok Nitrogen (N)',
-          '2': 'Pompa B - Larutan stok Fosfor (P)',
-          '3': 'Pompa C - Larutan stok Kalium (K)',
+          '1': 'Pompa A - Larutan Nitrogen (N)',
+          '2': 'Pompa B - Larutan Fosfor (P)',
+          '3': 'Pompa C - Larutan Kalium (K)',
         },
       },
       'fuzzyLogic': {

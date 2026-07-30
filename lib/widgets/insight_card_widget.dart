@@ -147,7 +147,7 @@ class InsightCardWidget extends StatelessWidget {
                 const SizedBox(height: 12),
                 _buildExpandedInfoRow(
                   icon: Icons.psychology_alt_rounded,
-                  label: 'Alasan AI',
+                  label: 'Penjelasan AI',
                   text: insight.action,
                 ),
                 if (insight.recommendation.trim().isNotEmpty) ...[

@@ -36,7 +36,7 @@ class FertilizerSolutionConcentration {
       'phosphorus_mg_per_liter': phosphorusMgPerLiter,
       'potassium_mg_per_liter': potassiumMgPerLiter,
       'calculation_note':
-          'Convert mg/L by dividing by 1000 before calculating pump volume in milliliters.',
+          'Use these stock-solution concentrations as duration factors. Lower concentration may require longer runtime, but the final recommendation must remain within local safety bounds and pH/EC constraints.',
     };
   }
 }
@@ -411,21 +411,21 @@ const List<PlantingMediumProfile> plantingMediumProfiles = [
   ),
   PlantingMediumProfile(
     id: 'clay_soil',
-    label: 'Tanah liat/padat',
+    label: 'Tanah liat',
     assumedDepthCm: 15,
     bulkDensityKgPerM3: 1200,
     note: 'Media lebih padat; koreksi dibuat lebih bertahap.',
   ),
   PlantingMediumProfile(
     id: 'sandy_fast_drying_soil',
-    label: 'Tanah berpasir/cepat kering',
+    label: 'Tanah berpasir',
     assumedDepthCm: 18,
     bulkDensityKgPerM3: 1100,
     note: 'Media berdrainase cepat; penyiraman dan nutrisi dibuat bertahap.',
   ),
   PlantingMediumProfile(
     id: 'raised_bed',
-    label: 'Bedengan/lahan teh',
+    label: 'Bedengan',
     assumedDepthCm: 25,
     bulkDensityKgPerM3: 850,
     note: 'Profil akar dangkal-menengah untuk koreksi permukaan bertahap.',
@@ -462,11 +462,9 @@ class GeminiRecommendationService {
   static const _responseCacheTtl = Duration(minutes: 2);
   static const _gradualCorrectionFraction = 0.25;
   static const _maxPumpRunSeconds = 30;
-  static const Map<String, double> _defaultRecipeRatiosByPumpIndex = {
-    '0': 1,
-    '1': 1,
-    '2': 1,
-  };
+  static const _doseBaselineConcentrationMgPerLiter = 100.0;
+  static const _minConcentrationDurationFactor = 0.001;
+  static const _maxConcentrationDurationFactor = 100.0;
   static _CachedAiRecommendation? _cachedRecommendation;
 
   // Default threshold target keeps the original tea-plant behavior.
@@ -522,6 +520,13 @@ class GeminiRecommendationService {
       input,
       activeThresholds,
     );
+    final dynamicDoseReference = _dynamicFertilizerDoseReferenceToJson(
+      _buildDynamicFertilizerDoses(
+        summary,
+        input,
+        activeThresholds,
+      ),
+    );
     final payload = jsonEncode({
       'task':
           'Calculate hybrid Gemini dose recommendations for ${input.plantType.label} and return JSON only.',
@@ -547,22 +552,32 @@ class GeminiRecommendationService {
           'Do not directly activate pumps. Return decision support only; the user must confirm and may adjust pump duration. Treat CWT RS485 NPK as estimated trends derived from conductivity behavior, not independent laboratory-grade elemental N/P/K measurements.',
       'pump_mapping': {
         'activate_nitrogen_pump':
-            'Pompa A - Larutan stok Nitrogen (N), used in EC-based recipe dosing',
+            'Pompa A - Larutan Nitrogen (N), used in EC-based recipe dosing',
         'activate_phosphorus_pump':
-            'Pompa B - Larutan stok Fosfor (P), used in EC-based recipe dosing',
+            'Pompa B - Larutan Fosfor (P), used in EC-based recipe dosing',
         'activate_potassium_pump':
-            'Pompa C - Larutan stok Kalium (K), used in EC-based recipe dosing',
+            'Pompa C - Larutan Kalium (K), used in EC-based recipe dosing',
         'activate_water_pump': 'Pompa D - Air (H2O)',
       },
       'sensor_interpretation_policy': {
         'npk_sensor_values': 'estimated_trend_only',
         'primary_nutrient_control_signal': 'EC',
-        'fertilizer_control_method': 'EC-based stock-solution recipe dosing',
+        'fertilizer_control_method': 'dynamic EC-gated stock-solution dosing',
         'warning':
             'Do not infer independent N, P, or K deficiency solely from CWT NPK values. They are displayed as trends and supporting indicators only.',
       },
-      'default_recipe_dosing_ratio_by_pump_index':
-          _defaultRecipeRatiosByPumpIndex,
+      'dynamic_fertilizer_dose_reference': dynamicDoseReference,
+      'concentration_dose_model': {
+        'baseline_mg_per_liter': _doseBaselineConcentrationMgPerLiter,
+        'formula':
+            'duration_factor = baseline_mg_per_liter / fertilizer_concentration_mg_per_liter',
+        'clamp_range': [
+          _minConcentrationDurationFactor,
+          _maxConcentrationDurationFactor,
+        ],
+        'interpretation':
+            'This fixed-baseline model makes concentration comparable across requests. Very concentrated solutions produce shorter pulses; very dilute solutions request longer pulses but are capped by local safety bounds.',
+      },
       'cultivation_area': {
         'square_meters': input.landAreaSquareMeters,
         'unit': 'm2',
@@ -587,9 +602,12 @@ class GeminiRecommendationService {
         'You may rewrite message, explanation, recommendation, sensor_summary, automation trigger reason, pump reasons, and schedule reason in your own agronomic wording.',
         'Keep item ids stable when they refer to the same sensor parameter, but you may adjust title text to be clearer.',
         'Automation trigger booleans should reflect your decision support, but they will still be safety-checked by the app before any pump action.',
-        'For Pompa A/B/C stock nutrient recommendations, use EC below ec_min as the activation trigger and apply default_recipe_dosing_ratio_by_pump_index. Do not activate A/B/C solely because estimated N/P/K trends are below their thresholds.',
-        'Estimated N, P, and K values may influence explanation priority, but they are not independent pump triggers because the CWT RS485 NPK reading is an estimated trend/proxy.',
-        'For EC low, calculate stock-solution pump seconds from EC deficit severity, deterministic_decision_plan, recipe ratio, and pump flow rates; keep the correction gradual.',
+        'For Pompa A/B/C stock nutrient recommendations, EC below ec_min is the nutrient activation gate, but choose pump durations dynamically from dynamic_fertilizer_dose_reference, estimated N/P/K trend severity, pH risk, fertilizer concentration, plant context, medium context, and pump flow rates.',
+        'Estimated N, P, and K values may influence relative fertilizer priority and duration, but they are not independent pump triggers because the CWT RS485 NPK reading is an estimated trend/proxy.',
+        'For EC low, calculate stock-solution pump seconds from EC deficit severity, historical N/P/K trend, fertilizer concentration, pH safety, deterministic_decision_plan, and pump flow rates; keep the correction gradual.',
+        'A lower fertilizer concentration may require a longer pump duration, but never exceed local safety bounds; if pH is already below ph_min, reduce or postpone acidifying fertilizer such as urea/N even when estimated N trend is low.',
+        'Use the fixed concentration_dose_model baseline. Do not normalize fertilizer concentration against the other N/P/K input values.',
+        'You may recommend only the fertilizer pumps that are suitable. Do not include every A/B/C pump when pH, EC, estimated trend, or concentration data argues against one pump.',
         'For EC high, never recommend fertilizer stock pumps; recommend dilution/flush monitoring with water only when moisture and context make it safe.',
         'For moisture, estimate water volume from current-to-minimum moisture percentage gap, fixed 100 cm2 area, assumed medium depth, estimated local medium volume, and safe gradual correction.',
         'Calculate recommended_seconds as recommended_volume_ml / pump_flow_rate_ml_per_second rounded to nearest whole second.',
@@ -722,8 +740,19 @@ class GeminiRecommendationService {
               reason:
                   'Jadwal harian ${input.plantType.label} direkomendasikan dari kalkulasi hybrid Gemini dengan validasi batas aman lokal, area sensor 100 cm2, dan asumsi media ${input.plantingMedium.label}.',
             );
+    final recommendedPumpIndexes =
+        pumpRecommendations.map((item) => item.pumpIndex).toSet();
+    final refinedTriggers = guardedResponse.automationTriggers.copyWith(
+      activateNitrogenPump: recommendedPumpIndexes.contains(0),
+      activatePhosphorusPump: recommendedPumpIndexes.contains(1),
+      activatePotassiumPump: recommendedPumpIndexes.contains(2),
+      activateWaterPump: recommendedPumpIndexes.contains(3),
+      reason:
+          '${guardedResponse.automationTriggers.reason} Trigger akhir diselaraskan dengan rekomendasi pompa yang lolos validasi lokal.',
+    );
 
     return guardedResponse.copyWith(
+      automationTriggers: refinedTriggers,
       pumpRecommendations: pumpRecommendations,
       dailyScheduleRecommendation: scheduleRecommendation,
     );
@@ -1103,6 +1132,11 @@ class GeminiRecommendationService {
       final pumpIndex = _readJsonInt(raw['pump_index']).clamp(0, 3);
       final resolvedRelay = relay >= 1 && relay <= 4 ? relay : pumpIndex + 1;
       if (!usedRelays.add(resolvedRelay)) continue;
+      if (resolvedRelay >= 1 &&
+          resolvedRelay <= 3 &&
+          !fallbackByRelay.containsKey(resolvedRelay)) {
+        continue;
+      }
 
       final metadata = _pumpMetadata(resolvedRelay, activeThresholds);
       if (metadata == null) continue;
@@ -1126,12 +1160,18 @@ class GeminiRecommendationService {
       final maxSeconds = _maxSafeSecondsForPump(metadata.pumpIndex, input);
       final localReferenceSeconds =
           fallbackByRelay[resolvedRelay]?.recommendedSeconds ?? 0;
-      final doseAwareSeconds = localReferenceSeconds > candidateSeconds
+      final isFertilizerRelay = resolvedRelay >= 1 && resolvedRelay <= 3;
+      final doseAwareSeconds = isFertilizerRelay && localReferenceSeconds > 0
           ? localReferenceSeconds
-          : candidateSeconds;
+          : localReferenceSeconds > candidateSeconds
+              ? localReferenceSeconds
+              : candidateSeconds;
       final safeSeconds = doseAwareSeconds.clamp(1, maxSeconds).toInt();
-      final wasRaisedToDoseReference =
-          localReferenceSeconds > 0 && candidateSeconds < localReferenceSeconds;
+      final wasAdjustedToDoseReference =
+          candidateSeconds.toInt() != safeSeconds ||
+              (isFertilizerRelay &&
+                  localReferenceSeconds > 0 &&
+                  candidateSeconds.toInt() != localReferenceSeconds);
       final deficit = _roundDouble(metadata.minimum - current);
       final deficitPercent = _roundDouble((deficit / metadata.minimum) * 100);
       final flowRate =
@@ -1145,8 +1185,8 @@ class GeminiRecommendationService {
           _nonEmptyText(raw['explanation']) ??
           fallbackByRelay[resolvedRelay]?.reason ??
           '${metadata.nutrient} saat ini ${_formatNumber(current)} ${metadata.unit}, kurang ${_formatNumber(deficit)} ${metadata.unit} dari ambang minimum ${_formatNumber(metadata.minimum)} ${metadata.unit}.';
-      final doseReferenceNote = wasRaisedToDoseReference
-          ? ' Durasi dinaikkan dari rekomendasi mentah ${candidateSeconds.toInt()} detik ke $safeSeconds detik agar tidak lebih rendah dari kalkulasi dosis lokal berbasis defisit, massa media, konsentrasi larutan, dan debit pompa.'
+      final doseReferenceNote = wasAdjustedToDoseReference
+          ? ' Durasi diselaraskan dari rekomendasi mentah ${candidateSeconds.toInt()} detik ke $safeSeconds detik mengikuti model dosis lokal berbasis EC, tren estimasi NPK, pH, konsentrasi larutan, media, dan batas aman pompa.'
           : '';
 
       validated.add(
@@ -1162,7 +1202,7 @@ class GeminiRecommendationService {
           deficitPercent: deficitPercent,
           recommendedSeconds: safeSeconds,
           reason:
-              '$reason ${basis == null ? '' : 'Dasar hitung: $basis '}$doseReferenceNote Durasi telah divalidasi dengan batas aman lokal maksimal $maxSeconds detik dan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+              '$reason ${basis == null ? '' : 'Dasar hitung: $basis '}$doseReferenceNote Durasi telah divalidasi dengan batas aman maksimal $maxSeconds detik dan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -1480,6 +1520,13 @@ class GeminiRecommendationService {
     Map<String, num> activeThresholds,
   ) {
     final items = <Map<String, dynamic>>[];
+    final dynamicFertilizerDoses = _buildDynamicFertilizerDoses(
+      summary,
+      input,
+      activeThresholds,
+    );
+    final dynamicPumpIndexes =
+        dynamicFertilizerDoses.map((item) => item.pumpIndex).toSet();
 
     void addItem({
       required String id,
@@ -1563,7 +1610,7 @@ class GeminiRecommendationService {
       lowTitle: 'Tren Nitrogen Rendah',
       highTitle: 'Tren Nitrogen Tinggi',
       lowAction:
-          'Gunakan nilai ini sebagai indikator pendukung. Pompa A tidak dijalankan hanya dari estimasi N; koreksi stok nutrisi dilakukan melalui recipe dosing jika EC juga rendah.',
+          'Gunakan tren N sebagai analisis pendukung. Pompa A tidak dijalankan hanya dari estimasi N; koreksi stok nutrisi dilakukan melalui recipe dosing jika EC juga rendah.',
       highAction:
           'Pantau EC dan respons daun ${input.plantType.label}. Jika EC tinggi, tunda pupuk; jika EC normal, perlakukan kenaikan ini sebagai tren sensor cepat, bukan bukti kelebihan N terpisah.',
       normalAction:
@@ -1650,8 +1697,9 @@ class GeminiRecommendationService {
       max: activeThresholds['ec_max']!,
       lowTitle: 'EC Rendah',
       highTitle: 'EC Tinggi',
-      lowAction:
-          'Tambahkan larutan stok nutrisi secara bertahap melalui Pompa A/B/C memakai rasio resep, lalu ukur ulang EC setelah pencampuran. Nilai N/P/K sensor dipakai sebagai tren pendukung, bukan pemicu pompa terpisah.',
+      lowAction: dynamicFertilizerDoses.isEmpty
+          ? 'EC rendah, tetapi kondisi pH/tren/konsentrasi larutan membuat pupuk perlu ditunda atau diberikan sangat hati-hati. Ukur ulang pH dan EC sebelum aktivasi pompa stok.'
+          : 'Tambahkan larutan nutrisi secara bertahap melalui ${dynamicFertilizerDoses.map((item) => item.pumpName).join(', ')} sesuai durasi dinamis berbasis EC, pH, tren estimasi NPK, konsentrasi larutan, dan media ${input.plantingMedium.label}.',
       highAction:
           'Encerkan larutan dengan air bersih secara bertahap dan tunda penambahan pupuk. Pantau ulang EC serta pH asam setelah larutan stabil.',
       normalAction:
@@ -1678,15 +1726,12 @@ class GeminiRecommendationService {
         'baik': baik,
       },
       'automation_triggers': {
-        'activate_nitrogen_pump':
-            summary.canActivateFertilizerRecipe(activeThresholds),
-        'activate_phosphorus_pump':
-            summary.canActivateFertilizerRecipe(activeThresholds),
-        'activate_potassium_pump':
-            summary.canActivateFertilizerRecipe(activeThresholds),
+        'activate_nitrogen_pump': dynamicPumpIndexes.contains(0),
+        'activate_phosphorus_pump': dynamicPumpIndexes.contains(1),
+        'activate_potassium_pump': dynamicPumpIndexes.contains(2),
         'activate_water_pump': summary.canActivateWaterPump(activeThresholds),
         'reason':
-            'Trigger pompa stok N/P/K mengikuti EC rendah dan rasio resep; N/P/K sensor hanya menjadi tren pendukung.',
+            'Trigger pompa stok N/P/K mengikuti gerbang EC rendah, lalu dipilih dinamis dari pH, tren estimasi NPK, konsentrasi larutan, media, dan batas aman durasi.',
       },
     };
   }
@@ -1832,81 +1877,46 @@ class GeminiRecommendationService {
 
     final deficit = _roundDouble(minEc - currentEc);
     final deficitPercent = _roundDouble((deficit / minEc) * 100);
-    final baseSeconds = _ecRecipeBaseSeconds(deficitPercent);
 
-    return [
-      _recipePumpRecommendation(
-        relay: 1,
-        pumpIndex: 0,
-        pumpName: 'Pompa A',
-        nutrient: 'Larutan stok Nitrogen',
-        currentEc: currentEc,
-        minEc: minEc,
-        deficit: deficit,
-        deficitPercent: deficitPercent,
-        baseSeconds: baseSeconds,
-        input: input,
-      ),
-      _recipePumpRecommendation(
-        relay: 2,
-        pumpIndex: 1,
-        pumpName: 'Pompa B',
-        nutrient: 'Larutan stok Fosfor',
-        currentEc: currentEc,
-        minEc: minEc,
-        deficit: deficit,
-        deficitPercent: deficitPercent,
-        baseSeconds: baseSeconds,
-        input: input,
-      ),
-      _recipePumpRecommendation(
-        relay: 3,
-        pumpIndex: 2,
-        pumpName: 'Pompa C',
-        nutrient: 'Larutan stok Kalium',
-        currentEc: currentEc,
-        minEc: minEc,
-        deficit: deficit,
-        deficitPercent: deficitPercent,
-        baseSeconds: baseSeconds,
-        input: input,
-      ),
-    ];
+    return _buildDynamicFertilizerDoses(
+      summary,
+      input,
+      activeThresholds,
+    )
+        .map(
+          (dose) => _recipePumpRecommendation(
+            dose: dose,
+            currentEc: currentEc,
+            minEc: minEc,
+            deficit: deficit,
+            deficitPercent: deficitPercent,
+            input: input,
+          ),
+        )
+        .toList(growable: false);
   }
 
   static PumpFertilizationRecommendation _recipePumpRecommendation({
-    required int relay,
-    required int pumpIndex,
-    required String pumpName,
-    required String nutrient,
+    required _DynamicFertilizerDose dose,
     required double currentEc,
     required double minEc,
     required double deficit,
     required double deficitPercent,
-    required int baseSeconds,
     required AiRecommendationAgronomicInput input,
   }) {
-    final ratio = _defaultRecipeRatiosByPumpIndex['$pumpIndex'] ?? 1;
-    final recommendedSeconds = (baseSeconds * ratio)
-        .round()
-        .clamp(
-            1,
-            _maxSafeSecondsForPump(
-              pumpIndex,
-              input,
-            ))
-        .toInt();
-    final flowRate = PumpFlowRates.byPumpIndex(pumpIndex).averageMlPerSecond;
+    final recommendedSeconds = dose.recommendedSeconds;
+    final flowRate =
+        PumpFlowRates.byPumpIndex(dose.pumpIndex).averageMlPerSecond;
     final estimatedVolumeMl = PumpFlowRates.volumeForDuration(
-      pumpIndex: pumpIndex,
+      pumpIndex: dose.pumpIndex,
       seconds: recommendedSeconds,
     );
 
     return PumpFertilizationRecommendation(
-      relay: relay,
-      pumpIndex: pumpIndex,
-      pumpName: pumpName,
-      nutrient: nutrient,
+      relay: dose.relay,
+      pumpIndex: dose.pumpIndex,
+      pumpName: dose.pumpName,
+      nutrient: dose.nutrient,
       unit: 'mS/cm',
       currentValue: currentEc,
       targetMinimum: minEc,
@@ -1914,8 +1924,327 @@ class GeminiRecommendationService {
       deficitPercent: deficitPercent,
       recommendedSeconds: recommendedSeconds,
       reason:
-          'EC saat ini ${_formatNumber(currentEc)} mS/cm, kurang ${_formatNumber(deficit)} mS/cm dari ambang minimum ${_formatNumber(minEc)} mS/cm. $pumpName dijalankan sebagai bagian recipe dosing larutan stok N/P/K dengan rasio ${_formatNumber(ratio)}; nilai N/P/K sensor dipakai sebagai tren pendukung, bukan pemicu unsur terpisah. Durasi $recommendedSeconds detik divalidasi dengan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml pada media ${input.plantingMedium.label}.',
+          'EC saat ini ${_formatNumber(currentEc)} mS/cm, kurang ${_formatNumber(deficit)} mS/cm dari ambang minimum ${_formatNumber(minEc)} mS/cm. ${dose.pumpName} dipilih dari analisis dinamis: ${dose.basis}. Durasi $recommendedSeconds detik divalidasi dengan debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk estimasi ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml pada media ${input.plantingMedium.label}.',
     );
+  }
+
+  static List<_DynamicFertilizerDose> _buildDynamicFertilizerDoses(
+    _SensorHistorySummary summary,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
+  ) {
+    final currentEc = summary.parameters['EC']?.current;
+    final minEc = activeThresholds['ec_min']!.toDouble();
+    if (currentEc == null || currentEc >= minEc || minEc <= 0) {
+      return const [];
+    }
+
+    final ecSeverity = _deficitRatio(currentEc, minEc);
+    final baseSeconds = _ecRecipeBaseSeconds(ecSeverity * 100);
+    final phStats = summary.parameters['pH'];
+    final phCurrent = phStats?.current;
+    final phMin = activeThresholds['ph_min']!.toDouble();
+    final phMax = activeThresholds['ph_max']!.toDouble();
+    final climateFactor = _climateFertilizerFactor(summary, activeThresholds);
+    final mediumFactor = _mediumFertilizerFactor(input.plantingMedium);
+    final concentrations = <int, double>{
+      0: input.fertilizerConcentration.nitrogenMgPerLiter,
+      1: input.fertilizerConcentration.phosphorusMgPerLiter,
+      2: input.fertilizerConcentration.potassiumMgPerLiter,
+    };
+    final configs = [
+      _FertilizerPumpConfig(
+        relay: 1,
+        pumpIndex: 0,
+        pumpName: 'Pompa A',
+        nutrient: 'Larutan Nitrogen',
+        trendKey: 'N',
+        thresholdMinKey: 'nitrogen_min',
+        thresholdMaxKey: 'nitrogen_max',
+        acidifyingRisk: 1,
+        concentrationMgPerLiter: concentrations[0] ?? 0,
+        fertilizerNote: 'stok N/urea cenderung menurunkan pH',
+      ),
+      _FertilizerPumpConfig(
+        relay: 2,
+        pumpIndex: 1,
+        pumpName: 'Pompa B',
+        nutrient: 'Larutan Fosfor',
+        trendKey: 'P',
+        thresholdMinKey: 'phosphorus_min',
+        thresholdMaxKey: 'phosphorus_max',
+        acidifyingRisk: 0.55,
+        concentrationMgPerLiter: concentrations[1] ?? 0,
+        fertilizerNote: 'stok P sedang dipengaruhi ketersediaan pH',
+      ),
+      _FertilizerPumpConfig(
+        relay: 3,
+        pumpIndex: 2,
+        pumpName: 'Pompa C',
+        nutrient: 'Larutan Kalium',
+        trendKey: 'K',
+        thresholdMinKey: 'potassium_min',
+        thresholdMaxKey: 'potassium_max',
+        acidifyingRisk: 0.2,
+        concentrationMgPerLiter: concentrations[2] ?? 0,
+        fertilizerNote: 'stok K relatif lebih netral terhadap pH',
+      ),
+    ];
+
+    final doses = <_DynamicFertilizerDose>[];
+    for (final config in configs) {
+      final concentration = config.concentrationMgPerLiter;
+      if (!concentration.isFinite || concentration <= 0) continue;
+
+      final trendStats = summary.parameters[config.trendKey];
+      final nutrientSeverity = _nutrientTrendSeverity(
+        trendStats,
+        activeThresholds[config.thresholdMinKey]!.toDouble(),
+        activeThresholds[config.thresholdMaxKey]!.toDouble(),
+      );
+      final phFactor = _phFertilizerFactor(
+        currentPh: phCurrent,
+        minPh: phMin,
+        maxPh: phMax,
+        acidifyingRisk: config.acidifyingRisk,
+      );
+      final concentrationFactor = _concentrationDurationFactor(concentration);
+      final concentrationNote = _concentrationDoseNote(concentration);
+      final suitabilityScore = _fertilizerSuitabilityScore(
+        ecSeverity: ecSeverity,
+        nutrientSeverity: nutrientSeverity,
+        phFactor: phFactor,
+        climateFactor: climateFactor,
+      );
+
+      final shouldSkip = _shouldSkipFertilizerDose(
+        ecSeverity: ecSeverity,
+        nutrientSeverity: nutrientSeverity,
+        phFactor: phFactor,
+        acidifyingRisk: config.acidifyingRisk,
+      );
+      if (shouldSkip) continue;
+
+      final severityFactor =
+          (0.60 + (ecSeverity * 0.55) + (nutrientSeverity * 0.40))
+              .clamp(0.35, 1.65)
+              .toDouble();
+      final rawSeconds = baseSeconds *
+          concentrationFactor *
+          severityFactor *
+          phFactor *
+          climateFactor *
+          mediumFactor;
+      final maxSafeSeconds = _maxSafeSecondsForPump(config.pumpIndex, input);
+      final recommendedSeconds =
+          rawSeconds.round().clamp(1, maxSafeSeconds).toInt();
+
+      doses.add(
+        _DynamicFertilizerDose(
+          relay: config.relay,
+          pumpIndex: config.pumpIndex,
+          pumpName: config.pumpName,
+          nutrient: config.nutrient,
+          trendKey: config.trendKey,
+          concentrationMgPerLiter: concentration,
+          recommendedSeconds: recommendedSeconds,
+          suitabilityScore: _roundDouble(suitabilityScore),
+          ecSeverity: _roundDouble(ecSeverity),
+          nutrientTrendSeverity: _roundDouble(nutrientSeverity),
+          concentrationFactor: _roundDouble(concentrationFactor),
+          phFactor: _roundDouble(phFactor),
+          mediumFactor: _roundDouble(mediumFactor),
+          climateFactor: _roundDouble(climateFactor),
+          concentrationNote: concentrationNote,
+          basis:
+              'defisit EC ${_formatNumber(ecSeverity * 100)}%, tren estimasi ${config.trendKey} ${_formatNumber(nutrientSeverity * 100)}%, konsentrasi larutan ${_formatNumber(concentration)} mg/L dibanding baseline ${_formatNumber(_doseBaselineConcentrationMgPerLiter)} mg/L, faktor konsentrasi ${_formatNumber(concentrationFactor)} ($concentrationNote), faktor pH ${_formatNumber(phFactor)} (${config.fertilizerNote}), faktor media ${_formatNumber(mediumFactor)}, dan faktor suhu/kelembapan ${_formatNumber(climateFactor)}',
+        ),
+      );
+    }
+
+    doses.sort((a, b) => b.suitabilityScore.compareTo(a.suitabilityScore));
+    return doses;
+  }
+
+  static Map<String, dynamic> _dynamicFertilizerDoseReferenceToJson(
+    List<_DynamicFertilizerDose> doses,
+  ) {
+    return {
+      'method':
+          'EC-gated dose-aware reference. EC low opens the nutrient gate; each pump uses duration_factor = 100 mg/L / fertilizer_concentration_mg_per_liter, then adjusts by estimated N/P/K trend, pH risk, medium, temperature, moisture, pump flow, and local safety bounds.',
+      'baseline_concentration_mg_per_liter':
+          _doseBaselineConcentrationMgPerLiter,
+      'concentration_factor_clamp_range': [
+        _minConcentrationDurationFactor,
+        _maxConcentrationDurationFactor,
+      ],
+      'items': doses
+          .map(
+            (item) => {
+              'relay': item.relay,
+              'pump_index': item.pumpIndex,
+              'pump_name': item.pumpName,
+              'nutrient': item.nutrient,
+              'trend_key': item.trendKey,
+              'fertilizer_concentration_mg_per_liter':
+                  item.concentrationMgPerLiter,
+              'recommended_seconds': item.recommendedSeconds,
+              'suitability_score': item.suitabilityScore,
+              'ec_severity': item.ecSeverity,
+              'estimated_npk_trend_severity': item.nutrientTrendSeverity,
+              'concentration_factor': item.concentrationFactor,
+              'concentration_note': item.concentrationNote,
+              'ph_factor': item.phFactor,
+              'medium_factor': item.mediumFactor,
+              'climate_factor': item.climateFactor,
+              'basis': item.basis,
+            },
+          )
+          .toList(growable: false),
+    };
+  }
+
+  static double _deficitRatio(double current, double minimum) {
+    if (minimum <= 0 || current >= minimum) return 0;
+    return ((minimum - current) / minimum).clamp(0.0, 1.0).toDouble();
+  }
+
+  static double _nutrientTrendSeverity(
+    _ParameterStats? stats,
+    double minimum,
+    double maximum,
+  ) {
+    final current = stats?.current;
+    if (stats == null || current == null || minimum <= 0) return 0.25;
+    if (current > maximum && maximum > 0) return -0.35;
+
+    var severity = current < minimum ? _deficitRatio(current, minimum) : 0.10;
+    final average = stats.average;
+    if (average != null && average < minimum) {
+      severity += _deficitRatio(average, minimum) * 0.35;
+    }
+    if (stats.trend == 'decreasing') {
+      severity += 0.18;
+    } else if (stats.trend == 'increasing') {
+      severity -= 0.08;
+    }
+    return severity.clamp(-0.35, 1.0).toDouble();
+  }
+
+  static double _concentrationDurationFactor(double concentration) {
+    if (concentration <= 0) return 1;
+    return (_doseBaselineConcentrationMgPerLiter / concentration)
+        .clamp(
+          _minConcentrationDurationFactor,
+          _maxConcentrationDurationFactor,
+        )
+        .toDouble();
+  }
+
+  static String _concentrationDoseNote(double concentration) {
+    if (concentration <= 0) return 'larutan tidak digunakan';
+    final rawFactor = _doseBaselineConcentrationMgPerLiter / concentration;
+    if (rawFactor > _maxConcentrationDurationFactor) {
+      return 'larutan sangat encer; kebutuhan durasi dibatasi oleh batas aman';
+    }
+    if (rawFactor < _minConcentrationDurationFactor) {
+      return 'larutan sangat pekat; durasi dipertahankan sebagai pulsa minimum aman';
+    }
+    if (rawFactor > 1) {
+      return 'lebih encer dari baseline sehingga durasi dinaikkan';
+    }
+    if (rawFactor < 1) {
+      return 'lebih pekat dari baseline sehingga durasi diturunkan';
+    }
+    return 'setara baseline kalibrasi';
+  }
+
+  static double _phFertilizerFactor({
+    required double? currentPh,
+    required double minPh,
+    required double maxPh,
+    required double acidifyingRisk,
+  }) {
+    if (currentPh == null || minPh <= 0 || maxPh <= 0) return 1;
+    if (currentPh < minPh) {
+      final acidGap = (minPh - currentPh).clamp(0.0, 1.5).toDouble();
+      final reduction = acidGap >= 0.45
+          ? 0.75
+          : acidGap >= 0.20
+              ? 0.55
+              : 0.35;
+      return (1 - (acidifyingRisk * reduction)).clamp(0.20, 1.0).toDouble();
+    }
+    if (currentPh > maxPh) {
+      return (1 + (acidifyingRisk * 0.08)).clamp(1.0, 1.08).toDouble();
+    }
+    if (currentPh <= minPh + 0.20) {
+      return (1 - (acidifyingRisk * 0.18)).clamp(0.70, 1.0).toDouble();
+    }
+    return 1;
+  }
+
+  static double _climateFertilizerFactor(
+    _SensorHistorySummary summary,
+    Map<String, num> activeThresholds,
+  ) {
+    var factor = 1.0;
+    final moisture = summary.parameters['Moisture']?.current;
+    final minMoisture = activeThresholds['moisture_min']!.toDouble();
+    if (moisture != null && moisture < minMoisture) factor *= 0.85;
+
+    final temperature = summary.parameters['Temp']?.current;
+    final maxTemperature = activeThresholds['temperature_max']!.toDouble();
+    if (temperature != null && temperature > maxTemperature) factor *= 0.82;
+
+    return factor.clamp(0.65, 1.0).toDouble();
+  }
+
+  static double _mediumFertilizerFactor(PlantingMediumProfile medium) {
+    switch (medium.id) {
+      case 'clay_soil':
+        return 0.80;
+      case 'potting_mix':
+        return 0.88;
+      case 'sandy_fast_drying_soil':
+        return 0.92;
+      case 'raised_bed':
+        return 0.95;
+      case 'loam_soil':
+        return 1.0;
+      default:
+        return 0.90;
+    }
+  }
+
+  static double _fertilizerSuitabilityScore({
+    required double ecSeverity,
+    required double nutrientSeverity,
+    required double phFactor,
+    required double climateFactor,
+  }) {
+    return ((ecSeverity * 0.50) +
+            (nutrientSeverity.clamp(0.0, 1.0) * 0.35) +
+            (phFactor * 0.10) +
+            (climateFactor * 0.05))
+        .clamp(0.0, 1.0)
+        .toDouble();
+  }
+
+  static bool _shouldSkipFertilizerDose({
+    required double ecSeverity,
+    required double nutrientSeverity,
+    required double phFactor,
+    required double acidifyingRisk,
+  }) {
+    if (nutrientSeverity < -0.20 && ecSeverity < 0.75) return true;
+    if (acidifyingRisk >= 0.9 &&
+        phFactor <= 0.35 &&
+        nutrientSeverity < 0.55 &&
+        ecSeverity < 0.80) {
+      return true;
+    }
+    return false;
   }
 
   static int _ecRecipeBaseSeconds(double deficitPercent) {
@@ -1992,7 +2321,7 @@ class GeminiRecommendationService {
           relay: 1,
           pumpIndex: 0,
           pumpName: 'Pompa A',
-          nutrient: 'Larutan stok Nitrogen',
+          nutrient: 'Larutan Nitrogen',
           unit: 'mS/cm',
           minimum: activeThresholds['ec_min']!.toDouble(),
         );
@@ -2002,7 +2331,7 @@ class GeminiRecommendationService {
           relay: 2,
           pumpIndex: 1,
           pumpName: 'Pompa B',
-          nutrient: 'Larutan stok Fosfor',
+          nutrient: 'Larutan Fosfor',
           unit: 'mS/cm',
           minimum: activeThresholds['ec_min']!.toDouble(),
         );
@@ -2012,7 +2341,7 @@ class GeminiRecommendationService {
           relay: 3,
           pumpIndex: 2,
           pumpName: 'Pompa C',
-          nutrient: 'Larutan stok Kalium',
+          nutrient: 'Larutan Kalium',
           unit: 'mS/cm',
           minimum: activeThresholds['ec_min']!.toDouble(),
         );
@@ -2105,6 +2434,70 @@ class _PumpMetadata {
   final double minimum;
 }
 
+class _FertilizerPumpConfig {
+  const _FertilizerPumpConfig({
+    required this.relay,
+    required this.pumpIndex,
+    required this.pumpName,
+    required this.nutrient,
+    required this.trendKey,
+    required this.thresholdMinKey,
+    required this.thresholdMaxKey,
+    required this.acidifyingRisk,
+    required this.concentrationMgPerLiter,
+    required this.fertilizerNote,
+  });
+
+  final int relay;
+  final int pumpIndex;
+  final String pumpName;
+  final String nutrient;
+  final String trendKey;
+  final String thresholdMinKey;
+  final String thresholdMaxKey;
+  final double acidifyingRisk;
+  final double concentrationMgPerLiter;
+  final String fertilizerNote;
+}
+
+class _DynamicFertilizerDose {
+  const _DynamicFertilizerDose({
+    required this.relay,
+    required this.pumpIndex,
+    required this.pumpName,
+    required this.nutrient,
+    required this.trendKey,
+    required this.concentrationMgPerLiter,
+    required this.recommendedSeconds,
+    required this.suitabilityScore,
+    required this.ecSeverity,
+    required this.nutrientTrendSeverity,
+    required this.concentrationFactor,
+    required this.phFactor,
+    required this.mediumFactor,
+    required this.climateFactor,
+    required this.concentrationNote,
+    required this.basis,
+  });
+
+  final int relay;
+  final int pumpIndex;
+  final String pumpName;
+  final String nutrient;
+  final String trendKey;
+  final double concentrationMgPerLiter;
+  final int recommendedSeconds;
+  final double suitabilityScore;
+  final double ecSeverity;
+  final double nutrientTrendSeverity;
+  final double concentrationFactor;
+  final double phFactor;
+  final double mediumFactor;
+  final double climateFactor;
+  final String concentrationNote;
+  final String basis;
+}
+
 class _CachedAiRecommendation {
   const _CachedAiRecommendation({
     required this.fingerprint,
@@ -2118,7 +2511,7 @@ class _CachedAiRecommendation {
 }
 
 const _systemPrompt =
-    'You are an expert agronomist calculator and an Explainable AI (XAI) narrator. Calculate candidate nutrient-stock recipe and watering doses from sensor history, crop-specific thresholds, the selected plant type, and the selected planting medium. Treat CWT RS485 NPK values as estimated trend/proxy readings, not independent laboratory-grade N, P, and K measurements. Use EC as the primary nutrient-control signal; Pompa A/B/C are stock-solution recipe pumps that should be recommended when EC is low, not solely when estimated N/P/K trends are low. Your explanations and recommendations must be specific to the chosen plant and medium, including how plant tolerance, target thresholds, medium depth, bulk density, drainage/porosity note, and estimated soil mass affect watering and fertilizer decisions. Use the fixed 100 cm2 local sensor coverage area and pump flow rates for gradual dose calculations. The app will validate pump recommendations with local safety rules before any user confirmation. Explain that media depth is estimated from the selected medium because actual depth is not measured. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
+    'You are an expert agronomist calculator and an Explainable AI (XAI) narrator. Calculate candidate nutrient-stock and watering doses from sensor history, crop-specific thresholds, selected plant type, selected planting medium, fertilizer concentration, pH risk, EC condition, and estimated N/P/K trends. Treat CWT RS485 NPK values as estimated trend/proxy readings, not independent laboratory-grade N, P, and K measurements. Use EC as the primary nutrient-control gate; Pompa A/B/C may receive different durations after evaluating estimated N/P/K trend priority, fertilizer concentration, pH safety such as urea/N acidifying risk, medium behavior, temperature, moisture, and pump flow rates. Your explanations and recommendations must be specific to the chosen plant and medium, including how plant tolerance, target thresholds, medium depth, bulk density, drainage/porosity note, and estimated soil mass affect watering and fertilizer decisions. Use the fixed 100 cm2 local sensor coverage area and pump flow rates for gradual dose calculations. The app will validate pump recommendations with local safety rules before any user confirmation. Explain that media depth is estimated from the selected medium because actual media depth is not measured. Output your entire response STRICTLY as a single, minified JSON object matching the requested schema.';
 
 final _recommendationItemSchema = Schema.object(
   properties: {

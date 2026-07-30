@@ -686,9 +686,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
             final recommendations = response.pumpRecommendations;
             final schedule = response.dailyScheduleRecommendation;
             final hasSchedule = schedule != null && schedule.hasPumps;
-            final durationSeconds = _recommendedScheduleDuration(
-              fallback: schedule?.durationSeconds ?? 0,
-            );
 
             Future<void> refreshDialog(Future<void> Function() action) async {
               await action();
@@ -825,13 +822,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 ),
                               ),
                             ],
-                            if (hasSchedule) ...[
-                              const SizedBox(height: 8),
-                              _buildSchedulePopupInfo(
-                                schedule: schedule,
-                                durationSeconds: durationSeconds,
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -867,8 +857,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                       ),
                                 label: Text(
                                   _scheduleAdded
-                                      ? 'Jadwal Ditambahkan ke Control'
-                                      : 'Tambah Jadwal Otomatis ke Control',
+                                      ? 'Rekomendasi Ditambahkan ke Jadwal'
+                                      : 'Tambah Rekomendasi ke Jadwal Harian',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1454,22 +1444,22 @@ class _InsightsScreenState extends State<InsightsScreen> {
         _buildTriggerChip(
           Icons.eco_rounded,
           triggers.activateNitrogenPump
-              ? 'Stok N: Direkomendasikan'
-              : 'Stok N: Normal',
+              ? 'Pompa A (N) : Direkomendasikan'
+              : 'Nitrogen (N): Cukup',
           triggers.activateNitrogenPump,
         ),
         _buildTriggerChip(
           Icons.grass_rounded,
           triggers.activatePhosphorusPump
-              ? 'Stok P: Direkomendasikan'
-              : 'Stok P: Normal',
+              ? 'Pompa B (P) : Direkomendasikan'
+              : 'Fosfor (P): Cukup',
           triggers.activatePhosphorusPump,
         ),
         _buildTriggerChip(
           Icons.local_florist_rounded,
           triggers.activatePotassiumPump
-              ? 'Stok K: Direkomendasikan'
-              : 'Stok K: Normal',
+              ? 'Pompa C (K) : Direkomendasikan'
+              : 'Kalium (K): Cukup',
           triggers.activatePotassiumPump,
         ),
         _buildTriggerChip(
@@ -1774,18 +1764,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
     }
     if (context.contains('ec') &&
         (context.contains('nitrogen') || context.contains('stok n'))) {
-      return 'Recipe Stok N (EC Rendah)';
+      return 'N (EC Rendah)';
     }
     if (context.contains('nitrogen')) return 'Tren Nitrogen (N)';
     if (context.contains('fosfor') || context.contains('phosphorus')) {
-      return context.contains('ec')
-          ? 'Recipe Stok P (EC Rendah)'
-          : 'Tren Fosfor (P)';
+      return context.contains('ec') ? 'P (EC Rendah)' : 'Tren Fosfor (P)';
     }
     if (context.contains('kalium') || context.contains('potassium')) {
-      return context.contains('ec')
-          ? 'Recipe Stok K (EC Rendah)'
-          : 'Tren Kalium (K)';
+      return context.contains('ec') ? 'K (EC Rendah)' : 'Tren Kalium (K)';
     }
     if (context.contains('air') ||
         context.contains('water') ||
@@ -1833,6 +1819,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     final flowRate = recommendation.averageFlowRateMlPerSecond;
     final estimatedVolumeMl = flowRate * seconds;
     final sliderMax = _durationSliderMax(seconds);
+    final doseWarning = _pumpDoseWarningText(recommendation);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1896,6 +1883,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
               ),
             ],
           ),
+          if (doseWarning != null) ...[
+            const SizedBox(height: 8),
+            _buildPumpDoseWarning(doseWarning),
+          ],
           const SizedBox(height: 6),
           Slider(
             value: seconds.toDouble(),
@@ -1911,6 +1902,59 @@ class _InsightsScreenState extends State<InsightsScreen> {
               });
               onDurationChanged?.call();
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? _pumpDoseWarningText(
+    PumpFertilizationRecommendation recommendation,
+  ) {
+    final isFertilizerPump =
+        recommendation.relay >= 1 && recommendation.relay <= 3;
+    if (!isFertilizerPump) return null;
+
+    final reason = recommendation.reason.toLowerCase();
+    final recommendedSeconds = recommendation.recommendedSeconds;
+    if (reason.contains('larutan sangat pekat') || recommendedSeconds <= 1) {
+      return 'Peringatan dosis: larutan sangat pekat, rekomendasi dikunci ke durasi minimum aman 1 detik.';
+    }
+    if (reason.contains('larutan sangat encer') ||
+        recommendedSeconds >= _maxCustomPumpDurationSeconds) {
+      return 'Peringatan dosis: larutan sangat encer, rekomendasi mencapai batas aman $_maxCustomPumpDurationSeconds detik. Lakukan koreksi bertahap dan ukur ulang EC/pH.';
+    }
+    return null;
+  }
+
+  Widget _buildPumpDoseWarning(String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.statusHigh.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.statusHigh.withOpacity(0.28)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 16,
+            color: AppTheme.statusHigh,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 11.5,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
       ),
@@ -1967,44 +2011,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
           height: 1.45,
           fontWeight: FontWeight.w600,
         ),
-      ),
-    );
-  }
-
-  Widget _buildSchedulePopupInfo({
-    required DailyFertilizationScheduleRecommendation schedule,
-    required int durationSeconds,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.primaryBlue.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primaryBlue.withOpacity(0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Jadwal Harian yang Disarankan',
-            style: TextStyle(
-              fontSize: 14,
-              color: AppTheme.textPrimary,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Rekomendasi jadwal harian pukul ${schedule.formattedTime} selama $durationSeconds detik. Gunakan tombol di bawah popup untuk menambahkan jadwal ke menu Control.',
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppTheme.textSecondary,
-              height: 1.45,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -2284,17 +2290,19 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
   }
 
   void _confirm() {
-    final nitrogen = _parsePositiveNumber(_nitrogenController.text);
-    final phosphorus = _parsePositiveNumber(_phosphorusController.text);
-    final potassium = _parsePositiveNumber(_potassiumController.text);
+    final nitrogen = _parseNonNegativeNumber(_nitrogenController.text);
+    final phosphorus = _parseNonNegativeNumber(_phosphorusController.text);
+    final potassium = _parseNonNegativeNumber(_potassiumController.text);
     if (nitrogen == null ||
         phosphorus == null ||
         potassium == null ||
-        nitrogen <= 0 ||
-        phosphorus <= 0 ||
-        potassium <= 0) {
+        nitrogen < 0 ||
+        phosphorus < 0 ||
+        potassium < 0 ||
+        (nitrogen == 0 && phosphorus == 0 && potassium == 0)) {
       setState(() {
-        _fertilizerErrorText = 'Isi konsentrasi N, P, dan K lebih dari 0 mg/L.';
+        _fertilizerErrorText =
+            'Isi minimal satu konsentrasi larutan pupuk lebih dari 0 mg/L.';
       });
       return;
     }
@@ -2446,6 +2454,11 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
     return parsed == null || parsed <= 0 ? null : parsed;
   }
 
+  double? _parseNonNegativeNumber(String input) {
+    final parsed = widget.parseLandAreaNumber(input);
+    return parsed == null || parsed < 0 ? null : parsed;
+  }
+
   double get _displayDepthCm {
     if (!_usesCustomMedium) return _selectedMedium.assumedDepthCm;
     if (!_manualCustomMediumProfile) {
@@ -2541,7 +2554,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Area rekomendasi dikunci 100 cm² atau 0,01 m² sesuai area efektif sensor RS485. N/P/K dipakai sebagai tren estimasi, sedangkan dosis stok nutrisi divalidasi terutama dari EC dan batas aman pompa kecil.',
+              'Area rekomendasi dikunci 100 cm² atau 0,01 m² sesuai area efektif sensor. Nilai N, P, dan K dipakai sebagai tren estimasi, sedangkan dosis nutrisi divalidasi terutama dari EC dan batas aman pompa kecil.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 11,
@@ -2902,7 +2915,7 @@ class _LandAreaInputDialogState extends State<_LandAreaInputDialog> {
             ],
             const SizedBox(height: 8),
             const Text(
-              'Biarkan 0 jika tidak menggunakan pupuk tertentu. Nilai ini akan digunakan untuk menghitung rekomendasi pemupukan.',
+              'Biarkan 0 jika tidak menggunakan pupuk tertentu. Nilai lebih encer cenderung menambah durasi, tetapi rekomendasi tetap dibatasi oleh EC, pH, tren NPK, media, dan batas aman pompa.',
               style: TextStyle(
                 color: AppTheme.textLight,
                 fontSize: 11,

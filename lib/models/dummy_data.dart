@@ -113,7 +113,7 @@ class DummyData {
           icon: '⚠️',
           severity: InsightSeverity.kritis,
           action:
-              'Gunakan koreksi nutrisi berbasis EC dan resep larutan stok, lalu ukur ulang setelah larutan merata.',
+              'Gunakan koreksi nutrisi berbasis EC dan resep larutan, lalu ukur ulang setelah larutan merata.',
         ),
         const InsightCard(
           title: 'pH Normal untuk Teh',
@@ -165,21 +165,21 @@ class DummyData {
         PumpController(
           id: 'pump_a',
           name: 'Pompa A',
-          nutrient: 'Larutan stok Nitrogen (N)',
+          nutrient: 'Larutan Nitrogen (N)',
           iconPath: 'assets/icons/leaf.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_b',
           name: 'Pompa B',
-          nutrient: 'Larutan stok Fosfor (P)',
+          nutrient: 'Larutan Fosfor (P)',
           iconPath: 'assets/icons/root.png',
           isOn: false,
         ),
         PumpController(
           id: 'pump_c',
           name: 'Pompa C',
-          nutrient: 'Larutan stok Kalium (K)',
+          nutrient: 'Larutan Kalium (K)',
           iconPath: 'assets/icons/crop.png',
           isOn: false,
         ),

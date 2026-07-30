@@ -122,12 +122,6 @@ class NutrientAlertService {
     switch (label) {
       case 'pH Level':
         return 'pH';
-      case 'Estimasi Nitrogen':
-        return 'Estimasi Nitrogen';
-      case 'Estimasi Fosfor':
-        return 'Estimasi Fosfor';
-      case 'Estimasi Kalium':
-        return 'Estimasi Kalium';
       case 'Moisture':
       case 'Soil Moisture':
         return 'Kelembapan';
@@ -161,13 +155,10 @@ class NutrientAlertService {
   String _sensorKeyForReading(SensorReading reading) {
     switch (reading.label) {
       case 'Nitrogen':
-      case 'Estimasi Nitrogen':
         return 'nitrogen';
       case 'Fosfor':
-      case 'Estimasi Fosfor':
         return 'phosphorus';
       case 'Kalium':
-      case 'Estimasi Kalium':
         return 'potassium';
       case 'pH Level':
         return 'ph';

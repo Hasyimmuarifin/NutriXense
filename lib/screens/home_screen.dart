@@ -233,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen>
     return [
       SensorReading(
         value: _readSensorValue(data, "nitrogen"),
-        label: "Estimasi Nitrogen",
+        label: "Nitrogen",
         unit: "mg/kg",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_nitrogen', 200, 250),
@@ -244,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "phosphorus"),
-        label: "Estimasi Fosfor",
+        label: "Fosfor",
         unit: "mg/kg",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_phosphorus', 50, 100),
@@ -255,7 +255,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       SensorReading(
         value: _readSensorValue(data, "potassium"),
-        label: "Estimasi Kalium",
+        label: "Kalium",
         unit: "mg/kg",
         minValue: 0,
         maxValue: _gaugeMaxValue('max_potassium', 200, 250),
@@ -346,13 +346,10 @@ class _HomeScreenState extends State<HomeScreen>
   String _sensorKeyForReading(SensorReading reading) {
     switch (reading.label) {
       case 'Nitrogen':
-      case 'Estimasi Nitrogen':
         return 'nitrogen';
       case 'Fosfor':
-      case 'Estimasi Fosfor':
         return 'phosphorus';
       case 'Kalium':
-      case 'Estimasi Kalium':
         return 'potassium';
       case 'pH Level':
         return 'ph';
@@ -468,11 +465,11 @@ class _HomeScreenState extends State<HomeScreen>
       case 'ec':
         return 'EC';
       case 'nitrogen':
-        return 'Estimasi Nitrogen';
+        return 'Nitrogen';
       case 'phosphorus':
-        return 'Estimasi Fosfor';
+        return 'Fosfor';
       case 'potassium':
-        return 'Estimasi Kalium';
+        return 'Kalium';
       case 'moisture':
         return 'Kelembapan';
       case 'temperature':
@@ -609,19 +606,19 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                         ),
                         _thresholdRangeField(
-                          'Estimasi Nitrogen',
+                          'Nitrogen',
                           minKey: 'min_nitrogen',
                           maxKey: 'max_nitrogen',
                           suffix: 'mg/kg',
                         ),
                         _thresholdRangeField(
-                          'Estimasi Fosfor',
+                          'Fosfor',
                           minKey: 'min_phosphorus',
                           maxKey: 'max_phosphorus',
                           suffix: 'mg/kg',
                         ),
                         _thresholdRangeField(
-                          'Estimasi Kalium',
+                          'Kalium',
                           minKey: 'min_potassium',
                           maxKey: 'max_potassium',
                           suffix: 'mg/kg',
@@ -833,9 +830,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     final thresholdPairs = {
-      'Estimasi Nitrogen': ('min_nitrogen', 'max_nitrogen'),
-      'Estimasi Fosfor': ('min_phosphorus', 'max_phosphorus'),
-      'Estimasi Kalium': ('min_potassium', 'max_potassium'),
+      'Nitrogen': ('min_nitrogen', 'max_nitrogen'),
+      'Fosfor': ('min_phosphorus', 'max_phosphorus'),
+      'Kalium': ('min_potassium', 'max_potassium'),
       'pH': ('min_ph', 'max_ph'),
       'Kelembapan': ('min_moisture', 'max_moisture'),
       'Suhu': ('min_temperature', 'max_temperature'),
@@ -921,12 +918,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   String _thresholdDisplayLabel(String key) {
     const labels = {
-      'min_nitrogen': 'minimal Estimasi Nitrogen',
-      'max_nitrogen': 'maksimal Estimasi Nitrogen',
-      'min_phosphorus': 'minimal Estimasi Fosfor',
-      'max_phosphorus': 'maksimal Estimasi Fosfor',
-      'min_potassium': 'minimal Estimasi Kalium',
-      'max_potassium': 'maksimal Estimasi Kalium',
+      'min_nitrogen': 'minimal Nitrogen',
+      'max_nitrogen': 'maksimal Nitrogen',
+      'min_phosphorus': 'minimal Fosfor',
+      'max_phosphorus': 'maksimal Fosfor',
+      'min_potassium': 'minimal Kalium',
+      'max_potassium': 'maksimal Kalium',
       'min_ph': 'minimal pH',
       'max_ph': 'maksimal pH',
       'min_moisture': 'minimal Kelembapan',
@@ -1537,9 +1534,9 @@ class _HomeScreenState extends State<HomeScreen>
               spacing: 16,
               runSpacing: 8,
               children: [
-                _legend('Est. N', AppTheme.primaryGreen),
-                _legend('Est. P', AppTheme.primaryBlue),
-                _legend('Est. K', AppTheme.statusHigh),
+                _legend('Nitrogen', AppTheme.primaryGreen),
+                _legend('Fosfor', AppTheme.primaryBlue),
+                _legend('Kalium', AppTheme.statusHigh),
               ],
             ),
           ),
