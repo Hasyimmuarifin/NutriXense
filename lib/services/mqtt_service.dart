@@ -173,6 +173,43 @@ class MQTTService {
     publishRelay(relay, isOn, source: source);
   }
 
+  void setExclusiveRelay(
+    int activeRelay, {
+    String source = 'manual_control',
+  }) {
+    final commandSource = source.trim().isEmpty ? 'manual_control' : source;
+    final payload = jsonEncode({
+      "source": "manual_control",
+      if (commandSource != 'manual_control') "command_source": commandSource,
+      "manual_override": 1,
+      "relay1": activeRelay == 1 ? 1 : 0,
+      "relay2": activeRelay == 2 ? 1 : 0,
+      "relay3": activeRelay == 3 ? 1 : 0,
+      "relay4": activeRelay == 4 ? 1 : 0,
+    });
+
+    publish("nutrixense/control", payload);
+    debugPrint("Exclusive Relay Command Sent: $payload");
+  }
+
+  void turnAllRelaysOff({
+    String source = 'manual_control',
+  }) {
+    final commandSource = source.trim().isEmpty ? 'manual_control' : source;
+    final payload = jsonEncode({
+      "source": "manual_control",
+      if (commandSource != 'manual_control') "command_source": commandSource,
+      "manual_override": 0,
+      "relay1": 0,
+      "relay2": 0,
+      "relay3": 0,
+      "relay4": 0,
+    });
+
+    publish("nutrixense/control", payload);
+    debugPrint("All Relays OFF Command Sent: $payload");
+  }
+
   void publishRelay(
     int relay,
     bool state, {
@@ -183,7 +220,10 @@ class MQTTService {
       "source": "manual_control",
       if (commandSource != 'manual_control') "command_source": commandSource,
       "manual_override": state ? 1 : 0,
-      "relay$relay": state ? 1 : 0,
+      "relay1": relay == 1 && state ? 1 : 0,
+      "relay2": relay == 2 && state ? 1 : 0,
+      "relay3": relay == 3 && state ? 1 : 0,
+      "relay4": relay == 4 && state ? 1 : 0,
     });
 
     publish("nutrixense/control", payload);

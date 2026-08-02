@@ -501,23 +501,45 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   List<Map<String, dynamic>> _espSchedulePayloads() {
-    return _wateringSchedules
-        .where((schedule) => schedule.enabled)
-        .expand((schedule) => schedule.durationEntries.map((entry) {
-              return {
-                'enabled': schedule.enabled,
-                'relay': entry.key + 1,
-                'start_date': _formatIsoDate(schedule.startDate),
-                'end_date': _formatIsoDate(schedule.endDate),
-                'time':
-                    '${_twoDigits(schedule.time.hour)}:${_twoDigits(schedule.time.minute)}',
-                'duration_seconds': _clampPumpDurationSeconds(entry.value),
-                'days': schedule.repeatsDaily
-                    ? [1, 2, 3, 4, 5, 6, 7]
-                    : [_espDayOfWeek(schedule.startDate)],
-              };
-            }))
-        .toList(growable: false);
+    const interRelayDelaySeconds = 3;
+    final payloads = <Map<String, dynamic>>[];
+
+    for (final schedule in _wateringSchedules.where((s) => s.enabled)) {
+      final sortedEntries = [...schedule.durationEntries]
+        ..sort((a, b) => a.key.compareTo(b.key));
+
+      var accumulatedStartDelaySeconds = 0;
+
+      for (var i = 0; i < sortedEntries.length; i++) {
+        final entry = sortedEntries[i];
+        final relay = entry.key + 1;
+        final durationSeconds = _clampPumpDurationSeconds(entry.value);
+
+        payloads.add({
+          'enabled': schedule.enabled,
+          'schedule_id': schedule.id,
+          'relay': relay,
+          'start_date': _formatIsoDate(schedule.startDate),
+          'end_date': _formatIsoDate(schedule.endDate),
+          'time':
+              '${_twoDigits(schedule.time.hour)}:${_twoDigits(schedule.time.minute)}',
+          'duration_seconds': durationSeconds,
+          'start_delay_seconds': accumulatedStartDelaySeconds,
+          'inter_relay_delay_seconds': interRelayDelaySeconds,
+          'sequence_index': i + 1,
+          'sequence_total': sortedEntries.length,
+          'sequential': true,
+          'days': schedule.repeatsDaily
+              ? [1, 2, 3, 4, 5, 6, 7]
+              : [_espDayOfWeek(schedule.startDate)],
+        });
+
+        accumulatedStartDelaySeconds +=
+            durationSeconds + interRelayDelaySeconds;
+      }
+    }
+
+    return payloads;
   }
 
   Map<String, dynamic> _rtcPayload(DateTime dateTime) {
@@ -610,6 +632,25 @@ class _ControlScreenState extends State<ControlScreen> {
   Future<void> _runSchedule(_WateringSchedule schedule) async {
     if (!mounted || !schedule.enabled || schedule.isRunning) return;
 
+    final todayKey = _formatIsoDate(DateTime.now());
+    try {
+      final docRef = _firestore
+          .collection(_wateringSchedulesCollection)
+          .doc('${schedule.id}');
+      final docSnap = await docRef.get();
+      if (docSnap.exists) {
+        final lastRun = docSnap.data()?['lastRunDateKey'];
+        if (lastRun == todayKey) {
+          _scheduleNextRun(schedule);
+          return;
+        }
+        await docRef.set({
+          'lastRunDateKey': todayKey,
+          'lastRunAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {}
+
     final hasDeviceTelemetry =
         await _pumpStateService.waitForFreshDeviceTelemetry();
     if (!_pumpStateService.isConnected || !hasDeviceTelemetry) {
@@ -622,35 +663,75 @@ class _ControlScreenState extends State<ControlScreen> {
       return;
     }
 
-    final startedAt = DateTime.now();
     final durationEntries = schedule.durationEntries;
+    final startedAt = DateTime.now();
 
     setState(() => schedule.isRunning = true);
     try {
-      for (final entry in durationEntries) {
-        await _pumpStateService.setRelay(
-          entry.key + 1,
-          true,
+      final sortedEntries = [...durationEntries]
+        ..sort((a, b) => a.key.compareTo(b.key));
+
+      for (var i = 0; i < sortedEntries.length; i++) {
+        final entry = sortedEntries[i];
+        final relay = entry.key + 1;
+        final durationSeconds = entry.value;
+
+        await _pumpStateService.setExclusiveRelay(
+          relay,
           source: 'schedule_worker',
-          requireConfirmation: true,
+          requireConfirmation: false,
         );
+
+        await Future.delayed(Duration(seconds: durationSeconds));
+
+        await _pumpStateService.turnAllRelaysOff(
+          source: 'schedule_worker',
+        );
+
+        if (i < sortedEntries.length - 1) {
+          await Future.delayed(const Duration(seconds: 3));
+        }
       }
 
-      final sortedEntries = [...durationEntries]
-        ..sort((a, b) => a.value.compareTo(b.value));
-      for (final entry in sortedEntries) {
-        final remaining = Duration(seconds: entry.value) -
-            DateTime.now().difference(startedAt);
-        if (remaining > Duration.zero) {
-          await Future.delayed(remaining);
+      final completedAt = DateTime.now();
+      unawaited(() async {
+        try {
+          await _firestore.collection('pump_activity_logs').add({
+            'relays': sortedEntries.map((e) => e.key + 1).toList(),
+            'pumpLabels': sortedEntries
+                .map((e) => e.key < _pumps.length
+                    ? _pumps[e.key].name
+                    : 'Relay ${e.key + 1}')
+                .toList(),
+            'durationMs': sortedEntries.fold<int>(
+              0,
+              (accumulated, e) => accumulated + (e.value * 1000),
+            ),
+            'durationMsByRelay': Map<String, int>.fromEntries(
+              sortedEntries.map(
+                (e) => MapEntry('${e.key + 1}', e.value * 1000),
+              ),
+            ),
+            'totalDurationMs': sortedEntries.fold<int>(
+              0,
+              (accumulated, e) => accumulated + (e.value * 1000),
+            ),
+            'reason': 'Penjadwalan Otomatis',
+            'status': 'completed',
+            'action': 'completed',
+            'startedAt': Timestamp.fromDate(startedAt),
+            'startedAtLocal': startedAt.toIso8601String(),
+            'completedAt': completedAt.toIso8601String(),
+            'createdAt': FieldValue.serverTimestamp(),
+            'metadata': {
+              'source': 'schedule_worker',
+              'scheduleId': schedule.id,
+            },
+          });
+        } catch (error) {
+          debugPrint('Failed to save pump schedule activity log: $error');
         }
-        await _pumpStateService.setRelay(
-          entry.key + 1,
-          false,
-          source: 'schedule_worker',
-          requireConfirmation: true,
-        );
-      }
+      }());
     } catch (error) {
       if (mounted) {
         _showPlainSnackBar(
@@ -659,16 +740,12 @@ class _ControlScreenState extends State<ControlScreen> {
         );
       }
     } finally {
-      for (final entry in durationEntries) {
-        try {
-          await _pumpStateService.setRelay(
-            entry.key + 1,
-            false,
-            source: 'schedule_worker',
-          );
-        } catch (_) {
-          // Best-effort shutdown when the device is unavailable.
-        }
+      try {
+        await _pumpStateService.turnAllRelaysOff(
+          source: 'schedule_worker',
+        );
+      } catch (_) {
+        // Best-effort shutdown when the device is unavailable.
       }
 
       if (mounted) {

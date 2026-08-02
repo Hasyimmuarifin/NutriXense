@@ -1,4 +1,4 @@
 {
   "java.configuration.updateBuildConfiguration": "interactive",
-  "cmake.sourceDirectory": "E:/SEMESTER 06/Project TA/Perancangan Judul TA/Monitoring Nutrisi Tanaman/Code/nutrixense/linux"
+  "cmake.sourceDirectory": "${workspaceFolder}/windows"
 }

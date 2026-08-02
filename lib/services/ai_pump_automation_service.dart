@@ -113,37 +113,29 @@ class AiPumpAutomationService {
       for (var i = 0; i < sortedCommands.length; i++) {
         final command = sortedCommands[i];
 
-        await _pumpStateService.setRelay(
+        await _pumpStateService.setExclusiveRelay(
           command.relay,
-          true,
           source: _aiSource,
           requireConfirmation: false,
         );
 
         await Future.delayed(command.duration);
 
-        await _pumpStateService.setRelay(
-          command.relay,
-          false,
+        await _pumpStateService.turnAllRelaysOff(
           source: _aiSource,
-          requireConfirmation: false,
         );
 
         if (i < sortedCommands.length - 1) {
-          await Future.delayed(const Duration(seconds: 1));
+          await Future.delayed(const Duration(seconds: 3));
         }
       }
     } finally {
-      for (final command in pumpCommands) {
-        try {
-          await _pumpStateService.setRelay(
-            command.relay,
-            false,
-            source: _aiSource,
-          );
-        } catch (_) {
-          // Best-effort shutdown only.
-        }
+      try {
+        await _pumpStateService.turnAllRelaysOff(
+          source: _aiSource,
+        );
+      } catch (_) {
+        // Best-effort shutdown only.
       }
       if (logRef != null) {
         await _completeLog(

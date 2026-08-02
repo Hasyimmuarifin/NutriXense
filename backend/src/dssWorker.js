@@ -4,6 +4,8 @@ const { runPumpPulseByRelay } = require('./pumpController');
 const { sensorReadingFromFirestore } = require('./readingUtils');
 const { DEFAULT_THRESHOLDS, buildThresholds } = require('./thresholdRules');
 
+let lastDssExecutionTime = 0;
+
 function isLow(value, minimum) {
   return typeof value === 'number' && typeof minimum === 'number' && value < minimum;
 }
@@ -18,15 +20,15 @@ function durationConfigFromData(data = {}) {
     minMs:
       Number(data.minPulseMs) ||
       Number(fuzzyLogic.minPulseSeconds) * 1000 ||
-      3 * 1000,
+      1 * 1000,
     mediumMs:
       Number(data.mediumPulseMs) ||
       Number(fuzzyLogic.mediumPulseSeconds) * 1000 ||
-      5 * 1000,
+      2 * 1000,
     maxMs:
       Number(data.maxPulseMs) ||
       Number(fuzzyLogic.maxPulseSeconds) * 1000 ||
-      10 * 1000,
+      3 * 1000,
   };
 }
 
@@ -284,6 +286,13 @@ function startDssWorker(mqttClient) {
       const allowedDurations = Object.fromEntries(
         matchedRelays.map((relay) => [relay, relayDurations[relay]]),
       );
+
+      const nowMs = Date.now();
+      if (nowMs - lastDssExecutionTime < 1 * 60 * 1000) {
+        console.log('DSS pulse skipped due to 1-minute cooldown window.');
+        return;
+      }
+      lastDssExecutionTime = nowMs;
 
       await runPumpPulseByRelay(
         mqttClient,

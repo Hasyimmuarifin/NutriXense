@@ -149,9 +149,9 @@ class NutrixenseBackgroundService : Service() {
     private val lastScheduleRunDates = mutableMapOf<Long, String>()
     private val repeatAlertMillis = TimeUnit.MINUTES.toMillis(5)
     private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(1)
-    private val fuzzyMinPulseMillis = 3_000L
-    private val fuzzyMediumPulseMillis = 5_000L
-    private val fuzzyMaxPulseMillis = 10_000L
+    private val fuzzyMinPulseMillis = 1_000L
+    private val fuzzyMediumPulseMillis = 2_000L
+    private val fuzzyMaxPulseMillis = 3_000L
     private val nutrientRecipeRatios = mapOf(1 to 1.0, 2 to 1.0, 3 to 1.0)
     private val notificationColor = Color.rgb(46, 125, 50)
 
@@ -532,13 +532,17 @@ class NutrixenseBackgroundService : Service() {
     private fun pulseRelays(relays: Set<Int>, durationMillis: Long) {
         if (relays.isEmpty()) return
         val sortedRelays = relays.sorted()
-        sortedRelays.forEachIndexed { index, relay ->
-            publishRelay(relay, true)
-            Thread.sleep(durationMillis.coerceAtLeast(1_000))
-            publishRelay(relay, false)
-            if (index < sortedRelays.size - 1) {
-                Thread.sleep(500)
+        try {
+            sortedRelays.forEachIndexed { index, relay ->
+                publishExclusiveRelay(relay)
+                Thread.sleep(durationMillis.coerceAtLeast(1_000))
+                publishAllRelaysOff()
+                if (index < sortedRelays.size - 1) {
+                    Thread.sleep(3000)
+                }
             }
+        } finally {
+            publishAllRelaysOff()
         }
     }
 
@@ -547,23 +551,44 @@ class NutrixenseBackgroundService : Service() {
 
         val sortedEntries = durationMillisByRelay.entries.sortedBy { it.key }
 
-        sortedEntries.forEachIndexed { index, entry ->
-            val relay = entry.key
-            val durationMs = entry.value.coerceAtLeast(1_000L)
+        try {
+            sortedEntries.forEachIndexed { index, entry ->
+                val relay = entry.key
+                val durationMs = entry.value.coerceAtLeast(1_000L)
 
-            publishRelay(relay, true)
-            Thread.sleep(durationMs)
-            publishRelay(relay, false)
+                publishExclusiveRelay(relay)
+                Thread.sleep(durationMs)
+                publishAllRelaysOff()
 
-            if (index < sortedEntries.size - 1) {
-                Thread.sleep(500)
+                if (index < sortedEntries.size - 1) {
+                    Thread.sleep(3000)
+                }
             }
+        } finally {
+            publishAllRelaysOff()
         }
     }
 
-    private fun publishRelay(relay: Int, turnOn: Boolean) {
+    private fun publishExclusiveRelay(activeRelay: Int) {
         val payload = JSONObject()
-            .put("relay$relay", if (turnOn) 1 else 0)
+            .put("source", "manual_control")
+            .put("manual_override", 1)
+            .put("relay1", if (activeRelay == 1) 1 else 0)
+            .put("relay2", if (activeRelay == 2) 1 else 0)
+            .put("relay3", if (activeRelay == 3) 1 else 0)
+            .put("relay4", if (activeRelay == 4) 1 else 0)
+            .toString()
+        publishMqtt(CONTROL_TOPIC, payload)
+    }
+
+    private fun publishAllRelaysOff() {
+        val payload = JSONObject()
+            .put("source", "manual_control")
+            .put("manual_override", 0)
+            .put("relay1", 0)
+            .put("relay2", 0)
+            .put("relay3", 0)
+            .put("relay4", 0)
             .toString()
         publishMqtt(CONTROL_TOPIC, payload)
     }

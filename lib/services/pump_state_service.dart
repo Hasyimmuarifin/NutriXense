@@ -107,6 +107,55 @@ class PumpStateService {
     }
   }
 
+  Future<void> setExclusiveRelay(
+    int activeRelay, {
+    String source = 'manual_control',
+    bool requireConfirmation = false,
+    Duration confirmationTimeout = _relayConfirmationTimeout,
+  }) async {
+    await start();
+    if (!_mqttService.isConnected) {
+      throw StateError('MQTT is not connected.');
+    }
+    if (requireConfirmation && !hasFreshDeviceTelemetry) {
+      throw StateError(
+        'Perangkat IoT tidak mengirim telemetry terbaru, perintah relay dibatalkan.',
+      );
+    }
+
+    _mqttService.setExclusiveRelay(activeRelay, source: source);
+    final now = DateTime.now();
+    for (var r = 1; r <= 4; r++) {
+      _pendingRelayCommands[r] = _PendingRelayCommand(
+        expectedState: r == activeRelay,
+        sentAt: now,
+      );
+    }
+    if (requireConfirmation) {
+      await _waitForRelayState(
+        activeRelay,
+        true,
+        timeout: confirmationTimeout,
+      );
+    }
+  }
+
+  Future<void> turnAllRelaysOff({
+    String source = 'manual_control',
+  }) async {
+    await start();
+    if (!_mqttService.isConnected) return;
+
+    _mqttService.turnAllRelaysOff(source: source);
+    final now = DateTime.now();
+    for (var r = 1; r <= 4; r++) {
+      _pendingRelayCommands[r] = _PendingRelayCommand(
+        expectedState: false,
+        sentAt: now,
+      );
+    }
+  }
+
   void _syncRelayStates(Map<String, dynamic> data) {
     var nextStates = relayStates.value;
     var changed = false;
