@@ -655,7 +655,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       if (!mounted) return;
 
       _showHistorySnackBar(
-        'Data historis tersimpan: $savedPath',
+        'Data Historis Tersimpan: $savedPath',
       );
     } catch (e) {
       if (!mounted) return;

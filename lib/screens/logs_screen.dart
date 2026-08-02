@@ -496,7 +496,7 @@ class _LogsScreenState extends State<LogsScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '$title tersimpan',
+            '$title Tersimpan',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -625,14 +625,6 @@ class _LogsScreenState extends State<LogsScreen> {
                 )
                 .toList(),
           ),
-          if (log.sourceLabel.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _buildMetadataRow(
-              icon: Icons.route_rounded,
-              label: 'Sumber',
-              value: log.sourceLabel,
-            ),
-          ],
         ],
       ),
     );
@@ -1169,7 +1161,9 @@ class _PumpActivityLog {
 
     return _PumpActivityLog(
       reference: reference,
-      reason: _readString(data['reason'], fallback: 'Aktivitas Pompa'),
+      reason: _standardizeReason(
+        _readString(data['reason'], fallback: 'Aktivitas Pompa'),
+      ),
       pumpDetails: pumpDetails,
       durationSeconds: fallbackSeconds,
       time: _readDate(data['createdAt']) ??
@@ -1178,6 +1172,14 @@ class _PumpActivityLog {
       sourceLabel: _sourceLabel(_readString(metadata['source'])),
       action: action,
     );
+  }
+
+  static String _standardizeReason(String reason) {
+    final normalized = reason.trim().toLowerCase();
+    if (normalized.contains('kontrol manual')) {
+      return 'Kontrol Manual';
+    }
+    return reason;
   }
 
   static List<_PumpDurationDetail> _buildPumpDetails({
@@ -1194,10 +1196,43 @@ class _PumpActivityLog {
           : (durationMs / 1000).round();
 
       return _PumpDurationDetail(
-        label: entry.value,
+        label: _standardizePumpLabel(entry.value, relay),
         durationSeconds: seconds,
       );
     }).toList(growable: false);
+  }
+
+  static String _standardizePumpLabel(String label, int? relay) {
+    if (relay == 1) return 'Pompa A (N)';
+    if (relay == 2) return 'Pompa B (P)';
+    if (relay == 3) return 'Pompa C (K)';
+    if (relay == 4) return 'Pompa D (Air)';
+
+    final normalized = label.toLowerCase();
+    if (normalized.contains('relay 1') ||
+        normalized.contains('pompa a') ||
+        normalized.contains('nitrogen')) {
+      return 'Pompa A (N)';
+    }
+    if (normalized.contains('relay 2') ||
+        normalized.contains('pompa b') ||
+        normalized.contains('fosfor') ||
+        normalized.contains('phosphorus')) {
+      return 'Pompa B (P)';
+    }
+    if (normalized.contains('relay 3') ||
+        normalized.contains('pompa c') ||
+        normalized.contains('kalium') ||
+        normalized.contains('potassium')) {
+      return 'Pompa C (K)';
+    }
+    if (normalized.contains('relay 4') ||
+        normalized.contains('pompa d') ||
+        normalized.contains('air') ||
+        normalized.contains('water')) {
+      return 'Pompa D (Air)';
+    }
+    return label;
   }
 
   static String _sourceLabel(String value) {
@@ -1209,7 +1244,7 @@ class _PumpActivityLog {
       case 'dss_worker':
         return 'Pompa Otomatis';
       case 'schedule_worker':
-        return 'Penjadwalan Pompa';
+        return 'Penjadwalan';
       default:
         return value;
     }

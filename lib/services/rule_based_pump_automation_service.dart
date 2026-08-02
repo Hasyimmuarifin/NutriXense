@@ -14,7 +14,7 @@ class RuleBasedPumpAutomationService {
 
   factory RuleBasedPumpAutomationService({
     FirebaseFirestore? firestore,
-    Duration checkInterval = const Duration(minutes: 1),
+    Duration checkInterval = const Duration(minutes: 2),
   }) {
     return RuleBasedPumpAutomationService._(
       firestore: firestore,
@@ -24,7 +24,7 @@ class RuleBasedPumpAutomationService {
 
   RuleBasedPumpAutomationService._({
     FirebaseFirestore? firestore,
-    this.checkInterval = const Duration(minutes: 1),
+    this.checkInterval = const Duration(minutes: 2),
   }) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
@@ -49,19 +49,23 @@ class RuleBasedPumpAutomationService {
 
   final ValueNotifier<Set<int>> activeRelays = ValueNotifier(<int>{});
 
-  bool get isRunning => false;
+  bool _running = false;
+  bool get isRunning => _running;
 
   Future<bool> loadEnabledPreference() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_enabledStorageKey) ?? false;
+    _running = prefs.getBool(_enabledStorageKey) ?? false;
+    return _running;
   }
 
   Future<void> setEnabledPreference(bool enabled) async {
+    _running = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledStorageKey, enabled);
   }
 
   Future<void> start({bool persist = true}) async {
+    _running = true;
     if (persist) {
       await setEnabledPreference(true);
     }
@@ -72,6 +76,7 @@ class RuleBasedPumpAutomationService {
   }
 
   Future<void> stop({bool persist = true}) async {
+    _running = false;
     if (persist) {
       await setEnabledPreference(false);
     }

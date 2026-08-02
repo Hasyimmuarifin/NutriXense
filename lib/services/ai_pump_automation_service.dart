@@ -59,7 +59,7 @@ class AiPumpAutomationService {
           .map(
             (item) => _PumpCommand(
               relay: item.relay,
-              label: '${item.pumpName} (${item.nutrient})',
+              label: _standardPumpLabel(item.relay),
               duration: Duration(seconds: item.recommendedSeconds),
             ),
           )
@@ -67,6 +67,21 @@ class AiPumpAutomationService {
       reason:
           'AI recommendation confirmed by user with adjustable pump duration.',
     );
+  }
+
+  static String _standardPumpLabel(int relay) {
+    switch (relay) {
+      case 1:
+        return 'Pompa A (N)';
+      case 2:
+        return 'Pompa B (P)';
+      case 3:
+        return 'Pompa C (K)';
+      case 4:
+        return 'Pompa D (Air)';
+      default:
+        return 'Relay $relay';
+    }
   }
 
   Future<AiPumpAutomationResult> applyRelays(
@@ -99,17 +114,10 @@ class AiPumpAutomationService {
     }
 
     final startedAt = DateTime.now();
-    DocumentReference<Map<String, dynamic>>? logRef;
+    final sortedCommands = [...pumpCommands]
+      ..sort((a, b) => a.relay.compareTo(b.relay));
 
     try {
-      logRef = await _createRunningLog(
-        pumpCommands,
-        startedAt: startedAt,
-      );
-
-      final sortedCommands = [...pumpCommands]
-        ..sort((a, b) => a.relay.compareTo(b.relay));
-
       for (var i = 0; i < sortedCommands.length; i++) {
         final command = sortedCommands[i];
 
@@ -137,85 +145,53 @@ class AiPumpAutomationService {
       } catch (_) {
         // Best-effort shutdown only.
       }
-      if (logRef != null) {
-        await _completeLog(
-          logRef,
-          pumpCommands,
-          startedAt: startedAt,
-          finishedAt: DateTime.now(),
-        );
-      }
+
+      await _writeCompletedLog(
+        sortedCommands,
+        startedAt: startedAt,
+        finishedAt: DateTime.now(),
+      );
     }
 
     return AiPumpAutomationResult(
-      activatedPumps: pumpCommands.map((command) => command.label).toList(),
+      activatedPumps: sortedCommands.map((command) => command.label).toList(),
       reason: reason,
     );
   }
 
-  Future<DocumentReference<Map<String, dynamic>>?> _createRunningLog(
-    List<_PumpCommand> pumpCommands, {
-    required DateTime startedAt,
-  }) async {
-    try {
-      final durationMsByRelay = {
-        for (final command in pumpCommands)
-          '${command.relay}': command.duration.inMilliseconds,
-      };
-      final maxDuration = _maxDuration(pumpCommands);
-
-      final ref = _firestore.collection(_pumpLogsCollection).doc();
-      await ref.set({
-        'reason': _aiLogTitle,
-        'action': 'running',
-        'relays': pumpCommands.map((command) => command.relay).toList(),
-        'pumpLabels': pumpCommands.map((command) => command.label).toList(),
-        'durationMs': maxDuration.inMilliseconds,
-        'durationMsByRelay': durationMsByRelay,
-        'createdAt': Timestamp.fromDate(startedAt),
-        'startedAt': Timestamp.fromDate(startedAt),
-        'metadata': {
-          'source': _aiSource,
-          'state': 'running',
-          'title': _aiLogTitle,
-        },
-      });
-      return ref;
-    } catch (error) {
-      debugPrint('AI pump running log failed: $error');
-      return null;
-    }
-  }
-
-  Future<void> _completeLog(
-    DocumentReference<Map<String, dynamic>>? logRef,
+  Future<void> _writeCompletedLog(
     List<_PumpCommand> pumpCommands, {
     required DateTime startedAt,
     required DateTime finishedAt,
   }) async {
-    if (logRef == null) return;
-
     try {
       final durationMsByRelay = {
         for (final command in pumpCommands)
           '${command.relay}': command.duration.inMilliseconds,
       };
-      final actualDurationMs = finishedAt.difference(startedAt).inMilliseconds;
 
-      await logRef.set({
+      // Total duration is the exact sum of confirmed pump active durations
+      final totalPumpDurationMs = pumpCommands.fold<int>(
+        0,
+        (sum, command) => sum + command.duration.inMilliseconds,
+      );
+
+      await _firestore.collection(_pumpLogsCollection).add({
         'reason': _aiLogTitle,
         'action': 'completed',
         'relays': pumpCommands.map((command) => command.relay).toList(),
         'pumpLabels': pumpCommands.map((command) => command.label).toList(),
-        'durationMs': actualDurationMs,
+        'durationMs': totalPumpDurationMs,
         'durationMsByRelay': durationMsByRelay,
+        'startedAt': Timestamp.fromDate(startedAt),
         'finishedAt': Timestamp.fromDate(finishedAt),
+        'createdAt': Timestamp.fromDate(finishedAt),
         'metadata': {
           'source': _aiSource,
           'state': 'completed',
           'title': _aiLogTitle,
         },
-      }, SetOptions(merge: true));
+      });
     } catch (error) {
       debugPrint('AI pump completed log failed: $error');
     }

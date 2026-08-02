@@ -148,7 +148,7 @@ class NutrixenseBackgroundService : Service() {
     private val lastRelayActivationTimes = mutableMapOf<Int, Long>()
     private val lastScheduleRunDates = mutableMapOf<Long, String>()
     private val repeatAlertMillis = TimeUnit.MINUTES.toMillis(5)
-    private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(1)
+    private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(2)
     private val fuzzyMinPulseMillis = 1_000L
     private val fuzzyMediumPulseMillis = 2_000L
     private val fuzzyMaxPulseMillis = 3_000L
@@ -241,14 +241,8 @@ class NutrixenseBackgroundService : Service() {
 
     private fun startMonitor() {
         executor.execute { connectMqttIfNeeded() }
-        if (isEnabled(this) && (ruleFuture == null || ruleFuture?.isCancelled == true)) {
-            ruleFuture = executor.scheduleAtFixedRate(
-                { runRuleBasedDecisionSupport() },
-                1,
-                1,
-                TimeUnit.MINUTES
-            )
-        }
+        // Otomatisasi DSS diproses secara terpusat oleh Node.js backend (dssWorker.js).
+        // Background service di Android difokuskan untuk pemantauan alert ambang batas dan jadwal.
         if (scheduleFuture == null || scheduleFuture?.isCancelled == true) {
             scheduleFuture = executor.scheduleAtFixedRate(
                 { runDueSchedules() },
@@ -569,9 +563,10 @@ class NutrixenseBackgroundService : Service() {
         }
     }
 
-    private fun publishExclusiveRelay(activeRelay: Int) {
+    private fun publishExclusiveRelay(activeRelay: Int, source: String = "dss_worker") {
         val payload = JSONObject()
-            .put("source", "manual_control")
+            .put("source", source)
+            .put("command_source", source)
             .put("manual_override", 1)
             .put("relay1", if (activeRelay == 1) 1 else 0)
             .put("relay2", if (activeRelay == 2) 1 else 0)
@@ -581,9 +576,10 @@ class NutrixenseBackgroundService : Service() {
         publishMqtt(CONTROL_TOPIC, payload)
     }
 
-    private fun publishAllRelaysOff() {
+    private fun publishAllRelaysOff(source: String = "dss_worker") {
         val payload = JSONObject()
-            .put("source", "manual_control")
+            .put("source", source)
+            .put("command_source", source)
             .put("manual_override", 0)
             .put("relay1", 0)
             .put("relay2", 0)

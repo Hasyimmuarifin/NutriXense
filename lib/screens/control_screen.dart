@@ -716,7 +716,7 @@ class _ControlScreenState extends State<ControlScreen> {
               0,
               (accumulated, e) => accumulated + (e.value * 1000),
             ),
-            'reason': 'Penjadwalan Otomatis',
+            'reason': 'Penjadwalan',
             'status': 'completed',
             'action': 'completed',
             'startedAt': Timestamp.fromDate(startedAt),

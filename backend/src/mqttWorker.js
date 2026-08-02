@@ -154,11 +154,15 @@ async function saveSensorReading(topic, payload, options = {}) {
 }
 
 function isManualControlPayload(payload) {
-  const commandSource = payload.command_source || payload.commandSource;
+  const commandSource = payload.command_source || payload.commandSource || payload.source;
   if (
     commandSource === 'ai_automation' ||
     commandSource === 'schedule_worker' ||
-    commandSource === 'dss_worker'
+    commandSource === 'dss_worker' ||
+    commandSource === 'dss' ||
+    payload.source === 'dss_worker' ||
+    payload.source === 'schedule_worker' ||
+    payload.source === 'ai_automation'
   ) {
     return false;
   }
@@ -221,7 +225,7 @@ async function saveManualPumpCommand(relay, isOn) {
       relays: [relay],
       pumpLabels: [RELAY_LABELS[relay] || `Relay ${relay}`],
       durationMs: 0,
-      reason: 'Kontrol manual pompa',
+      reason: 'Kontrol Manual',
       action: 'running',
       metadata: {
         source: 'manual_control',
@@ -249,7 +253,7 @@ async function saveManualPumpCommand(relay, isOn) {
     relays: [relay],
     pumpLabels: [RELAY_LABELS[relay] || `Relay ${relay}`],
     durationMs,
-    reason: 'Kontrol manual pompa',
+    reason: 'Kontrol Manual',
     action: 'completed',
     metadata: {
       source: 'manual_control',
@@ -316,6 +320,19 @@ async function confirmManualPumpCommandsFromSensor(payload) {
 const autoPumpSessions = new Map();
 
 async function trackRelayStateFromSensor(payload) {
+  const source = payload.source || payload.command_source || payload.commandSource || '';
+  const event = payload.event || '';
+  if (
+    source === 'dss_worker' ||
+    source === 'schedule_worker' ||
+    source === 'ai_automation' ||
+    source === 'dss' ||
+    source === 'relay_status' ||
+    source === 'realtime' ||
+    event === 'relay_status'
+  ) {
+    return;
+  }
   for (let relay = 1; relay <= 4; relay++) {
     const isOn = readRelayState(payload, relay);
     if (isOn === undefined) continue;
@@ -329,7 +346,7 @@ async function trackRelayStateFromSensor(payload) {
           relays: [relay],
           pumpLabels: [RELAY_LABELS[relay] || `Relay ${relay}`],
           durationMs: 0,
-          reason: 'Penjadwalan Otomatis',
+          reason: 'Penjadwalan',
           action: 'running',
           status: 'running',
           metadata: {
