@@ -11,7 +11,7 @@ import '../models/ai_recommendation.dart';
 import '../models/pump_flow_rate.dart';
 
 String _formatAiDateTime(DateTime value) {
-  return DateFormat('yyyy-MM-dd HH:mm').format(value);
+  return DateFormat('dd-MM-yyyy HH:mm').format(value);
 }
 
 String _formatAiDateTimeRange(DateTime start, DateTime end) {
@@ -159,7 +159,7 @@ class AiAnalysisWindowProfile {
       if (customEndAt != null) 'custom_end_at': customEndAt!.toIso8601String(),
       if (customStartAt != null && customEndAt != null)
         'display_range': _formatAiDateTimeRange(customStartAt!, customEndAt!),
-      'display_format': 'yyyy-MM-dd HH:mm',
+      'display_format': 'dd-MM-yyyy HH:mm',
       'description': description,
     };
   }
@@ -179,7 +179,7 @@ class AiAnalysisTimestampRange {
       'start': start.toIso8601String(),
       'end': end.toIso8601String(),
       'display_range': _formatAiDateTimeRange(start, end),
-      'display_format': 'yyyy-MM-dd HH:mm',
+      'display_format': 'dd-MM-yyyy HH:mm',
       'basis': 'Firestore timestamp field',
     };
   }
@@ -462,7 +462,7 @@ class GeminiRecommendationService {
   static const _responseCacheTtl = Duration(minutes: 2);
   static const _gradualCorrectionFraction = 0.25;
   static const _maxPumpRunSeconds = 30;
-  static const _doseBaselineConcentrationMgPerLiter = 100.0;
+  static const _doseBaselineConcentrationMgPerLiter = 500.0;
   static const _minConcentrationDurationFactor = 0.001;
   static const _maxConcentrationDurationFactor = 100.0;
   static _CachedAiRecommendation? _cachedRecommendation;
@@ -620,7 +620,7 @@ class GeminiRecommendationService {
         'If a calculation is uncertain, recommend a smaller gradual dose and explain the assumption.',
         'Narasi XAI must explain that depth/media values are estimates from selected planting medium because actual media depth is not measured.',
         'sensor_summary maximum 2 sentences and must mention ${input.plantType.label}, ${input.plantingMedium.label}, and the selected analysis window (${input.analysisWindow.xaiLabel}), not the number of analyzed rows.',
-        'When writing dates or times for users, use the provided display_range/display_format (yyyy-MM-dd HH:mm). Do not expose ISO timestamps with T, seconds, milliseconds, or timezone suffixes in sensor_summary.',
+        'When writing dates or times for users, use the provided display_range/display_format (dd-MM-yyyy HH:mm). Do not expose ISO timestamps with T, seconds, milliseconds, or timezone suffixes in sensor_summary.',
         'For each item, message maximum 1 sentence, explanation maximum 2 sentences, recommendation maximum 2 sentences.',
         'For each recommendation item, explanation must explain current value, threshold, average, trend, selected plant relevance, selected medium relevance, and the dose basis when correction is needed.',
         'For each recommendation item, recommendation must explain practical follow-up actions for ${input.plantType.label} on ${input.plantingMedium.label} and require user confirmation before pump activation.',
@@ -750,11 +750,18 @@ class GeminiRecommendationService {
       reason:
           '${guardedResponse.automationTriggers.reason} Trigger akhir diselaraskan dengan rekomendasi pompa yang lolos validasi lokal.',
     );
+    final xaiContributions = _buildHistoricalShapContributions(
+      summary,
+      input,
+      activeThresholds,
+      pumpRecommendations,
+    );
 
     return guardedResponse.copyWith(
       automationTriggers: refinedTriggers,
       pumpRecommendations: pumpRecommendations,
       dailyScheduleRecommendation: scheduleRecommendation,
+      xaiContributions: xaiContributions,
     );
   }
 
@@ -771,11 +778,16 @@ class GeminiRecommendationService {
   }
 
   static String _replaceIsoTimestampsForDisplay(String value) {
-    return value.replaceAllMapped(
+    final replaced = value.replaceAllMapped(
       RegExp(
-        r'(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?',
+        r'(\d{4})-(\d{2})-(\d{2})(?:T|\s+)(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?',
       ),
-      (match) => '${match.group(1)} ${match.group(2)}',
+      (match) =>
+          '${match.group(3)}-${match.group(2)}-${match.group(1)} ${match.group(4)}',
+    );
+    return replaced.replaceAllMapped(
+      RegExp(r'\b(\d{4})-(\d{2})-(\d{2})\b'),
+      (match) => '${match.group(3)}-${match.group(2)}-${match.group(1)}',
     );
   }
 
@@ -1610,7 +1622,7 @@ class GeminiRecommendationService {
       lowTitle: 'Tren Nitrogen Rendah',
       highTitle: 'Tren Nitrogen Tinggi',
       lowAction:
-          'Gunakan tren N sebagai analisis pendukung. Pompa A tidak dijalankan hanya dari estimasi N; koreksi stok nutrisi dilakukan melalui recipe dosing jika EC juga rendah.',
+          'Gunakan tren N sebagai analisis pendukung. Pompa A tidak dijalankan hanya dari estimasi N; koreksi nutrisi dilakukan melalui recipe dosing jika EC juga rendah.',
       highAction:
           'Pantau EC dan respons daun ${input.plantType.label}. Jika EC tinggi, tunda pupuk; jika EC normal, perlakukan kenaikan ini sebagai tren sensor cepat, bukan bukti kelebihan N terpisah.',
       normalAction:
@@ -1625,7 +1637,7 @@ class GeminiRecommendationService {
       lowTitle: 'Tren Fosfor Rendah',
       highTitle: 'Tren Fosfor Tinggi',
       lowAction:
-          'Gunakan tren P sebagai sinyal pendukung. Pompa B hanya masuk resep stok nutrisi saat EC rendah, bukan karena estimasi P rendah sendirian.',
+          'Gunakan tren P sebagai sinyal pendukung. Pompa B hanya masuk resep nutrisi saat EC rendah, bukan karena estimasi P rendah sendirian.',
       highAction:
           'Pantau EC dan pH media tanam. Jika EC tidak tinggi, jangan menyimpulkan fosfor aktual berlebih dari sensor cepat saja.',
       normalAction: 'Pertahankan pemantauan tren P bersama EC dan pH.',
@@ -1639,7 +1651,7 @@ class GeminiRecommendationService {
       lowTitle: 'Tren Kalium Rendah',
       highTitle: 'Tren Kalium Tinggi',
       lowAction:
-          'Gunakan tren K untuk memperkuat analisis, tetapi Pompa C hanya dijalankan sebagai bagian resep stok nutrisi saat EC rendah.',
+          'Gunakan tren K untuk memperkuat analisis, tetapi Pompa C hanya dijalankan sebagai bagian resep nutrisi saat EC rendah.',
       highAction:
           'Tunda keputusan koreksi K spesifik sampai EC, kondisi tanaman, atau uji pembanding mendukung. Nilai ini adalah tren sensor cepat.',
       normalAction:
@@ -1698,7 +1710,7 @@ class GeminiRecommendationService {
       lowTitle: 'EC Rendah',
       highTitle: 'EC Tinggi',
       lowAction: dynamicFertilizerDoses.isEmpty
-          ? 'EC rendah, tetapi kondisi pH/tren/konsentrasi larutan membuat pupuk perlu ditunda atau diberikan sangat hati-hati. Ukur ulang pH dan EC sebelum aktivasi pompa stok.'
+          ? 'EC rendah, tetapi kondisi pH/tren/konsentrasi larutan membuat pupuk perlu ditunda atau diberikan sangat hati-hati. Ukur ulang pH dan EC sebelum aktivasi pompa nutrisi.'
           : 'Tambahkan larutan nutrisi secara bertahap melalui ${dynamicFertilizerDoses.map((item) => item.pumpName).join(', ')} sesuai durasi dinamis berbasis EC, pH, tren estimasi NPK, konsentrasi larutan, dan media ${input.plantingMedium.label}.',
       highAction:
           'Encerkan larutan dengan air bersih secara bertahap dan tunda penambahan pupuk. Pantau ulang EC serta pH asam setelah larutan stabil.',
@@ -1731,7 +1743,7 @@ class GeminiRecommendationService {
         'activate_potassium_pump': dynamicPumpIndexes.contains(2),
         'activate_water_pump': summary.canActivateWaterPump(activeThresholds),
         'reason':
-            'Trigger pompa stok N/P/K mengikuti gerbang EC rendah, lalu dipilih dinamis dari pH, tren estimasi NPK, konsentrasi larutan, media, dan batas aman durasi.',
+            'Trigger pompa N/P/K mengikuti gerbang EC rendah, lalu dipilih dinamis dari pH, tren estimasi NPK, konsentrasi larutan, media, dan batas aman durasi.',
       },
     };
   }
@@ -1963,7 +1975,7 @@ class GeminiRecommendationService {
         thresholdMaxKey: 'nitrogen_max',
         acidifyingRisk: 1,
         concentrationMgPerLiter: concentrations[0] ?? 0,
-        fertilizerNote: 'stok N/urea cenderung menurunkan pH',
+        fertilizerNote: 'N/urea cenderung menurunkan pH',
       ),
       _FertilizerPumpConfig(
         relay: 2,
@@ -1975,7 +1987,7 @@ class GeminiRecommendationService {
         thresholdMaxKey: 'phosphorus_max',
         acidifyingRisk: 0.55,
         concentrationMgPerLiter: concentrations[1] ?? 0,
-        fertilizerNote: 'stok P sedang dipengaruhi ketersediaan pH',
+        fertilizerNote: 'P sedang dipengaruhi ketersediaan pH',
       ),
       _FertilizerPumpConfig(
         relay: 3,
@@ -1987,7 +1999,7 @@ class GeminiRecommendationService {
         thresholdMaxKey: 'potassium_max',
         acidifyingRisk: 0.2,
         concentrationMgPerLiter: concentrations[2] ?? 0,
-        fertilizerNote: 'stok K relatif lebih netral terhadap pH',
+        fertilizerNote: 'K relatif lebih netral terhadap pH',
       ),
     ];
 
@@ -2066,6 +2078,303 @@ class GeminiRecommendationService {
     return doses;
   }
 
+  static List<XaiFeatureContribution> _buildHistoricalShapContributions(
+    _SensorHistorySummary summary,
+    AiRecommendationAgronomicInput input,
+    Map<String, num> activeThresholds,
+    List<PumpFertilizationRecommendation> pumpRecommendations,
+  ) {
+    if (pumpRecommendations.isEmpty) return const [];
+
+    final hasFertilizer = pumpRecommendations
+        .any((item) => item.relay >= 1 && item.relay <= 3);
+    final hasWater = pumpRecommendations.any((item) => item.relay == 4);
+    final items = <XaiFeatureContribution>[];
+
+    void add({
+      required String feature,
+      required String label,
+      required double contribution,
+      required double featureValue,
+      required double featureValueRatio,
+      required String direction,
+      required String detail,
+    }) {
+      if (!contribution.isFinite || contribution.abs() < 0.05) return;
+      items.add(
+        XaiFeatureContribution(
+          feature: feature,
+          label: label,
+          contribution: _roundDouble(contribution.clamp(-6.0, 6.0).toDouble()),
+          featureValue: _roundDouble(featureValue),
+          featureValueRatio: featureValueRatio.clamp(0.0, 1.0).toDouble(),
+          direction: direction,
+          detail: detail,
+        ),
+      );
+    }
+
+    final ec = summary.parameters['EC'];
+    final ecCurrent = ec?.current;
+    final ecMin = activeThresholds['ec_min']!.toDouble();
+    final ecMax = activeThresholds['ec_max']!.toDouble();
+    if (ecCurrent != null) {
+      final lowSeverity = _deficitRatio(ecCurrent, ecMin);
+      final highSeverity = _excessRatio(ecCurrent, ecMax);
+      if (lowSeverity > 0) {
+        add(
+          feature: 'ec_deficit',
+          label: 'EC rendah',
+          contribution: 1.4 + (lowSeverity * 5.2),
+          featureValue: ecCurrent,
+          featureValueRatio: _rangeValueRatio(ecCurrent, ecMin, ecMax),
+          direction: 'Mendorong pemupukan',
+          detail:
+              'EC historis/current berada di bawah target, sehingga membuka gerbang rekomendasi nutrisi.',
+        );
+      } else if (highSeverity > 0) {
+        add(
+          feature: 'ec_high',
+          label: 'EC tinggi',
+          contribution: -(1.2 + highSeverity * 4.5),
+          featureValue: ecCurrent,
+          featureValueRatio: _rangeValueRatio(ecCurrent, ecMin, ecMax),
+          direction: 'Menahan pupuk',
+          detail:
+              'EC berada di atas target, sehingga pupuk ditahan untuk mencegah over-fertilization.',
+        );
+      } else if (hasFertilizer) {
+        add(
+          feature: 'ec_safe_gate',
+          label: 'EC dalam kendali',
+          contribution: 0.6,
+          featureValue: ecCurrent,
+          featureValueRatio: _rangeValueRatio(ecCurrent, ecMin, ecMax),
+          direction: 'Mendukung ringan',
+          detail:
+              'EC masih menjadi sinyal utama sebelum fitur lain menyesuaikan durasi.',
+        );
+      }
+    }
+
+    void addNpkTrend({
+      required String key,
+      required String label,
+      required String minKey,
+      required String maxKey,
+      required int relay,
+    }) {
+      final stats = summary.parameters[key];
+      final current = stats?.current;
+      if (stats == null || current == null) return;
+
+      final min = activeThresholds[minKey]!.toDouble();
+      final max = activeThresholds[maxKey]!.toDouble();
+      final severity = _nutrientTrendSeverity(stats, min, max);
+      final pumpSelected =
+          pumpRecommendations.any((item) => item.relay == relay);
+      final trendBoost = stats.trend == 'decreasing' ? 0.55 : 0.0;
+      final contribution = severity >= 0
+          ? (severity * (pumpSelected ? 4.4 : 2.4)) + trendBoost
+          : severity * 4.0;
+      add(
+        feature: '${key.toLowerCase()}_estimated_trend',
+        label: 'Tren estimasi $label',
+        contribution: contribution,
+        featureValue: current,
+        featureValueRatio: _rangeValueRatio(current, min, max),
+        direction: contribution >= 0 ? 'Mendorong prioritas' : 'Menahan',
+        detail:
+            'Dihitung dari nilai terakhir, rata-rata historis, dan tren ${_translateTrend(stats.trend)} terhadap ambang $label.',
+      );
+    }
+
+    addNpkTrend(
+      key: 'N',
+      label: 'N',
+      minKey: 'nitrogen_min',
+      maxKey: 'nitrogen_max',
+      relay: 1,
+    );
+    addNpkTrend(
+      key: 'P',
+      label: 'P',
+      minKey: 'phosphorus_min',
+      maxKey: 'phosphorus_max',
+      relay: 2,
+    );
+    addNpkTrend(
+      key: 'K',
+      label: 'K',
+      minKey: 'potassium_min',
+      maxKey: 'potassium_max',
+      relay: 3,
+    );
+
+    final ph = summary.parameters['pH'];
+    final phCurrent = ph?.current;
+    final phMin = activeThresholds['ph_min']!.toDouble();
+    final phMax = activeThresholds['ph_max']!.toDouble();
+    if (phCurrent != null) {
+      final acidSeverity = _deficitRatio(phCurrent, phMin);
+      final baseSeverity = _excessRatio(phCurrent, phMax);
+      if (acidSeverity > 0) {
+        add(
+          feature: 'ph_acid_risk',
+          label: 'pH terlalu asam',
+          contribution: -(1.0 + acidSeverity * 5.0),
+          featureValue: phCurrent,
+          featureValueRatio: _rangeValueRatio(phCurrent, phMin, phMax),
+          direction: 'Menahan durasi',
+          detail:
+              'pH asam menahan dosis, terutama pada pupuk yang berisiko menurunkan pH.',
+        );
+      } else if (baseSeverity > 0) {
+        add(
+          feature: 'ph_high',
+          label: 'pH terlalu basa',
+          contribution: -1.0 - (baseSeverity * 2.2),
+          featureValue: phCurrent,
+          featureValueRatio: _rangeValueRatio(phCurrent, phMin, phMax),
+          direction: 'Menahan durasi',
+          detail:
+              'pH basa membuat koreksi nutrisi tetap bertahap sambil memantau ketersediaan hara.',
+        );
+      } else if (hasFertilizer) {
+        add(
+          feature: 'ph_safe',
+          label: 'pH dalam rentang',
+          contribution: 0.8,
+          featureValue: phCurrent,
+          featureValueRatio: _rangeValueRatio(phCurrent, phMin, phMax),
+          direction: 'Mendukung ringan',
+          detail:
+              'pH berada dalam rentang aman sehingga tidak banyak menahan rekomendasi nutrisi.',
+        );
+      }
+    }
+
+    final moisture = summary.parameters['Moisture'];
+    final moistureCurrent = moisture?.current;
+    final moistureMin = activeThresholds['moisture_min']!.toDouble();
+    final moistureMax = activeThresholds['moisture_max']!.toDouble();
+    if (moistureCurrent != null) {
+      final severity = _deficitRatio(moistureCurrent, moistureMin);
+      if (severity > 0) {
+        add(
+          feature: 'moisture_deficit',
+          label: 'Kelembapan rendah',
+          contribution: hasWater ? 1.2 + (severity * 4.8) : -(severity * 2.2),
+          featureValue: moistureCurrent,
+          featureValueRatio:
+              _rangeValueRatio(moistureCurrent, moistureMin, moistureMax),
+          direction: hasWater ? 'Mendorong air' : 'Menahan pupuk',
+          detail:
+              'Kelembapan rendah dari data historis mendorong air atau membuat pupuk lebih hati-hati.',
+        );
+      }
+    }
+
+    final temp = summary.parameters['Temp'];
+    final tempCurrent = temp?.current;
+    final tempMin = activeThresholds['temperature_min']!.toDouble();
+    final tempMax = activeThresholds['temperature_max']!.toDouble();
+    if (tempCurrent != null) {
+      final hotSeverity = _excessRatio(tempCurrent, tempMax);
+      if (hotSeverity > 0) {
+        add(
+          feature: 'soil_temperature_high',
+          label: 'Suhu tanah tinggi',
+          contribution:
+              hasWater ? 1.0 + (hotSeverity * 4.5) : -(hotSeverity * 2.0),
+          featureValue: tempCurrent,
+          featureValueRatio: _rangeValueRatio(tempCurrent, tempMin, tempMax),
+          direction: hasWater ? 'Mendorong air' : 'Menahan pupuk',
+          detail:
+              'Suhu tinggi pada histori mendorong penyiraman ringan atau menahan pemupukan.',
+        );
+      }
+    }
+
+    void addConcentration({
+      required String key,
+      required String label,
+      required double concentration,
+      required int relay,
+    }) {
+      if (concentration <= 0 ||
+          !pumpRecommendations.any((item) => item.relay == relay)) {
+        return;
+      }
+      final factor = _concentrationDurationFactor(concentration);
+      final contribution = factor >= 1
+          ? (factor - 1).clamp(0.2, 6.0).toDouble()
+          : -((1 - factor) * 5.0).clamp(0.2, 5.6).toDouble();
+      add(
+        feature: '${key}_solution_concentration',
+        label: 'Konsentrasi larutan $label',
+        contribution: contribution,
+        featureValue: concentration,
+        featureValueRatio: (concentration /
+                (concentration + _doseBaselineConcentrationMgPerLiter))
+            .clamp(0.0, 1.0)
+            .toDouble(),
+        direction: contribution >= 0 ? 'Menaikkan durasi' : 'Menurunkan durasi',
+        detail:
+            'Dibanding baseline ${_formatNumber(_doseBaselineConcentrationMgPerLiter)} mg/L; larutan pekat menurunkan durasi, larutan encer menaikkan durasi.',
+      );
+    }
+
+    addConcentration(
+      key: 'n',
+      label: 'N',
+      concentration: input.fertilizerConcentration.nitrogenMgPerLiter,
+      relay: 1,
+    );
+    addConcentration(
+      key: 'p',
+      label: 'P',
+      concentration: input.fertilizerConcentration.phosphorusMgPerLiter,
+      relay: 2,
+    );
+    addConcentration(
+      key: 'k',
+      label: 'K',
+      concentration: input.fertilizerConcentration.potassiumMgPerLiter,
+      relay: 3,
+    );
+
+    final mediumFactor = _mediumFertilizerFactor(input.plantingMedium);
+    if (hasFertilizer && mediumFactor < 0.98) {
+      add(
+        feature: 'planting_medium',
+        label: 'Media ${input.plantingMedium.label}',
+        contribution: -((1 - mediumFactor) * 5.0).clamp(0.2, 4.0).toDouble(),
+        featureValue: mediumFactor,
+        featureValueRatio: mediumFactor.clamp(0.0, 1.0).toDouble(),
+        direction: 'Menahan durasi',
+        detail:
+            'Profil media historis/input membuat koreksi pupuk dilakukan lebih bertahap.',
+      );
+    }
+
+    if (hasFertilizer || hasWater) {
+      add(
+        feature: 'plant_type_threshold',
+        label: 'Jenis tanaman ${input.plantType.label}',
+        contribution: 0.75,
+        featureValue: 1,
+        featureValueRatio: 0.75,
+        direction: 'Mengatur ambang',
+        detail:
+            'Jenis tanaman menentukan ambang EC, pH, suhu, dan kelembapan yang dipakai model.',
+      );
+    }
+
+    items.sort((a, b) => b.contribution.abs().compareTo(a.contribution.abs()));
+    return items.take(8).toList(growable: false);
+  }
+
   static Map<String, dynamic> _dynamicFertilizerDoseReferenceToJson(
     List<_DynamicFertilizerDose> doses,
   ) {
@@ -2107,6 +2416,18 @@ class GeminiRecommendationService {
   static double _deficitRatio(double current, double minimum) {
     if (minimum <= 0 || current >= minimum) return 0;
     return ((minimum - current) / minimum).clamp(0.0, 1.0).toDouble();
+  }
+
+  static double _excessRatio(double current, double maximum) {
+    if (maximum <= 0 || current <= maximum) return 0;
+    return ((current - maximum) / maximum).clamp(0.0, 1.0).toDouble();
+  }
+
+  static double _rangeValueRatio(double current, double minimum, double maximum) {
+    if (maximum <= minimum) return 0.5;
+    return ((current - minimum) / (maximum - minimum))
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
 
   static double _nutrientTrendSeverity(
@@ -2248,9 +2569,9 @@ class GeminiRecommendationService {
   }
 
   static int _ecRecipeBaseSeconds(double deficitPercent) {
-    if (deficitPercent <= 30) return 3;
-    if (deficitPercent <= 60) return 5;
-    return 10;
+    if (deficitPercent <= 30) return 1;
+    if (deficitPercent <= 60) return 2;
+    return 3;
   }
 
   static String _buildWateringLowAction(
@@ -2781,7 +3102,7 @@ class _SensorHistorySummary {
         'start': startTime.toIso8601String(),
         'end': endTime.toIso8601String(),
         'display_range': _formatAiDateTimeRange(startTime, endTime),
-        'display_format': 'yyyy-MM-dd HH:mm',
+        'display_format': 'dd-MM-yyyy HH:mm',
       },
       'sensor_interpretation': {
         'N': 'estimated_trend_only',

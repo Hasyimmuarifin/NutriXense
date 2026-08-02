@@ -28,10 +28,12 @@ class MiniLineChart extends StatelessWidget {
 
     return SizedBox(
       height: height,
-      child: LineChart(
-        LineChartData(
-          minY: minY,
-          maxY: maxY,
+      child: ClipRect(
+        child: LineChart(
+          LineChartData(
+            clipData: const FlClipData.all(),
+            minY: minY,
+            maxY: maxY,
           gridData: const FlGridData(show: false),
           titlesData: const FlTitlesData(show: false),
           borderData: FlBorderData(show: false),
@@ -61,6 +63,7 @@ class MiniLineChart extends StatelessWidget {
         ),
         duration: const Duration(milliseconds: 300),
       ),
+    ),
     );
   }
 }

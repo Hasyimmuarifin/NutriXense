@@ -141,14 +141,38 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   double get _npkChartMaxY {
-    return [
+    final thresholdMax = [
       _gaugeMaxValue('max_nitrogen', 200, 250),
       _gaugeMaxValue('max_phosphorus', 50, 100),
       _gaugeMaxValue('max_potassium', 200, 250),
     ].reduce((a, b) => a > b ? a : b);
+
+    double dataMax = 0;
+    for (final d in _data) {
+      if (d.nitrogen > dataMax) dataMax = d.nitrogen;
+      if (d.phosphorus > dataMax) dataMax = d.phosphorus;
+      if (d.potassium > dataMax) dataMax = d.potassium;
+    }
+
+    if (dataMax > 0 && (dataMax * 1.15) > thresholdMax) {
+      return (dataMax * 1.15).ceilToDouble();
+    }
+    return thresholdMax;
   }
 
-  double get _ecChartMaxY => _gaugeMaxValue('max_ec', 1.8, 4);
+  double get _ecChartMaxY {
+    final thresholdMax = _gaugeMaxValue('max_ec', 1.8, 4);
+
+    double dataMax = 0;
+    for (final d in _data) {
+      if (d.ec > dataMax) dataMax = d.ec;
+    }
+
+    if (dataMax > 0 && (dataMax * 1.15) > thresholdMax) {
+      return double.parse((dataMax * 1.15).toStringAsFixed(1));
+    }
+    return thresholdMax;
+  }
 
   double _gaugeMaxValue(
     String maxNormalKey,
@@ -1161,7 +1185,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   List<String> _exportRow(SensorDataPoint item) {
     return [
-      DateFormat('yyyy-MM-dd HH:mm').format(item.time),
+      DateFormat('dd-MM-yyyy HH:mm').format(item.time),
       item.nitrogen.toStringAsFixed(1),
       item.phosphorus.toStringAsFixed(1),
       item.potassium.toStringAsFixed(1),
@@ -2014,14 +2038,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                 ),
                                 child: Column(
                                   children: [
-                                    SizedBox(
-                                      height: 220,
-                                      child: LineChart(
-                                        LineChartData(
-                                          minX: _chartMinX,
-                                          maxX: _chartMaxX,
-                                          minY: _chartMinY,
-                                          maxY: _chartMaxY,
+                                     SizedBox(
+                                       height: 220,
+                                       child: ClipRect(
+                                         child: LineChart(
+                                           LineChartData(
+                                             clipData: const FlClipData.all(),
+                                             minX: _chartMinX,
+                                             maxX: _chartMaxX,
+                                             minY: _chartMinY,
+                                             maxY: _chartMaxY,
                                           gridData: FlGridData(
                                             show: true,
                                             drawVerticalLine: false,
@@ -2109,6 +2135,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                         ),
                                       ),
                                     ),
+                                   ),
 
                                     // Legend
                                     if (_selectedSensor == 0) ...[

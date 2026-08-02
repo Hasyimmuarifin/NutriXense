@@ -531,34 +531,32 @@ class NutrixenseBackgroundService : Service() {
 
     private fun pulseRelays(relays: Set<Int>, durationMillis: Long) {
         if (relays.isEmpty()) return
-        relays.forEach { relay -> publishRelay(relay, true) }
-        Thread.sleep(durationMillis.coerceAtLeast(1_000))
-        relays.forEach { relay -> publishRelay(relay, false) }
+        val sortedRelays = relays.sorted()
+        sortedRelays.forEachIndexed { index, relay ->
+            publishRelay(relay, true)
+            Thread.sleep(durationMillis.coerceAtLeast(1_000))
+            publishRelay(relay, false)
+            if (index < sortedRelays.size - 1) {
+                Thread.sleep(500)
+            }
+        }
     }
 
     private fun pulseRelays(durationMillisByRelay: Map<Int, Long>) {
         if (durationMillisByRelay.isEmpty()) return
 
-        durationMillisByRelay.keys.forEach { relay -> publishRelay(relay, true) }
+        val sortedEntries = durationMillisByRelay.entries.sortedBy { it.key }
 
-        val startedAt = System.currentTimeMillis()
-        val remainingRelays = durationMillisByRelay.keys.toMutableSet()
+        sortedEntries.forEachIndexed { index, entry ->
+            val relay = entry.key
+            val durationMs = entry.value.coerceAtLeast(1_000L)
 
-        while (remainingRelays.isNotEmpty()) {
-            val elapsed = System.currentTimeMillis() - startedAt
-            val relaysToStop = remainingRelays
-                .filter { relay ->
-                    elapsed >= (durationMillisByRelay[relay] ?: 1_000L)
-                        .coerceAtLeast(1_000L)
-                }
+            publishRelay(relay, true)
+            Thread.sleep(durationMs)
+            publishRelay(relay, false)
 
-            relaysToStop.forEach { relay ->
-                publishRelay(relay, false)
-                remainingRelays.remove(relay)
-            }
-
-            if (remainingRelays.isNotEmpty()) {
-                Thread.sleep(250)
+            if (index < sortedEntries.size - 1) {
+                Thread.sleep(500)
             }
         }
     }

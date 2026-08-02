@@ -38,9 +38,9 @@ class RuleBasedPumpAutomationService {
   static const String _dssConfigDocument = 'dss';
   static const String _wateringSchedulesCollection = 'watering_schedules';
   static const String _dssFallbackDocument = '_dss_config';
-  static const int _minPulseSeconds = 3;
-  static const int _mediumPulseSeconds = 5;
-  static const int _maxPulseSeconds = 10;
+  static const int _minPulseSeconds = 1;
+  static const int _mediumPulseSeconds = 2;
+  static const int _maxPulseSeconds = 3;
   static const Map<String, double> _defaultRecipeRelayRatios = {
     '1': 1,
     '2': 1,
@@ -131,7 +131,7 @@ class RuleBasedPumpAutomationService {
         'cooldownSeconds': FieldValue.delete(),
         'checkIntervalSeconds': checkInterval.inSeconds,
         'description':
-            'Durasi pompa otomatis mengikuti fuzzy: Minimum 3 detik, Sedang 5 detik, Maksimum 10 detik. Pompa air mengikuti kelembapan/suhu, sedangkan Pompa N/P/K mengikuti resep dosing saat EC rendah.',
+            'Durasi pompa otomatis mengikuti fuzzy: Minimum 1 detik, Sedang 2 detik, Maksimum 3 detik. Setiap pompa dinyalakan secara bergantian (sequential) untuk mencegah lonjakan arus listrik.',
       },
       'updatedAt': FieldValue.serverTimestamp(),
     };

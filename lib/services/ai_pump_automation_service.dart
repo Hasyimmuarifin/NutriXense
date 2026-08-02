@@ -102,33 +102,36 @@ class AiPumpAutomationService {
     DocumentReference<Map<String, dynamic>>? logRef;
 
     try {
-      for (final command in pumpCommands) {
-        await _pumpStateService.setRelay(
-          command.relay,
-          true,
-          source: _aiSource,
-          requireConfirmation: true,
-        );
-      }
       logRef = await _createRunningLog(
         pumpCommands,
         startedAt: startedAt,
       );
 
       final sortedCommands = [...pumpCommands]
-        ..sort((a, b) => a.duration.compareTo(b.duration));
-      for (final command in sortedCommands) {
-        final elapsed = DateTime.now().difference(startedAt);
-        final remaining = command.duration - elapsed;
-        if (remaining > Duration.zero) {
-          await Future.delayed(remaining);
-        }
+        ..sort((a, b) => a.relay.compareTo(b.relay));
+
+      for (var i = 0; i < sortedCommands.length; i++) {
+        final command = sortedCommands[i];
+
+        await _pumpStateService.setRelay(
+          command.relay,
+          true,
+          source: _aiSource,
+          requireConfirmation: false,
+        );
+
+        await Future.delayed(command.duration);
+
         await _pumpStateService.setRelay(
           command.relay,
           false,
           source: _aiSource,
-          requireConfirmation: true,
+          requireConfirmation: false,
         );
+
+        if (i < sortedCommands.length - 1) {
+          await Future.delayed(const Duration(seconds: 1));
+        }
       }
     } finally {
       for (final command in pumpCommands) {
@@ -139,7 +142,7 @@ class AiPumpAutomationService {
             source: _aiSource,
           );
         } catch (_) {
-          // Best-effort shutdown only. A failed cleanup must not create a success log.
+          // Best-effort shutdown only.
         }
       }
       if (logRef != null) {

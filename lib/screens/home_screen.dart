@@ -322,11 +322,25 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   double get _npkChartMaxY {
-    return [
+    final thresholdMax = [
       _gaugeMaxValue('max_nitrogen', 200, 250),
       _gaugeMaxValue('max_phosphorus', 50, 100),
       _gaugeMaxValue('max_potassium', 200, 250),
     ].reduce((a, b) => a > b ? a : b);
+
+    double dataMax = 0;
+    for (final v in [
+      ...nitrogenHistory,
+      ...phosphorusHistory,
+      ...potassiumHistory
+    ]) {
+      if (v > dataMax) dataMax = v;
+    }
+
+    if (dataMax > 0 && (dataMax * 1.15) > thresholdMax) {
+      return (dataMax * 1.15).ceilToDouble();
+    }
+    return thresholdMax;
   }
 
   double get _npkChartInterval => _npkChartMaxY / 5;
@@ -1446,11 +1460,13 @@ class _HomeScreenState extends State<HomeScreen>
           // Chart
           SizedBox(
             height: 160,
-            child: LineChart(
-              LineChartData(
-                minY: 0,
-                maxY: _npkChartMaxY,
-                gridData: FlGridData(
+            child: ClipRect(
+              child: LineChart(
+                LineChartData(
+                  clipData: const FlClipData.all(),
+                  minY: 0,
+                  maxY: _npkChartMaxY,
+                  gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
                   horizontalInterval: _npkChartInterval,
@@ -1524,6 +1540,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
           ),
+        ),
           const SizedBox(height: 14),
 
           // Legend

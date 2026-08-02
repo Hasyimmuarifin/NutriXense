@@ -2,9 +2,9 @@ const { admin, db } = require('./firebase');
 const { config } = require('./config');
 
 const RELAY_LABELS = {
-  1: 'Pompa A (Stok N)',
-  2: 'Pompa B (Stok P)',
-  3: 'Pompa C (Stok K)',
+  1: 'Pompa A (N)',
+  2: 'Pompa B (P)',
+  3: 'Pompa C (K)',
   4: 'Pompa D (Air)',
 };
 
@@ -92,25 +92,20 @@ async function runPumpPulse(client, relays, durationMs, reason, metadata = {}) {
   const selectedRelays = validRelays(relays);
   if (selectedRelays.length === 0) return;
 
-  for (const relay of selectedRelays) {
-    publishRelay(client, relay, true);
-  }
-
-  const confirmedOn = await waitForRelayStates(client, selectedRelays, true);
-  if (!confirmedOn) {
-    for (const relay of selectedRelays) {
-      publishRelay(client, relay, false);
-    }
-    console.warn(
-      `Pump pulse ignored because relay ON confirmation was not received: ${selectedRelays.join(', ')}`,
-    );
-    return;
-  }
-
   const startedAt = new Date();
 
   try {
-    await delay(durationMs);
+    for (let i = 0; i < selectedRelays.length; i++) {
+      const relay = selectedRelays[i];
+
+      publishRelay(client, relay, true);
+      await delay(durationMs);
+      publishRelay(client, relay, false);
+
+      if (i < selectedRelays.length - 1) {
+        await delay(1000);
+      }
+    }
   } finally {
     for (const relay of selectedRelays) {
       publishRelay(client, relay, false);
@@ -119,7 +114,8 @@ async function runPumpPulse(client, relays, durationMs, reason, metadata = {}) {
     await db.collection(config.firestore.pumpLogsCollection).add({
       relays: selectedRelays,
       pumpLabels: selectedRelays.map((relay) => RELAY_LABELS[relay]),
-      durationMs,
+      durationMs: durationMs * selectedRelays.length,
+      activationMode: 'sequential_optimistic',
       reason,
       metadata,
       startedAt,
@@ -145,52 +141,33 @@ async function runPumpPulseByRelay(client, durationMsByRelay, reason, metadata =
 
   const selectedRelays = entries.map(([relay]) => relay);
   const durationByRelay = Object.fromEntries(entries);
-  const maxDurationMs = Math.max(...entries.map(([, durationMs]) => durationMs));
-
-  for (const relay of selectedRelays) {
-    publishRelay(client, relay, true);
-  }
-
-  const confirmedOn = await waitForRelayStates(client, selectedRelays, true);
-  if (!confirmedOn) {
-    for (const relay of selectedRelays) {
-      publishRelay(client, relay, false);
-    }
-    console.warn(
-      `Pump pulse by relay ignored because relay ON confirmation was not received: ${selectedRelays.join(', ')}`,
-    );
-    return;
-  }
+  const totalDurationMs = entries.reduce((sum, [, ms]) => sum + ms, 0);
 
   const startedAt = new Date();
-  const remainingRelays = new Set(selectedRelays);
-  const startedAtMs = Date.now();
 
   try {
-    while (remainingRelays.size > 0) {
-      const elapsedMs = Date.now() - startedAtMs;
+    for (let i = 0; i < entries.length; i++) {
+      const [relay, durationMs] = entries[i];
 
-      for (const relay of [...remainingRelays]) {
-        if (elapsedMs >= durationByRelay[relay]) {
-          publishRelay(client, relay, false);
-          remainingRelays.delete(relay);
-        }
-      }
+      publishRelay(client, relay, true);
+      await delay(durationMs);
+      publishRelay(client, relay, false);
 
-      if (remainingRelays.size > 0) {
-        await delay(250);
+      if (i < entries.length - 1) {
+        await delay(1000);
       }
     }
   } finally {
-    for (const relay of remainingRelays) {
+    for (const relay of selectedRelays) {
       publishRelay(client, relay, false);
     }
 
     await db.collection(config.firestore.pumpLogsCollection).add({
       relays: selectedRelays,
       pumpLabels: selectedRelays.map((relay) => RELAY_LABELS[relay]),
-      durationMs: maxDurationMs,
+      durationMs: totalDurationMs,
       durationMsByRelay: durationByRelay,
+      activationMode: 'sequential_optimistic',
       reason,
       metadata,
       startedAt,

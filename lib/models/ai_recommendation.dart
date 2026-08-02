@@ -10,6 +10,7 @@ class AiRecommendationResponse {
   final AutomationTriggers automationTriggers;
   final List<PumpFertilizationRecommendation> pumpRecommendations;
   final DailyFertilizationScheduleRecommendation? dailyScheduleRecommendation;
+  final List<XaiFeatureContribution> xaiContributions;
 
   const AiRecommendationResponse({
     required this.plantHealthPercentage,
@@ -18,6 +19,7 @@ class AiRecommendationResponse {
     required this.automationTriggers,
     this.pumpRecommendations = const [],
     this.dailyScheduleRecommendation,
+    this.xaiContributions = const [],
   });
 
   factory AiRecommendationResponse.fromJson(Map<String, dynamic> json) {
@@ -38,6 +40,9 @@ class AiRecommendationResponse {
           DailyFertilizationScheduleRecommendation.fromJson(
         _readMap(json['daily_schedule_recommendation']),
       ),
+      xaiContributions: _readXaiContributions(
+        json['xai_feature_contributions'],
+      ),
     );
   }
 
@@ -48,6 +53,7 @@ class AiRecommendationResponse {
     AutomationTriggers? automationTriggers,
     List<PumpFertilizationRecommendation>? pumpRecommendations,
     Object? dailyScheduleRecommendation = _unset,
+    List<XaiFeatureContribution>? xaiContributions,
   }) {
     return AiRecommendationResponse(
       plantHealthPercentage:
@@ -61,6 +67,7 @@ class AiRecommendationResponse {
               ? this.dailyScheduleRecommendation
               : dailyScheduleRecommendation
                   as DailyFertilizationScheduleRecommendation?,
+      xaiContributions: xaiContributions ?? this.xaiContributions,
     );
   }
 
@@ -86,6 +93,40 @@ class AiRecommendationResponse {
 
   List<InsightCard> toInsightCards() {
     return recommendations.semua.map((item) => item.toInsightCard()).toList();
+  }
+}
+
+class XaiFeatureContribution {
+  final String feature;
+  final String label;
+  final double contribution;
+  final double featureValue;
+  final double featureValueRatio;
+  final String direction;
+  final String detail;
+
+  const XaiFeatureContribution({
+    required this.feature,
+    required this.label,
+    required this.contribution,
+    required this.featureValue,
+    required this.featureValueRatio,
+    required this.direction,
+    required this.detail,
+  });
+
+  factory XaiFeatureContribution.fromJson(Map<String, dynamic> json) {
+    return XaiFeatureContribution(
+      feature: (json['feature'] ?? '').toString(),
+      label: (json['label'] ?? json['feature'] ?? '').toString(),
+      contribution: _readDouble(json['contribution']),
+      featureValue: _readDouble(json['feature_value']),
+      featureValueRatio: _readDouble(json['feature_value_ratio'])
+          .clamp(0.0, 1.0)
+          .toDouble(),
+      direction: (json['direction'] ?? '').toString(),
+      detail: (json['detail'] ?? '').toString(),
+    );
   }
 }
 
@@ -433,6 +474,17 @@ List<PumpFertilizationRecommendation> _readPumpRecommendations(Object? value) {
             Map<String, dynamic>.from(item),
           ))
       .where((item) => item.relay >= 1 && item.relay <= 4)
+      .toList();
+}
+
+List<XaiFeatureContribution> _readXaiContributions(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map>()
+      .map((item) => XaiFeatureContribution.fromJson(
+            Map<String, dynamic>.from(item),
+          ))
+      .where((item) => item.label.trim().isNotEmpty)
       .toList();
 }
 
