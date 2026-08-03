@@ -51,27 +51,6 @@ const LEGACY_DEFAULT_THRESHOLDS = {
 
 const SENSOR_DEFINITIONS = [
   {
-    key: 'nitrogen',
-    label: 'Estimasi Nitrogen',
-    unit: 'mg/kg',
-    minKey: 'min_nitrogen',
-    maxKey: 'max_nitrogen',
-  },
-  {
-    key: 'phosphorus',
-    label: 'Estimasi Phosphorus',
-    unit: 'mg/kg',
-    minKey: 'min_phosphorus',
-    maxKey: 'max_phosphorus',
-  },
-  {
-    key: 'potassium',
-    label: 'Estimasi Kalium',
-    unit: 'mg/kg',
-    minKey: 'min_potassium',
-    maxKey: 'max_potassium',
-  },
-  {
     key: 'ph',
     label: 'pH',
     unit: 'pH',
@@ -80,21 +59,21 @@ const SENSOR_DEFINITIONS = [
   },
   {
     key: 'moisture',
-    label: 'Moisture',
+    label: 'Kelembapan',
     unit: '%',
     minKey: 'min_moisture',
     maxKey: 'max_moisture',
   },
   {
     key: 'temperature',
-    label: 'Temperature',
-    unit: 'C',
+    label: 'Suhu',
+    unit: '°C',
     minKey: 'min_temperature',
     maxKey: 'max_temperature',
   },
   {
     key: 'ec',
-    label: 'Electrical Conductivity',
+    label: 'EC',
     unit: 'mS/cm',
     minKey: 'min_ec',
     maxKey: 'max_ec',

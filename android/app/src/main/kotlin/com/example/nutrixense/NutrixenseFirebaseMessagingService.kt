@@ -122,7 +122,7 @@ class NutrixenseFirebaseMessagingService : FirebaseMessagingService() {
                 .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
         }
 
-        val notification = withBadgeIcon(withGroupAlertBehavior(builder))
+        val notification = builder
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
             .setColor(notificationColor)
             .setNumber(currentAlertCount)
@@ -130,14 +130,12 @@ class NutrixenseFirebaseMessagingService : FirebaseMessagingService() {
             .setContentText(firstAlertLine(message))
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setGroup(ALERT_GROUP_KEY)
+            .setAutoCancel(false)
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 350, 150, 350))
             .build()
 
-        manager.notify(nextAlertChildNotificationId(), notification)
-        showAlertGroupSummary(manager, pendingIntent, recentAlertCount)
+        manager.notify(2002, notification)
     }
 
     private fun showAlertGroupSummary(

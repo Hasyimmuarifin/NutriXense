@@ -326,23 +326,93 @@ class NutrixenseBackgroundService : Service() {
     }
 
     private fun handleThresholdAlerts(reading: SensorReading) {
-        val alertLines = mutableListOf<String>()
+        class SensorAlertItem(
+            val key: String,
+            val label: String,
+            val value: Double,
+            val unit: String,
+            val isLow: Boolean,
+            val threshold: Double
+        )
 
-        addAlertLine(alertLines, "nitrogen", "Estimasi Nitrogen", reading.nitrogen, "mg/kg", "min_nitrogen", "max_nitrogen")
-        addAlertLine(alertLines, "phosphorus", "Estimasi Fosfor", reading.phosphorus, "mg/kg", "min_phosphorus", "max_phosphorus")
-        addAlertLine(alertLines, "potassium", "Estimasi Kalium", reading.potassium, "mg/kg", "min_potassium", "max_potassium")
-        addAlertLine(alertLines, "ph", "pH", reading.ph, "pH", "min_ph", "max_ph")
-        addAlertLine(alertLines, "moisture", "Kelembapan", reading.moisture, "%", "min_moisture", "max_moisture")
-        addAlertLine(alertLines, "temperature", "Suhu", reading.temperature, "°C", "min_temperature", "max_temperature")
-        addAlertLine(alertLines, "ec", "EC", reading.ec, "mS/cm", "min_ec", "max_ec")
+        val activeItems = mutableListOf<SensorAlertItem>()
 
-        if (alertLines.isEmpty()) return
+        fun checkAlert(key: String, label: String, value: Double?, unit: String, minKey: String, maxKey: String) {
+            if (value == null || mutedSensors[key] == true) return
+            val min = thresholds[minKey]
+            val max = thresholds[maxKey]
+            if (min != null && value < min) {
+                activeItems.add(SensorAlertItem(key, label, value, unit, true, min))
+            } else if (max != null && value > max) {
+                activeItems.add(SensorAlertItem(key, label, value, unit, false, max))
+            }
+        }
+
+        checkAlert("ph", "pH", reading.ph, "pH", "min_ph", "max_ph")
+        checkAlert("moisture", "Kelembapan", reading.moisture, "%", "min_moisture", "max_moisture")
+        checkAlert("temperature", "Suhu", reading.temperature, "°C", "min_temperature", "max_temperature")
+        checkAlert("ec", "EC", reading.ec, "mS/cm", "min_ec", "max_ec")
+
+        if (activeItems.isEmpty()) return
 
         publishAlertBuzzer()
-        showThresholdAlert(
-            "Peringatan Nutrisi Tanaman",
-            alertLines.joinToString("\n")
-        )
+
+        val nStr = reading.nitrogen?.let { "${formatNumber(it)} mg/kg" } ?: "-"
+        val pStr = reading.phosphorus?.let { "${formatNumber(it)} mg/kg" } ?: "-"
+        val kStr = reading.potassium?.let { "${formatNumber(it)} mg/kg" } ?: "-"
+
+        val isEcLow = activeItems.any { it.key == "ec" && it.isLow }
+
+        val finalTitle: String
+        val finalMessage: String
+
+        if (activeItems.size == 1) {
+            val item = activeItems.first()
+            when (item.key) {
+                "ec" -> {
+                    if (item.isLow) {
+                        finalTitle = "Nutrisi Tanaman Menurun"
+                        finalMessage = "Nilai EC (${formatNumber(item.value)} mS/cm) di bawah batas minimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr)."
+                    } else {
+                        finalTitle = "Peringatan Nutrisi Tinggi"
+                        finalMessage = "Nilai EC (${formatNumber(item.value)} mS/cm) di atas batas maksimal normal (${formatNumber(item.threshold)} mS/cm)."
+                    }
+                }
+                "ph" -> {
+                    finalTitle = if (item.isLow) "Peringatan pH Tanah Terlalu Asam" else "Peringatan pH Tanah Terlalu Basa"
+                    val dir = if (item.isLow) "di bawah batas minimal normal ${formatNumber(item.threshold)} pH" else "di atas batas maksimal normal ${formatNumber(item.threshold)} pH"
+                    finalMessage = "Nilai pH (${formatNumber(item.value)} pH) $dir."
+                }
+                "temperature" -> {
+                    finalTitle = if (item.isLow) "Peringatan Suhu Tanah Rendah" else "Peringatan Suhu Tanah Tinggi"
+                    val dir = if (item.isLow) "di bawah batas minimal normal ${formatNumber(item.threshold)} °C" else "di atas batas maksimal normal ${formatNumber(item.threshold)} °C"
+                    finalMessage = "Suhu tanah (${formatNumber(item.value)} °C) $dir."
+                }
+                "moisture" -> {
+                    finalTitle = if (item.isLow) "Peringatan Kelembapan Tanah Rendah" else "Peringatan Kelembapan Tanah Tinggi"
+                    val dir = if (item.isLow) "di bawah batas minimal normal ${formatNumber(item.threshold)} %" else "di atas batas maksimal normal ${formatNumber(item.threshold)} %"
+                    finalMessage = "Kelembapan tanah (${formatNumber(item.value)} %) $dir."
+                }
+                else -> {
+                    finalTitle = "Peringatan Sensor"
+                    finalMessage = "${item.label}: ${formatNumber(item.value)} ${item.unit}"
+                }
+            }
+        } else {
+            finalTitle = if (isEcLow) "Peringatan Nutrisi & Lingkungan" else "Peringatan Parameter Lingkungan"
+            val lines = mutableListOf<String>()
+            for (item in activeItems) {
+                if (item.key == "ec" && item.isLow) {
+                    lines.add("• EC (${formatNumber(item.value)} mS/cm) di bawah batas minimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).")
+                } else {
+                    val dir = if (item.isLow) "di bawah batas minimal ${formatNumber(item.threshold)} ${item.unit}" else "di atas batas maksimal ${formatNumber(item.threshold)} ${item.unit}"
+                    lines.add("• ${item.label}: ${formatNumber(item.value)} ${item.unit} $dir")
+                }
+            }
+            finalMessage = lines.joinToString("\n")
+        }
+
+        showThresholdAlert(finalTitle, finalMessage)
     }
 
     private fun addAlertLine(
@@ -767,7 +837,7 @@ class NutrixenseBackgroundService : Service() {
                 .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
         }
 
-        val notification = withBadgeIcon(withGroupAlertBehavior(builder))
+        val notification = builder
             .setSmallIcon(R.drawable.ic_nutrixense_notification)
             .setColor(notificationColor)
             .setNumber(currentAlertCount)
@@ -775,14 +845,12 @@ class NutrixenseBackgroundService : Service() {
             .setContentText(firstAlertLine(message))
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setGroup(ALERT_GROUP_KEY)
+            .setAutoCancel(false)
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 350, 150, 350))
             .build()
 
-        manager.notify(nextAlertChildNotificationId(), notification)
-        showAlertGroupSummary(manager, pendingIntent, recentAlertCount)
+        manager.notify(2002, notification)
     }
 
     private fun showAlertGroupSummary(

@@ -17,9 +17,13 @@ class SensorCard extends StatelessWidget {
   Color get _statusColor {
     switch (reading.status) {
       case 'Low':
+      case 'Tren Menurun':
+      case 'Kurang':
         return AppTheme.statusLow;
 
       case 'High':
+      case 'Tren Meningkat':
+      case 'Tinggi':
         return AppTheme.statusHigh;
 
       default:
@@ -30,9 +34,13 @@ class SensorCard extends StatelessWidget {
   IconData get _statusIcon {
     switch (reading.status) {
       case 'Low':
+      case 'Tren Menurun':
+      case 'Kurang':
         return Icons.arrow_downward_rounded;
 
       case 'High':
+      case 'Tren Meningkat':
+      case 'Tinggi':
         return Icons.arrow_upward_rounded;
 
       default:
@@ -51,12 +59,16 @@ class SensorCard extends StatelessWidget {
 
     switch (reading.status) {
       case 'Low':
+      case 'Tren Menurun':
+      case 'Kurang':
         borderColor = AppTheme.statusLow;
         glowColor = AppTheme.statusLow.withOpacity(0.005);
         backgroundTint = AppTheme.statusLow.withOpacity(0.005);
         break;
 
       case 'High':
+      case 'Tren Meningkat':
+      case 'Tinggi':
         borderColor = AppTheme.statusHigh;
         glowColor = AppTheme.statusHigh.withOpacity(0.005);
         backgroundTint = AppTheme.statusHigh.withOpacity(0.005);

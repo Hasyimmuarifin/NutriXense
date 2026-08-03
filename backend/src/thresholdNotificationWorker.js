@@ -10,7 +10,8 @@ function formatValue(value) {
 }
 
 function formatAlertLine(alert) {
-  return `${alert.label}: ${formatValue(alert.value)} ${alert.unit} is ${alert.direction} ${formatValue(alert.threshold)} ${alert.unit}`;
+  const directionText = alert.direction === 'below' ? 'di bawah batas minimal' : 'di atas batas maksimal';
+  return `${alert.label}: ${formatValue(alert.value)} ${alert.unit} ${directionText} ${formatValue(alert.threshold)} ${alert.unit}`;
 }
 
 function alertCountForLogData(data = {}) {
@@ -128,17 +129,64 @@ async function loadLatestReading() {
 }
 
 async function sendThresholdNotification(alerts, reading) {
-  const detailBody = alerts.map(formatAlertLine).join('\n');
-  const title = 'Peringatan Nutrisi Tanaman';
+  if (!alerts || alerts.length === 0) return;
+
+  const nStr = reading.nitrogen != null ? `${formatValue(reading.nitrogen)} mg/kg` : '-';
+  const pStr = reading.phosphorus != null ? `${formatValue(reading.phosphorus)} mg/kg` : '-';
+  const kStr = reading.potassium != null ? `${formatValue(reading.potassium)} mg/kg` : '-';
+
+  const isEcLow = alerts.some((a) => a.key === 'ec' && a.status === 'Low');
+  let title = 'Peringatan Sensor';
+  let detailBody = '';
+
+  if (alerts.length === 1) {
+    const alert = alerts[0];
+    const isLow = alert.status === 'Low';
+    if (alert.key === 'ec') {
+      if (isLow) {
+        title = 'Nutrisi Tanaman Menurun';
+        detailBody = `Nilai EC (${formatValue(alert.value)} mS/cm) di bawah batas minimal normal (${formatValue(alert.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = ${nStr}, P = ${pStr}, K = ${kStr}).`;
+      } else {
+        title = 'Peringatan Nutrisi Tinggi';
+        detailBody = `Nilai EC (${formatValue(alert.value)} mS/cm) di atas batas maksimal normal (${formatValue(alert.threshold)} mS/cm).`;
+      }
+    } else if (alert.key === 'ph') {
+      title = isLow ? 'Peringatan pH Tanah Terlalu Asam' : 'Peringatan pH Tanah Terlalu Basa';
+      const dir = isLow ? `di bawah batas minimal normal ${formatValue(alert.threshold)} pH` : `di atas batas maksimal normal ${formatValue(alert.threshold)} pH`;
+      detailBody = `Nilai pH (${formatValue(alert.value)} pH) ${dir}.`;
+    } else if (alert.key === 'temperature') {
+      title = isLow ? 'Peringatan Suhu Tanah Rendah' : 'Peringatan Suhu Tanah Tinggi';
+      const dir = isLow ? `di bawah batas minimal normal ${formatValue(alert.threshold)} °C` : `di atas batas maksimal normal ${formatValue(alert.threshold)} °C`;
+      detailBody = `Suhu tanah (${formatValue(alert.value)} °C) ${dir}.`;
+    } else if (alert.key === 'moisture') {
+      title = isLow ? 'Peringatan Kelembapan Tanah Rendah' : 'Peringatan Kelembapan Tanah Tinggi';
+      const dir = isLow ? `di bawah batas minimal normal ${formatValue(alert.threshold)} %` : `di atas batas maksimal normal ${formatValue(alert.threshold)} %`;
+      detailBody = `Kelembapan tanah (${formatValue(alert.value)} %) ${dir}.`;
+    } else {
+      title = 'Peringatan Sensor';
+      detailBody = formatAlertLine(alert);
+    }
+  } else {
+    title = isEcLow ? 'Peringatan Nutrisi & Lingkungan' : 'Peringatan Parameter Lingkungan';
+    const lines = alerts.map((alert) => {
+      if (alert.key === 'ec' && alert.status === 'Low') {
+        return `• EC (${formatValue(alert.value)} mS/cm) di bawah batas minimal normal (${formatValue(alert.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = ${nStr}, P = ${pStr}, K = ${kStr}).`;
+      }
+      return `• ${formatAlertLine(alert)}`;
+    });
+    detailBody = lines.join('\n');
+  }
+
   const logRef = db.collection(config.firestore.thresholdAlertLogsCollection).doc();
   const recentAlertCount = await countRecentAlertLogs(alerts);
-  const body = `${recentAlertCount} peringatan nutrisi terdeteksi dalam 1 jam terakhir. Buka halaman Logs untuk melihat detail.`;
+  const summaryText = `${recentAlertCount} peringatan nutrisi terdeteksi dalam 1 jam terakhir. Buka halaman Logs untuk melihat detail.`;
+  const bodyText = detailBody;
 
   await logRef.set({
     topic: config.automation.fcmTopic,
     title,
     body: detailBody,
-    summaryBody: body,
+    summaryBody: summaryText,
     recentAlertCount,
     alerts,
     sensorReadingId: reading.id,
@@ -149,11 +197,15 @@ async function sendThresholdNotification(alerts, reading) {
   try {
     const response = await admin.messaging().send({
       topic: config.automation.fcmTopic,
+      notification: {
+        title,
+        body: bodyText,
+      },
       data: {
         title,
-        body,
+        body: bodyText,
         detailBody,
-        message: body,
+        message: bodyText,
         type: 'threshold_alert',
         sensorReadingId: reading.id,
         alertCount: String(alerts.length),
@@ -164,6 +216,11 @@ async function sendThresholdNotification(alerts, reading) {
       android: {
         priority: 'high',
         ttl: 60 * 60 * 1000,
+        notification: {
+          channelId: config.automation.fcmChannelId || 'nutrixense_fcm_alerts',
+          icon: 'ic_nutrixense_notification',
+          color: '#2E7D32',
+        },
       },
     });
 
@@ -247,7 +304,12 @@ function startThresholdNotificationWorker() {
       }
 
       const alerts = abnormalReadings(reading, notificationConfig.thresholds)
-        .filter((alert) => notificationConfig.mutedSensors[alert.key] !== true);
+        .filter((alert) => {
+          if (alert.key === 'nitrogen' || alert.key === 'phosphorus' || alert.key === 'potassium') {
+            return false;
+          }
+          return notificationConfig.mutedSensors[alert.key] !== true;
+        });
       if (alerts.length === 0) {
         await writeRuntimeStatus({
           state: 'normal',

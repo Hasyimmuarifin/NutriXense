@@ -173,7 +173,7 @@ class AiPumpAutomationService {
       // Total duration is the exact sum of confirmed pump active durations
       final totalPumpDurationMs = pumpCommands.fold<int>(
         0,
-        (sum, command) => sum + command.duration.inMilliseconds,
+        (total, command) => total + command.duration.inMilliseconds,
       );
 
       await _firestore.collection(_pumpLogsCollection).add({
@@ -195,12 +195,6 @@ class AiPumpAutomationService {
     } catch (error) {
       debugPrint('AI pump completed log failed: $error');
     }
-  }
-
-  Duration _maxDuration(List<_PumpCommand> pumpCommands) {
-    return pumpCommands
-        .map((command) => command.duration)
-        .reduce((a, b) => a > b ? a : b);
   }
 
   _PumpCommand? _commandForRelay(int relay) {

@@ -13,6 +13,8 @@ class SensorReading {
   final double maxNormal;
   final String icon;
   final int colorHex;
+  final String? overrideStatus;
+  final double? customNormalizedValue;
 
   const SensorReading({
     required this.label,
@@ -24,19 +26,27 @@ class SensorReading {
     required this.maxNormal,
     required this.icon,
     required this.colorHex,
+    this.overrideStatus,
+    this.customNormalizedValue,
   });
 
-  /// Returns status: 'Low', 'Normal', or 'High'
+  /// Returns status: 'Low', 'Normal', 'High', or custom override status
   String get status {
+    if (overrideStatus != null && overrideStatus!.isNotEmpty) {
+      return overrideStatus!;
+    }
     if (value < minNormal) return 'Low';
     if (value > maxNormal) return 'High';
     return 'Normal';
   }
 
   double get normalizedValue {
-    final range = maxValue - minValue;
-    if (range == 0) return 0;
-    return ((value - minValue) / range).clamp(0.0, 1.0);
+    if (customNormalizedValue != null) {
+      return customNormalizedValue!.clamp(0.0, 1.0);
+    }
+    final range = maxNormal - minNormal;
+    if (range <= 0) return 0.0;
+    return ((value - minNormal) / range).clamp(0.0, 1.0);
   }
 }
 

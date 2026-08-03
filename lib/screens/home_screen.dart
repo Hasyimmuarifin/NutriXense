@@ -89,12 +89,6 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription<bool>? deviceStatusSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _buzzerConfigSub;
   final Map<String, TextEditingController> _thresholdControllers = {
-    'min_nitrogen': TextEditingController(text: '100'),
-    'max_nitrogen': TextEditingController(text: '200'),
-    'min_phosphorus': TextEditingController(text: '20'),
-    'max_phosphorus': TextEditingController(text: '50'),
-    'min_potassium': TextEditingController(text: '100'),
-    'max_potassium': TextEditingController(text: '200'),
     'min_ph': TextEditingController(text: '4.5'),
     'max_ph': TextEditingController(text: '5.5'),
     'min_moisture': TextEditingController(text: '40'),
@@ -230,39 +224,71 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<SensorReading> _buildReadingsFromData(Map<String, dynamic> data) {
+    final ecVal = _readSensorValue(data, "ec");
+    final minEc = _thresholdValue('min_ec', 0.8);
+    final maxEc = _thresholdValue('max_ec', 1.8);
+
+    String npkStatus;
+    if (ecVal < minEc) {
+      npkStatus = 'Low';
+    } else if (ecVal > maxEc) {
+      npkStatus = 'High';
+    } else {
+      npkStatus = 'Normal';
+    }
+
+    final ecReading = SensorReading(
+      value: ecVal,
+      label: "Electrical Conductivity",
+      unit: "mS/cm",
+      minValue: 0,
+      maxValue: _gaugeMaxValue('max_ec', 1.8, 4),
+      minNormal: minEc,
+      maxNormal: maxEc,
+      icon: "assets/icons/ec.png",
+      colorHex: 0xFF7C4DFF,
+    );
+    final ecNormalizedValue = ecReading.normalizedValue;
+
     return [
       SensorReading(
         value: _readSensorValue(data, "nitrogen"),
         label: "Nitrogen",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_nitrogen', 200, 250),
-        minNormal: _thresholdValue('min_nitrogen', 100),
-        maxNormal: _thresholdValue('max_nitrogen', 200),
+        maxValue: 250,
+        minNormal: 80,
+        maxNormal: 200,
         icon: "assets/icons/leaf.png",
         colorHex: 0xFF4CAF50,
+        overrideStatus: npkStatus,
+        customNormalizedValue: ecNormalizedValue,
       ),
       SensorReading(
         value: _readSensorValue(data, "phosphorus"),
         label: "Fosfor",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_phosphorus', 50, 100),
-        minNormal: _thresholdValue('min_phosphorus', 20),
-        maxNormal: _thresholdValue('max_phosphorus', 50),
+        maxValue: 100,
+        minNormal: 20,
+        maxNormal: 50,
         icon: "assets/icons/root.png",
         colorHex: 0xFF2196F3,
+        overrideStatus: npkStatus,
+        customNormalizedValue: ecNormalizedValue,
       ),
       SensorReading(
         value: _readSensorValue(data, "potassium"),
         label: "Kalium",
         unit: "mg/kg",
         minValue: 0,
-        maxValue: _gaugeMaxValue('max_potassium', 200, 250),
-        minNormal: _thresholdValue('min_potassium', 100),
-        maxNormal: _thresholdValue('max_potassium', 200),
+        maxValue: 250,
+        minNormal: 100,
+        maxNormal: 200,
         icon: "assets/icons/crop.png",
         colorHex: 0xFFFF9800,
+        overrideStatus: npkStatus,
+        customNormalizedValue: ecNormalizedValue,
       ),
       SensorReading(
         value: _readSensorValue(data, "ph"),
@@ -297,17 +323,7 @@ class _HomeScreenState extends State<HomeScreen>
         icon: "assets/icons/temp.png",
         colorHex: 0xFFF44336,
       ),
-      SensorReading(
-        value: _readSensorValue(data, "ec"),
-        label: "Electrical Conductivity",
-        unit: "mS/cm",
-        minValue: 0,
-        maxValue: _gaugeMaxValue('max_ec', 1.8, 4),
-        minNormal: _thresholdValue('min_ec', 0.8),
-        maxNormal: _thresholdValue('max_ec', 1.8),
-        icon: "assets/icons/ec.png",
-        colorHex: 0xFF7C4DFF,
-      ),
+      ecReading,
     ];
   }
 
@@ -398,6 +414,10 @@ class _HomeScreenState extends State<HomeScreen>
             _buzzerMuted[key] = value != 0;
           }
         }
+        final ecMuted = _buzzerMuted['ec'] ?? false;
+        _buzzerMuted['nitrogen'] = ecMuted;
+        _buzzerMuted['phosphorus'] = ecMuted;
+        _buzzerMuted['potassium'] = ecMuted;
       });
       unawaited(
         _nutrientAlertService.syncBackgroundAlertConfig(
@@ -439,10 +459,21 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _toggleBuzzerMute(String sensorKey) async {
-    final nextMuted = !(_buzzerMuted[sensorKey] ?? false);
+    final isNpkOrEc = sensorKey == 'nitrogen' ||
+        sensorKey == 'phosphorus' ||
+        sensorKey == 'potassium' ||
+        sensorKey == 'ec';
+    final targetKey = isNpkOrEc ? 'ec' : sensorKey;
+    final nextMuted = !(_buzzerMuted[targetKey] ?? false);
 
     setState(() {
-      _buzzerMuted[sensorKey] = nextMuted;
+      _buzzerMuted[targetKey] = nextMuted;
+      if (isNpkOrEc) {
+        _buzzerMuted['nitrogen'] = nextMuted;
+        _buzzerMuted['phosphorus'] = nextMuted;
+        _buzzerMuted['potassium'] = nextMuted;
+        _buzzerMuted['ec'] = nextMuted;
+      }
     });
 
     final backendSynced = await _saveBuzzerMuteConfigToBackend();
@@ -457,12 +488,13 @@ class _HomeScreenState extends State<HomeScreen>
     );
 
     if (!mounted) return;
+    final label = isNpkOrEc ? 'EC & Nutrisi (N, P, K)' : _sensorLabel(sensorKey);
     showAppTextSnackBar(
       context,
       backendSynced
           ? nextMuted
-              ? 'Peringatan ${_sensorLabel(sensorKey)} dinonaktifkan'
-              : 'Peringatan ${_sensorLabel(sensorKey)} diaktifkan'
+              ? 'Peringatan $label dinonaktifkan'
+              : 'Peringatan $label diaktifkan'
           : 'Status peringatan berubah di aplikasi, tetapi gagal disinkronkan ke backend.',
       backendSynced
           ? nextMuted
@@ -571,7 +603,7 @@ class _HomeScreenState extends State<HomeScreen>
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          'Konfigurasi Ambang Batas Normal',
+                          'Konfigurasi Batas Normal',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -610,7 +642,7 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           ),
                           child: const Text(
-                            'Atur rentang minimal dan maksimal normal. N/P/K adalah estimasi/tren sensor cepat, sedangkan EC menjadi acuan utama kontrol nutrisi otomatis.',
+                            'Atur rentang minimal dan maksimal normal untuk pH, Kelembapan, Suhu, dan EC. Batas N/P/K tidak perlu diatur manual karena statusnya otomatis mengikuti tren kepekatan EC.',
                             style: TextStyle(
                               fontSize: 11,
                               color: AppTheme.textSecondary,
@@ -618,24 +650,6 @@ class _HomeScreenState extends State<HomeScreen>
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                        _thresholdRangeField(
-                          'Nitrogen',
-                          minKey: 'min_nitrogen',
-                          maxKey: 'max_nitrogen',
-                          suffix: 'mg/kg',
-                        ),
-                        _thresholdRangeField(
-                          'Fosfor',
-                          minKey: 'min_phosphorus',
-                          maxKey: 'max_phosphorus',
-                          suffix: 'mg/kg',
-                        ),
-                        _thresholdRangeField(
-                          'Kalium',
-                          minKey: 'min_potassium',
-                          maxKey: 'max_potassium',
-                          suffix: 'mg/kg',
                         ),
                         _thresholdRangeField(
                           'pH',
@@ -844,9 +858,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     final thresholdPairs = {
-      'Nitrogen': ('min_nitrogen', 'max_nitrogen'),
-      'Fosfor': ('min_phosphorus', 'max_phosphorus'),
-      'Kalium': ('min_potassium', 'max_potassium'),
       'pH': ('min_ph', 'max_ph'),
       'Kelembapan': ('min_moisture', 'max_moisture'),
       'Suhu': ('min_temperature', 'max_temperature'),
@@ -1568,7 +1579,10 @@ class _HomeScreenState extends State<HomeScreen>
   }) {
     final sensorColor = Color(reading.colorHex);
     final sensorKey = _sensorKeyForReading(reading);
-    final isBuzzerMuted = _buzzerMuted[sensorKey] ?? false;
+    final isNpkCard = sensorKey == 'nitrogen' || sensorKey == 'phosphorus' || sensorKey == 'potassium';
+    final isBuzzerMuted = isNpkCard
+        ? (_buzzerMuted['ec'] ?? false)
+        : (_buzzerMuted[sensorKey] ?? false);
     final isEcCard = sensorKey == 'ec';
 
     // ─── Dynamic UI based on reading status ─────────────────────
@@ -1579,6 +1593,8 @@ class _HomeScreenState extends State<HomeScreen>
 
     switch (reading.status) {
       case 'Low':
+      case 'Tren Menurun':
+      case 'Kurang':
         borderColor = AppTheme.statusLow;
         statusColor = AppTheme.statusLow;
         statusIcon = Icons.arrow_downward_rounded;
@@ -1586,6 +1602,8 @@ class _HomeScreenState extends State<HomeScreen>
         break;
 
       case 'High':
+      case 'Tren Meningkat':
+      case 'Tinggi':
         borderColor = AppTheme.statusHigh;
         statusColor = AppTheme.statusHigh;
         statusIcon = Icons.arrow_upward_rounded;
@@ -1793,34 +1811,40 @@ class _HomeScreenState extends State<HomeScreen>
 
           // ─── Min / Max label ────────────────────────────────────────
           SizedBox(height: compact ? 5 : 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  'Min ${reading.minNormal} ${reading.unit}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: AppTheme.textLight,
+          Visibility(
+            visible: !isNpkCard,
+            maintainSize: true,
+            maintainAnimation: true,
+            maintainState: true,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    'Min ${reading.minNormal} ${reading.unit}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.textLight,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Max ${reading.maxNormal} ${reading.unit}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: AppTheme.textLight,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Max ${reading.maxNormal} ${reading.unit}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.textLight,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

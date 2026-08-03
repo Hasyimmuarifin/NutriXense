@@ -48,11 +48,15 @@ class NutrientAlertService {
     Set<String> mutedSensorKeys = const {},
   }) async {
     final now = DateTime.now();
-    final abnormalReadings = readings
-        .where((reading) =>
-            reading.status != 'Normal' &&
-            !mutedSensorKeys.contains(_sensorKeyForReading(reading)))
-        .toList();
+
+    // Filter out N, P, K as individual alerts since they follow EC status
+    final abnormalReadings = readings.where((reading) {
+      final key = _sensorKeyForReading(reading);
+      if (key == 'nitrogen' || key == 'phosphorus' || key == 'potassium') {
+        return false;
+      }
+      return reading.status != 'Normal' && !mutedSensorKeys.contains(key);
+    }).toList();
 
     if (abnormalReadings.isEmpty) {
       _lastStatuses.clear();
@@ -84,7 +88,12 @@ class NutrientAlertService {
       _lastAlertTimes[reading.label] = now;
     }
 
-    final message = readingsToAlert.map(_formatAlertLine).join('\n');
+    final alertData = _buildDynamicAlertTitleAndMessage(readingsToAlert, readings);
+    final title = alertData['title']!;
+    final message = alertData['message']!;
+
+    if (message.isEmpty) return;
+
     final canShowNotification = await ThresholdNotificationCooldownService
         .instance
         .tryAcquireNotificationSlot();
@@ -98,7 +107,7 @@ class NutrientAlertService {
 
     try {
       await _channel.invokeMethod<void>('showNutrientAlert', {
-        'title': 'Peringatan Nutrisi Tanaman',
+        'title': title,
         'message': message,
       });
     } on PlatformException catch (error) {
@@ -106,13 +115,111 @@ class NutrientAlertService {
     }
   }
 
+  Map<String, String> _buildDynamicAlertTitleAndMessage(
+    List<SensorReading> readingsToAlert,
+    List<SensorReading> allReadings,
+  ) {
+    final ecReading = allReadings.cast<SensorReading?>().firstWhere(
+          (r) => r != null && _sensorKeyForReading(r) == 'ec',
+          orElse: () => null,
+        );
+    final nReading = allReadings.cast<SensorReading?>().firstWhere(
+          (r) => r != null && _sensorKeyForReading(r) == 'nitrogen',
+          orElse: () => null,
+        );
+    final pReading = allReadings.cast<SensorReading?>().firstWhere(
+          (r) => r != null && _sensorKeyForReading(r) == 'phosphorus', 
+          orElse: () => null,
+        );
+    final kReading = allReadings.cast<SensorReading?>().firstWhere(
+          (r) => r != null && _sensorKeyForReading(r) == 'potassium',
+          orElse: () => null,
+        );
+
+    final activeAlerts = readingsToAlert.where((r) {
+      final key = _sensorKeyForReading(r);
+      return key == 'ph' || key == 'moisture' || key == 'temperature' || key == 'ec';
+    }).toList();
+
+    if (activeAlerts.isEmpty) {
+      return {'title': 'Peringatan Sensor', 'message': ''};
+    }
+
+    final isEcLow = ecReading != null &&
+        activeAlerts.any((r) => _sensorKeyForReading(r) == 'ec' && r.status == 'Low');
+
+    String title;
+    String message;
+
+    if (activeAlerts.length == 1) {
+      final alert = activeAlerts.first;
+      final key = _sensorKeyForReading(alert);
+      final isLow = alert.status == 'Low';
+
+      if (key == 'ec') {
+        if (isLow) {
+          title = 'Nutrisi Tanaman Menurun';
+          final nStr = nReading != null ? '${nReading.value.toStringAsFixed(0)} mg/kg' : '-';
+          final pStr = pReading != null ? '${pReading.value.toStringAsFixed(0)} mg/kg' : '-';
+          final kStr = kReading != null ? '${kReading.value.toStringAsFixed(0)} mg/kg' : '-';
+          final minEcStr = ecReading!.minNormal.toStringAsFixed(1);
+          message = 'Nilai EC (${ecReading.value.toStringAsFixed(1)} mS/cm) di bawah batas minimal normal ($minEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).';
+        } else {
+          title = 'Peringatan Nutrisi Tinggi';
+          message = 'Nilai EC (${alert.value.toStringAsFixed(1)} mS/cm) di atas batas maksimal normal (${alert.maxNormal.toStringAsFixed(1)} mS/cm).';
+        }
+      } else if (key == 'ph') {
+        title = isLow ? 'Peringatan pH Tanah Terlalu Asam' : 'Peringatan pH Tanah Terlalu Basa';
+        final dir = isLow
+            ? 'di bawah batas minimal normal ${alert.minNormal.toStringAsFixed(1)} pH'
+            : 'di atas batas maksimal normal ${alert.maxNormal.toStringAsFixed(1)} pH';
+        message = 'Nilai pH (${alert.value.toStringAsFixed(1)} pH) $dir.';
+      } else if (key == 'temperature') {
+        title = isLow ? 'Peringatan Suhu Tanah Rendah' : 'Peringatan Suhu Tanah Tinggi';
+        final dir = isLow
+            ? 'di bawah batas minimal normal ${alert.minNormal.toStringAsFixed(1)} °C'
+            : 'di atas batas maksimal normal ${alert.maxNormal.toStringAsFixed(1)} °C';
+        message = 'Suhu tanah (${alert.value.toStringAsFixed(1)} °C) $dir.';
+      } else if (key == 'moisture') {
+        title = isLow ? 'Peringatan Kelembapan Tanah Rendah' : 'Peringatan Kelembapan Tanah Tinggi';
+        final dir = isLow
+            ? 'di bawah batas minimal normal ${alert.minNormal.toStringAsFixed(0)} %'
+            : 'di atas batas maksimal normal ${alert.maxNormal.toStringAsFixed(0)} %';
+        message = 'Kelembapan tanah (${alert.value.toStringAsFixed(0)} %) $dir.';
+      } else {
+        title = 'Peringatan Sensor';
+        message = _formatAlertLine(alert);
+      }
+    } else {
+      title = isEcLow ? 'Peringatan Nutrisi & Lingkungan' : 'Peringatan Parameter Lingkungan';
+      final lines = <String>[];
+      for (final alert in activeAlerts) {
+        final key = _sensorKeyForReading(alert);
+        if (key == 'ec' && alert.status == 'Low') {
+          final nStr = nReading != null ? '${nReading.value.toStringAsFixed(0)} mg/kg' : '-';
+          final pStr = pReading != null ? '${pReading.value.toStringAsFixed(0)} mg/kg' : '-';
+          final kStr = kReading != null ? '${kReading.value.toStringAsFixed(0)} mg/kg' : '-';
+          final minEcStr = ecReading!.minNormal.toStringAsFixed(1);
+          lines.add('• EC (${ecReading.value.toStringAsFixed(1)} mS/cm) di bawah batas minimal normal ($minEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).');
+        } else {
+          lines.add('• ${_formatAlertLine(alert)}');
+        }
+      }
+      message = lines.join('\n');
+    }
+
+    return {'title': title, 'message': message};
+  }
+
   String _formatAlertLine(SensorReading reading) {
     final sensorLabel = _alertSensorLabel(reading.label);
-    final direction = reading.status == 'Low'
+    final direction = (reading.status == 'Low' || reading.status == 'Tren Menurun')
         ? 'di bawah batas minimal'
         : 'di atas batas maksimal';
     final threshold =
-        reading.status == 'Low' ? reading.minNormal : reading.maxNormal;
+        (reading.status == 'Low' || reading.status == 'Tren Menurun')
+            ? reading.minNormal
+            : reading.maxNormal;
 
     return '$sensorLabel: ${reading.value.toStringAsFixed(1)} ${reading.unit} '
         '$direction ${threshold.toStringAsFixed(1)} ${reading.unit}';

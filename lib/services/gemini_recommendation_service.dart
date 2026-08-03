@@ -131,7 +131,7 @@ class AiAnalysisWindowProfile {
     final start = customStartAt;
     final end = customEndAt;
     if (!isCustom || start == null || end == null) return label;
-    return '$label ${_formatAiDateTimeRange(start, end)}';
+    return _formatAiDateTimeRange(start, end);
   }
 
   AiAnalysisTimestampRange resolveRange(DateTime now) {
@@ -778,17 +778,28 @@ class GeminiRecommendationService {
   }
 
   static String _replaceIsoTimestampsForDisplay(String value) {
-    final replaced = value.replaceAllMapped(
+    var replaced = value.replaceAllMapped(
       RegExp(
         r'(\d{4})-(\d{2})-(\d{2})(?:T|\s+)(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?',
       ),
       (match) =>
           '${match.group(3)}-${match.group(2)}-${match.group(1)} ${match.group(4)}',
     );
-    return replaced.replaceAllMapped(
+    replaced = replaced.replaceAllMapped(
       RegExp(r'\b(\d{4})-(\d{2})-(\d{2})\b'),
       (match) => '${match.group(3)}-${match.group(2)}-${match.group(1)}',
     );
+    replaced = replaced
+        .replaceAll('untuk rentang Custom ', 'mulai dari ')
+        .replaceAll('untuk rentang Custom', 'mulai dari')
+        .replaceAll('Pengukuran NPK RS485 digunakan', 'Pengukuran nilai N, P, K oleh sensor digunakan')
+        .replaceAll('Pengukuran NPK RS485', 'Pengukuran nilai N, P, K oleh sensor');
+
+    if (replaced.endsWith('berbasis EC') || replaced.endsWith('berbasis EC ')) {
+      replaced = '${replaced.trim()}.';
+    }
+
+    return replaced;
   }
 
   Future<_GeminiRuntimeConfig> _resolveConfig() async {
@@ -1730,7 +1741,7 @@ class GeminiRecommendationService {
     return {
       'plant_health_percentage': (100 - scorePenalty).clamp(0, 100),
       'sensor_summary':
-          'Analisis ${input.plantType.label} dibuat dari rentang ${input.analysisWindow.xaiLabel}, EC sebagai sinyal kontrol nutrisi utama, tren estimasi NPK, dan asumsi media ${input.plantingMedium.label}. Nilai N/P/K sensor diperlakukan sebagai tren cepat, bukan pengukuran unsur terpisah.',
+          'Analisis kondisi tanaman ${input.plantType.label} pada media ${input.plantingMedium.label} mulai dari ${input.analysisWindow.xaiLabel} menunjukkan defisit kelembapan dan EC serta pH yang terlalu basa. Pengukuran nilai N, P, K oleh sensor digunakan sebagai inikator tren estimasi pendukung kontrol nutrisi berbasis EC.',
       'recommendations': {
         'all': items,
         'kritis': kritis,
