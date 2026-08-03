@@ -1188,11 +1188,6 @@ class _ControlScreenState extends State<ControlScreen> {
 
                 const SizedBox(height: 8),
 
-                // ─── Emergency Stop ──────────────────────────────────────
-                _buildEmergencyStop(),
-
-                const SizedBox(height: 14),
-
                 // ─── Automatic Watering Schedule ────────────────────────
                 _buildScheduleCard(),
               ]),
@@ -1912,57 +1907,7 @@ class _ControlScreenState extends State<ControlScreen> {
     );
   }
 
-  Widget _buildEmergencyStop() {
-    final anyOn = _pumps.any((p) => p.isOn);
-    return GestureDetector(
-      onTap: anyOn
-          ? () async {
-              for (int i = 0; i < _pumps.length; i++) {
-                if (_pumps[i].isOn) {
-                  await _togglePump(i, false);
-                }
-              }
-            }
-          : null,
-      child: AnimatedOpacity(
-        opacity: anyOn ? 1.0 : 0.4,
-        duration: const Duration(milliseconds: 300),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.statusLow.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppTheme.statusLow.withOpacity(0.3),
-            ),
-          ),
-          child: const Wrap(
-            alignment: WrapAlignment.center,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            runSpacing: 6,
-            children: [
-              Icon(
-                Icons.stop_circle_outlined,
-                color: AppTheme.statusLow,
-                size: 20,
-              ),
-              SizedBox(width: 8),
-              Text(
-                'Hentikan Darurat Semua Pompa',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.statusLow,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+
 }
 
 class _WateringSchedule {
