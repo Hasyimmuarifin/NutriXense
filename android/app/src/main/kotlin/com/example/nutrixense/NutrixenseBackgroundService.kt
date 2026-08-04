@@ -148,7 +148,7 @@ class NutrixenseBackgroundService : Service() {
     private val lastRelayActivationTimes = mutableMapOf<Int, Long>()
     private val lastScheduleRunDates = mutableMapOf<Long, String>()
     private val repeatAlertMillis = TimeUnit.MINUTES.toMillis(5)
-    private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(2)
+    private val ruleIntervalMillis = TimeUnit.MINUTES.toMillis(10)
     private val fuzzyMinPulseMillis = 1_000L
     private val fuzzyMediumPulseMillis = 2_000L
     private val fuzzyMaxPulseMillis = 3_000L
@@ -361,7 +361,8 @@ class NutrixenseBackgroundService : Service() {
         val pStr = reading.phosphorus?.let { "${formatNumber(it)} mg/kg" } ?: "-"
         val kStr = reading.potassium?.let { "${formatNumber(it)} mg/kg" } ?: "-"
 
-        val isEcLow = activeItems.any { it.key == "ec" && it.isLow }
+        val hasNutrientAlert = activeItems.any { it.key == "ec" }
+        val hasEnvAlert = activeItems.any { it.key == "ph" || it.key == "temperature" || it.key == "moisture" }
 
         val finalTitle: String
         val finalMessage: String
@@ -375,7 +376,7 @@ class NutrixenseBackgroundService : Service() {
                         finalMessage = "Nilai EC (${formatNumber(item.value)} mS/cm) di bawah batas minimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr)."
                     } else {
                         finalTitle = "Peringatan Nutrisi Tinggi"
-                        finalMessage = "Nilai EC (${formatNumber(item.value)} mS/cm) di atas batas maksimal normal (${formatNumber(item.threshold)} mS/cm)."
+                        finalMessage = "Nilai EC (${formatNumber(item.value)} mS/cm) di atas batas maksimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr)."
                     }
                 }
                 "ph" -> {
@@ -399,11 +400,21 @@ class NutrixenseBackgroundService : Service() {
                 }
             }
         } else {
-            finalTitle = if (isEcLow) "Peringatan Nutrisi & Lingkungan" else "Peringatan Parameter Lingkungan"
+            finalTitle = if (hasNutrientAlert && hasEnvAlert) {
+                "Peringatan Nutrisi & Lingkungan"
+            } else if (hasNutrientAlert) {
+                "Peringatan Nutrisi"
+            } else {
+                "Peringatan Parameter Lingkungan"
+            }
             val lines = mutableListOf<String>()
             for (item in activeItems) {
-                if (item.key == "ec" && item.isLow) {
-                    lines.add("• EC (${formatNumber(item.value)} mS/cm) di bawah batas minimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).")
+                if (item.key == "ec") {
+                    if (item.isLow) {
+                        lines.add("• EC (${formatNumber(item.value)} mS/cm) di bawah batas minimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).")
+                    } else {
+                        lines.add("• EC (${formatNumber(item.value)} mS/cm) di atas batas maksimal normal (${formatNumber(item.threshold)} mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).")
+                    }
                 } else {
                     val dir = if (item.isLow) "di bawah batas minimal ${formatNumber(item.threshold)} ${item.unit}" else "di atas batas maksimal ${formatNumber(item.threshold)} ${item.unit}"
                     lines.add("• ${item.label}: ${formatNumber(item.value)} ${item.unit} $dir")

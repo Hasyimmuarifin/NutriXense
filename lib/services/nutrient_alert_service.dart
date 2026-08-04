@@ -119,10 +119,6 @@ class NutrientAlertService {
     List<SensorReading> readingsToAlert,
     List<SensorReading> allReadings,
   ) {
-    final ecReading = allReadings.cast<SensorReading?>().firstWhere(
-          (r) => r != null && _sensorKeyForReading(r) == 'ec',
-          orElse: () => null,
-        );
     final nReading = allReadings.cast<SensorReading?>().firstWhere(
           (r) => r != null && _sensorKeyForReading(r) == 'nitrogen',
           orElse: () => null,
@@ -145,8 +141,15 @@ class NutrientAlertService {
       return {'title': 'Peringatan Sensor', 'message': ''};
     }
 
-    final isEcLow = ecReading != null &&
-        activeAlerts.any((r) => _sensorKeyForReading(r) == 'ec' && r.status == 'Low');
+    final hasNutrientAlert = activeAlerts.any((r) => _sensorKeyForReading(r) == 'ec');
+    final hasEnvAlert = activeAlerts.any((r) {
+      final key = _sensorKeyForReading(r);
+      return key == 'ph' || key == 'moisture' || key == 'temperature';
+    });
+
+    final nStr = nReading != null ? '${nReading.value.toStringAsFixed(0)} mg/kg' : '-';
+    final pStr = pReading != null ? '${pReading.value.toStringAsFixed(0)} mg/kg' : '-';
+    final kStr = kReading != null ? '${kReading.value.toStringAsFixed(0)} mg/kg' : '-';
 
     String title;
     String message;
@@ -159,14 +162,12 @@ class NutrientAlertService {
       if (key == 'ec') {
         if (isLow) {
           title = 'Nutrisi Tanaman Menurun';
-          final nStr = nReading != null ? '${nReading.value.toStringAsFixed(0)} mg/kg' : '-';
-          final pStr = pReading != null ? '${pReading.value.toStringAsFixed(0)} mg/kg' : '-';
-          final kStr = kReading != null ? '${kReading.value.toStringAsFixed(0)} mg/kg' : '-';
-          final minEcStr = ecReading!.minNormal.toStringAsFixed(1);
-          message = 'Nilai EC (${ecReading.value.toStringAsFixed(1)} mS/cm) di bawah batas minimal normal ($minEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).';
+          final minEcStr = alert.minNormal.toStringAsFixed(1);
+          message = 'Nilai EC (${alert.value.toStringAsFixed(1)} mS/cm) di bawah batas minimal normal ($minEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).';
         } else {
           title = 'Peringatan Nutrisi Tinggi';
-          message = 'Nilai EC (${alert.value.toStringAsFixed(1)} mS/cm) di atas batas maksimal normal (${alert.maxNormal.toStringAsFixed(1)} mS/cm).';
+          final maxEcStr = alert.maxNormal.toStringAsFixed(1);
+          message = 'Nilai EC (${alert.value.toStringAsFixed(1)} mS/cm) di atas batas maksimal normal ($maxEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).';
         }
       } else if (key == 'ph') {
         title = isLow ? 'Peringatan pH Tanah Terlalu Asam' : 'Peringatan pH Tanah Terlalu Basa';
@@ -191,16 +192,24 @@ class NutrientAlertService {
         message = _formatAlertLine(alert);
       }
     } else {
-      title = isEcLow ? 'Peringatan Nutrisi & Lingkungan' : 'Peringatan Parameter Lingkungan';
+      if (hasNutrientAlert && hasEnvAlert) {
+        title = 'Peringatan Nutrisi & Lingkungan';
+      } else if (hasNutrientAlert) {
+        title = 'Peringatan Nutrisi';
+      } else {
+        title = 'Peringatan Parameter Lingkungan';
+      }
       final lines = <String>[];
       for (final alert in activeAlerts) {
         final key = _sensorKeyForReading(alert);
-        if (key == 'ec' && alert.status == 'Low') {
-          final nStr = nReading != null ? '${nReading.value.toStringAsFixed(0)} mg/kg' : '-';
-          final pStr = pReading != null ? '${pReading.value.toStringAsFixed(0)} mg/kg' : '-';
-          final kStr = kReading != null ? '${kReading.value.toStringAsFixed(0)} mg/kg' : '-';
-          final minEcStr = ecReading!.minNormal.toStringAsFixed(1);
-          lines.add('• EC (${ecReading.value.toStringAsFixed(1)} mS/cm) di bawah batas minimal normal ($minEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).');
+        if (key == 'ec') {
+          if (alert.status == 'Low') {
+            final minEcStr = alert.minNormal.toStringAsFixed(1);
+            lines.add('• EC (${alert.value.toStringAsFixed(1)} mS/cm) di bawah batas minimal normal ($minEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).');
+          } else {
+            final maxEcStr = alert.maxNormal.toStringAsFixed(1);
+            lines.add('• EC (${alert.value.toStringAsFixed(1)} mS/cm) di atas batas maksimal normal ($maxEcStr mS/cm). Estimasi tren NPK sekarang: (N = $nStr, P = $pStr, K = $kStr).');
+          }
         } else {
           lines.add('• ${_formatAlertLine(alert)}');
         }

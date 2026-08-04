@@ -20,25 +20,25 @@ class PumpFlowRates {
       pumpIndex: 0,
       relay: 1,
       pumpName: 'Pompa A',
-      averageMlPerSecond: 34.77,
+      averageMlPerSecond: 47.4,
     ),
     PumpFlowRate(
       pumpIndex: 1,
       relay: 2,
       pumpName: 'Pompa B',
-      averageMlPerSecond: 38.55,
+      averageMlPerSecond: 46.87,
     ),
     PumpFlowRate(
       pumpIndex: 2,
       relay: 3,
       pumpName: 'Pompa C',
-      averageMlPerSecond: 29.99,
+      averageMlPerSecond: 44.15,
     ),
     PumpFlowRate(
       pumpIndex: 3,
       relay: 4,
       pumpName: 'Pompa D',
-      averageMlPerSecond: 35.00,
+      averageMlPerSecond: 39.6,
     ),
   ];
 

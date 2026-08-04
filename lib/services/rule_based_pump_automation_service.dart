@@ -14,7 +14,7 @@ class RuleBasedPumpAutomationService {
 
   factory RuleBasedPumpAutomationService({
     FirebaseFirestore? firestore,
-    Duration checkInterval = const Duration(minutes: 2),
+    Duration checkInterval = const Duration(minutes: 10),
   }) {
     return RuleBasedPumpAutomationService._(
       firestore: firestore,
@@ -24,7 +24,7 @@ class RuleBasedPumpAutomationService {
 
   RuleBasedPumpAutomationService._({
     FirebaseFirestore? firestore,
-    this.checkInterval = const Duration(minutes: 2),
+    this.checkInterval = const Duration(minutes: 10),
   }) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
