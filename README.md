@@ -10,11 +10,11 @@ NutriXense is a production-grade Flutter application for monitoring and controll
 
 | # | Screen | Description |
 |---|--------|-------------|
-| 1 | **Home** | Live dashboard — 6 sensor cards (N, P, K, pH, Moisture, Temp) + real-time NPK trend chart |
+| 1 | **Home** | Live dashboard — 6+1 sensor cards (N, P, K, pH, Moisture, Temp, EC) + real-time NPK trend chart |
 | 2 | **History** | Time-series charts with Hari ini / 7 Hari / 30 Hari filter, sensor selector, stats summary, data table |
-| 3 | **Scan** | AI plant scan simulation — camera viewfinder, scan animation, detailed health report |
-| 4 | **Insights** | AI recommendation cards with severity filters, NutriAI summary, expandable action cards |
-| 5 | **Control** | Pompa A/B/C toggle with auto-schedule display |
+| 3 | **Insights** | AI recommendation cards with severity filters, NutriAI summary, threshold config modal |
+| 4 | **Control** | Pompa A/B/C/D toggle with auto-schedule display & manual override |
+| 5 | **Logs** | Alert notification center, buzzer mute controls per sensor, and pump execution history |
 
 ---
 
@@ -31,9 +31,9 @@ lib/
 ├── screens/
 │   ├── home_screen.dart         # Monitoring dashboard
 │   ├── history_screen.dart      # Time-series history
-│   ├── scan_screen.dart         # AI plant scan
-│   ├── insights_screen.dart     # AI recommendations
-│   └── control_screen.dart      # Pump controller
+│   ├── insights_screen.dart     # AI recommendations & threshold config
+│   ├── control_screen.dart      # Pump controller
+│   └── logs_screen.dart         # Notification logs & alert center
 └── widgets/
     ├── sensor_card.dart          # Individual sensor card
     ├── insight_card_widget.dart  # Insight/recommendation card
