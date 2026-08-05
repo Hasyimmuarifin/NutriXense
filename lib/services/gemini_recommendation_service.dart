@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 
 import '../models/ai_recommendation.dart';
 import '../models/pump_flow_rate.dart';
+import '../models/sensor_data.dart';
 
 String _formatAiDateTime(DateTime value) {
   return DateFormat('dd-MM-yyyy HH:mm').format(value);
@@ -505,7 +506,7 @@ class GeminiRecommendationService {
       );
     }
 
-    final summary = _SensorHistorySummary.fromReadings(readings);
+    final summary = SensorHistorySummary.fromReadings(readings);
     final activeThresholds = _thresholdsFor(input);
     final requestFingerprint = _buildRequestFingerprint(
       summary,
@@ -515,7 +516,7 @@ class GeminiRecommendationService {
     final cachedResponse = _readCachedRecommendation(requestFingerprint);
     if (cachedResponse != null) return cachedResponse;
 
-    final deterministicPlan = _buildDeterministicDecisionPlan(
+    final deterministicPlan = buildDeterministicDecisionPlan(
       summary,
       input,
       activeThresholds,
@@ -699,7 +700,7 @@ class GeminiRecommendationService {
 
   static AiRecommendationResponse _responseWithDecisionPlan(
     Map<String, dynamic> decoded,
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input, {
     required Map<String, num> activeThresholds,
     required bool useGeminiPumpRecommendations,
@@ -866,7 +867,7 @@ class GeminiRecommendationService {
   }
 
   static String _buildRequestFingerprint(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -914,7 +915,7 @@ class GeminiRecommendationService {
     required _GeminiRuntimeConfig config,
     required String rawText,
     required String originalPayload,
-    required _SensorHistorySummary summary,
+    required SensorHistorySummary summary,
     required AiRecommendationAgronomicInput input,
     required Map<String, num> activeThresholds,
   }) async {
@@ -999,8 +1000,9 @@ class GeminiRecommendationService {
     );
   }
 
-  static Map<String, dynamic> _buildDeterministicDecisionPlan(
-    _SensorHistorySummary summary,
+  @visibleForTesting
+  static Map<String, dynamic> buildDeterministicDecisionPlan(
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -1028,7 +1030,7 @@ class GeminiRecommendationService {
 
   static Map<String, dynamic> _mergeGeminiNarrativeWithDecisionPlan(
     Map<String, dynamic> deterministicPlan,
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     Map<String, dynamic> geminiResponse,
   ) {
     final geminiRecommendations = _asMap(geminiResponse['recommendations']);
@@ -1136,7 +1138,7 @@ class GeminiRecommendationService {
   static List<PumpFertilizationRecommendation>
       _validateGeminiPumpRecommendations(
     Map<String, dynamic> decoded,
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
     List<PumpFertilizationRecommendation> localFallback,
@@ -1538,7 +1540,7 @@ class GeminiRecommendationService {
   }
 
   static Map<String, dynamic> _buildLocalFallbackResponse(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -1760,7 +1762,7 @@ class GeminiRecommendationService {
   }
 
   static Map<String, dynamic> _buildAiUnavailableFallbackResponse(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     Object error,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
@@ -1781,7 +1783,7 @@ class GeminiRecommendationService {
   }
 
   static List<PumpFertilizationRecommendation> _buildPumpRecommendations(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -1801,11 +1803,22 @@ class GeminiRecommendationService {
 
       final deficit = _roundDouble(minimum - current);
       final deficitPercent = _roundDouble((deficit / minimum) * 100);
-      final targetVolumeMl = _estimatedWaterVolumeMl(
+
+      final currentTemperature = summary.parameters['Temp']?.current;
+      final maxTemperature = activeThresholds['temperature_max']?.toDouble();
+      final isHighTemp = currentTemperature != null &&
+          maxTemperature != null &&
+          currentTemperature > maxTemperature;
+
+      final baseTargetVolumeMl = _estimatedWaterVolumeMl(
         currentMoisturePercent: current,
         targetMinimumPercent: minimum,
         input: input,
       );
+      final targetVolumeMl = isHighTemp
+          ? _roundDouble(baseTargetVolumeMl * 1.15)
+          : baseTargetVolumeMl;
+
       final recommendedSeconds = PumpFlowRates.secondsForVolume(
         pumpIndex: pumpIndex,
         volumeMl: targetVolumeMl,
@@ -1815,6 +1828,10 @@ class GeminiRecommendationService {
         pumpIndex: pumpIndex,
         seconds: recommendedSeconds,
       );
+
+      final tempNote = isHighTemp
+          ? ' Suhu tanah (${_formatNumber(currentTemperature)} °C) terdeteksi tinggi (di atas ${_formatNumber(maxTemperature)} °C), sehingga durasi disesuaikan +15% untuk kompensasi laju penguapan (evapotranspirasi).'
+          : '';
 
       recommendations.add(
         PumpFertilizationRecommendation(
@@ -1829,7 +1846,7 @@ class GeminiRecommendationService {
           deficitPercent: deficitPercent,
           recommendedSeconds: recommendedSeconds,
           reason:
-              '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit. Estimasi penyiraman memakai area sensor 100 cm2, kedalaman media ${_formatNumber(input.plantingMedium.assumedDepthCm)} cm, dan koreksi bertahap sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
+              '$nutrient saat ini ${_formatNumber(current)} $unit, kurang ${_formatNumber(deficit)} $unit dari ambang minimum ${_formatNumber(minimum)} $unit.$tempNote Estimasi penyiraman memakai area sensor 100 cm2, kedalaman media ${_formatNumber(input.plantingMedium.assumedDepthCm)} cm, dan koreksi bertahap sekitar ${PumpFlowRates.formatMl(targetVolumeMl)} ml; durasi pompa dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
         ),
       );
     }
@@ -1849,46 +1866,13 @@ class GeminiRecommendationService {
       unit: '%',
       minimum: activeThresholds['moisture_min']!.toDouble(),
     );
-    if (!recommendations.any((item) => item.pumpIndex == 3)) {
-      final currentTemperature = summary.parameters['Temp']?.current;
-      final maxTemperature = activeThresholds['temperature_max']!.toDouble();
-      if (currentTemperature != null && currentTemperature > maxTemperature) {
-        final excess = _roundDouble(currentTemperature - maxTemperature);
-        final excessPercent = _roundDouble((excess / maxTemperature) * 100);
-        final maxSafeSeconds = _maxSafeSecondsForPump(3, input);
-        final recommendedSeconds =
-            (3 + (excess * 1.5)).round().clamp(3, maxSafeSeconds).toInt();
-        final flowRate = PumpFlowRates.byPumpIndex(3).averageMlPerSecond;
-        final estimatedVolumeMl = PumpFlowRates.volumeForDuration(
-          pumpIndex: 3,
-          seconds: recommendedSeconds,
-        );
-
-        recommendations.add(
-          PumpFertilizationRecommendation(
-            relay: 4,
-            pumpIndex: 3,
-            pumpName: 'Pompa D',
-            nutrient: 'Suhu Tinggi',
-            unit: '°C',
-            currentValue: currentTemperature,
-            targetMinimum: maxTemperature,
-            deficit: excess,
-            deficitPercent: excessPercent,
-            recommendedSeconds: recommendedSeconds,
-            reason:
-                'Suhu saat ini ${_formatNumber(currentTemperature)} °C, lebih tinggi ${_formatNumber(excess)} °C dari ambang maksimum ${_formatNumber(maxTemperature)} °C. Pompa D Air direkomendasikan sebagai penyiraman bertahap ringan untuk membantu menurunkan stres panas dan menjaga kelembapan media ${input.plantingMedium.label}; durasi dihitung dari debit rata-rata ${PumpFlowRates.formatRate(flowRate)} ml/detik untuk keluaran sekitar ${PumpFlowRates.formatMl(estimatedVolumeMl)} ml.',
-          ),
-        );
-      }
-    }
 
     return recommendations;
   }
 
   static List<PumpFertilizationRecommendation>
       _buildEcRecipePumpRecommendations(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -1952,7 +1936,7 @@ class GeminiRecommendationService {
   }
 
   static List<_DynamicFertilizerDose> _buildDynamicFertilizerDoses(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -2090,7 +2074,7 @@ class GeminiRecommendationService {
   }
 
   static List<XaiFeatureContribution> _buildHistoricalShapContributions(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
     List<PumpFertilizationRecommendation> pumpRecommendations,
@@ -2517,7 +2501,7 @@ class GeminiRecommendationService {
   }
 
   static double _climateFertilizerFactor(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     Map<String, num> activeThresholds,
   ) {
     var factor = 1.0;
@@ -2586,7 +2570,7 @@ class GeminiRecommendationService {
   }
 
   static String _buildWateringLowAction(
-    _SensorHistorySummary summary,
+    SensorHistorySummary summary,
     AiRecommendationAgronomicInput input,
     Map<String, num> activeThresholds,
   ) {
@@ -3038,8 +3022,9 @@ class _SensorReadingSnapshot {
   }
 }
 
-class _SensorHistorySummary {
-  const _SensorHistorySummary({
+@visibleForTesting
+class SensorHistorySummary {
+  const SensorHistorySummary({
     required this.rowCount,
     required this.startTime,
     required this.endTime,
@@ -3051,10 +3036,28 @@ class _SensorHistorySummary {
   final DateTime endTime;
   final Map<String, _ParameterStats> parameters;
 
-  factory _SensorHistorySummary.fromReadings(
+  factory SensorHistorySummary.fromHistory(List<SensorDataPoint> history) {
+    final snapshots = history
+        .map(
+          (item) => _SensorReadingSnapshot(
+            timestamp: item.time,
+            nitrogen: item.nitrogen,
+            phosphorus: item.phosphorus,
+            potassium: item.potassium,
+            ph: item.ph,
+            temperature: item.temperature,
+            moisture: item.moisture,
+            ec: item.ec,
+          ),
+        )
+        .toList();
+    return SensorHistorySummary.fromReadings(snapshots);
+  }
+
+  factory SensorHistorySummary.fromReadings(
     List<_SensorReadingSnapshot> readings,
   ) {
-    return _SensorHistorySummary(
+    return SensorHistorySummary(
       rowCount: readings.length,
       startTime: readings.first.timestamp,
       endTime: readings.last.timestamp,

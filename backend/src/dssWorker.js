@@ -139,10 +139,19 @@ function recipeDurationsFromEc(reading, thresholds, durations, recipeRatios) {
 }
 
 function fuzzyDecisionsForReading(reading, thresholds, durations) {
-  return [
-    ...lowDecision(reading, 'moisture', 'min_moisture', 4, thresholds, durations),
-    ...highDecision(reading, 'temperature', 'max_temperature', 4, thresholds, durations),
-  ];
+  const moistureDecisions = lowDecision(reading, 'moisture', 'min_moisture', 4, thresholds, durations);
+  if (moistureDecisions.length === 0) {
+    return [];
+  }
+  const isHighTemp = isHigh(reading.temperature, thresholds.max_temperature);
+  if (isHighTemp) {
+    return moistureDecisions.map((decision) => ({
+      ...decision,
+      durationMs: Math.round(decision.durationMs * 1.15),
+      note: 'Water pump duration increased by 15% due to high soil temperature (evapotranspiration compensation).',
+    }));
+  }
+  return moistureDecisions;
 }
 
 function durationMsByRelay(decisions) {

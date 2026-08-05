@@ -514,18 +514,12 @@ class NutrixenseBackgroundService : Service() {
     private fun fuzzyDurationsByRelay(reading: SensorReading): Map<Int, Long> {
         val durationsByRelay = mutableMapOf<Int, Long>()
 
-        addFuzzyLowDuration(
-            durationsByRelay,
-            relay = 4,
-            value = reading.moisture,
-            minKey = "min_moisture"
-        )
-        addFuzzyHighDuration(
-            durationsByRelay,
-            relay = 4,
-            value = reading.temperature,
-            maxKey = "max_temperature"
-        )
+        val moistureDuration = fuzzyLowDurationMillis(reading.moisture, "min_moisture")
+        if (moistureDuration != null) {
+            val isHighTemp = isHigh(reading.temperature, "max_temperature")
+            val finalDuration = if (isHighTemp) (moistureDuration * 1.15).toLong() else moistureDuration
+            durationsByRelay[4] = finalDuration
+        }
 
         val ecDuration = fuzzyLowDurationMillis(reading.ec, "min_ec")
         if (ecDuration != null) {
@@ -586,7 +580,6 @@ class NutrixenseBackgroundService : Service() {
         val relays = mutableSetOf<Int>()
 
         if (isLow(reading.moisture, "min_moisture")) relays.add(4)
-        if (isHigh(reading.temperature, "max_temperature")) relays.add(4)
         if (isLow(reading.ec, "min_ec")) relays.addAll(setOf(1, 2, 3))
 
         return relays
