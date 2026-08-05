@@ -12,7 +12,6 @@
    - [3.3 Setup Google AI Studio (Gemini API)](#33-setup-google-ai-studio-gemini-api)
 4. [Deployment Backend Worker (Node.js & PM2)](#4-deployment-backend-worker-nodejs--pm2)
 5. [Panduan Penggunaan Aplikasi Android NutriXense](#5-panduan-penggunaan-aplikasi-android-nutrixense)
-6. [Panduan Penyusunan Buku Manual / Book PDF](#6-panduan-penyusunan-buku-manual--book-pdf)
 
 ---
 
@@ -284,70 +283,6 @@ Aplikasi NutriXense terdiri dari 5 menu navigasi utama:
    - Log riwayat notifikasi saat nilai sensor melebihi ambang aman.
    - Fitur **Buzzer Mute** per sensor (`buzzerMuted`) untuk mematikan alarm suara hardware pada parameter tertentu tanpa menghentikan pemantauan.
    - Log riwayat aktivitas saklar pompa.
-
----
-
-## 6. Panduan Penyusunan Buku Manual / Book PDF
-
-Gunakan susunan bab di bawah ini untuk pembuatan dokumen **Buku Panduan Teknis (Technical Manual / Buku TA)** resmi:
-
-### 6.1 Struktur Bab & Isi Buku PDF
-
-```text
-KAVER BUKU (Judul, Logo, Nama Pengembang, Universitas/Institusi)
-KATA PENGANTAR & DAFTAR ISI
-
-BAB I: PENDAHULUAN & ARSITEKTUR SISTEM
-  1.1 Latar Belakang & Tujuan NutriXense
-  1.2 Arsitektur Sistem End-to-End (Catu Daya 2S - IoT - Cloud - AI - Mobile)
-  1.3 Spesifikasi Parameter Sensor Nutrisi
-
-BAB II: PERANGKAT HARDWARE IOT & SKEMA WIRING
-  2.1 Spesifikasi Sistem Daya (2x 18650 Battery Pack 7.4V, Switch, & DC-DC Step-Down)
-  2.2 Pemetaan Pinout Wiring ESP32, Proto-Board, LCD 16x2 I2C, & RTC DS3231
-  2.3 Rangkaian Schematics Cirkit Designer & Aturan Common GND
-  2.4 Tata Cara Pemrograman Passive Buzzer (Sinyal PWM / Tone Generation ESP32)
-  2.5 Assembly & Testing Modul Relay 4-Channel & Pompa DC
-
-BAB III: KONFIGURASI CLOUD SERVICES & API KEYS
-  3.1 Setup Firebase Console, Firestore Database, & Service Account Key
-  3.2 Setup HiveMQ Cloud Broker MQTT (SSL/TLS Port 8883) & Topik Komunikasi
-  3.3 Setup Google AI Studio & Pengintegrasian Gemini API
-
-BAB IV: DEPLOYMENT BACKEND WORKER (VPS NODE.JS)
-  4.1 Persiapan Environment & Variabel Rahasia (.env)
-  4.2 Manajemen Service 24 Jam Menggunakan PM2
-  4.3 Sistem Pengiriman Notifikasi FCM & Synchronizer Retained Config
-
-BAB V: PANDUAN PENGGUNAAN APLIKASI MOBILE ANDROID
-  5.1 Instalasi & Persyaratan Perangkat Android
-  5.2 Panduan Penggunaan Dashboard Real-Time & Status Hardware
-  5.3 Panduan Analisis Riwayat & Ekspor Data (History)
-  5.4 Panduan NutriAI Insights & Pengaturan Ambang Batas (Threshold Config)
-  5.5 Panduan Pengoperasian Saklar Pompa Manual & Penjadwalan Otomatis
-
-BAB VI: PEMELIHARAAN SISTEM & TROUBLESHOOTING
-  6.1 Prosedur Pengisian Daya & Pemantauan Voltmeter Baterai 18650
-  6.2 Kalibrasi Sensor 7-in-1 Soil NPK / pH / EC
-  6.3 Solusi Troubleshooting Koneksi MQTT, Wi-Fi ESP32, & Gemini API
-
-DAFTAR PUSTAKA & LAMPIRAN
-  Lampiran 1: Data Sheet Komponen Hardware
-  Lampiran 2: Potongan Kode Firmware ESP32 & Payload JSON Reference
-```
-
-### 6.2 Format Layout & Tipografi Buku PDF
-
-1. **Spesifikasi Halaman**:
-   - Ukuran Kertas: **A4 (210 x 297 mm)**.
-   - Margin: Left = 3 cm, Right = 2 cm, Top = 2.5 cm, Bottom = 2.5 cm.
-2. **Tipografi**:
-   - Font Utama: **Inter** / **Roboto** / **Segoe UI** (Ukuran Body: 11pt, Line Height: 1.3).
-   - Judul Bab (Heading 1): 18pt Bold (Warna Hijau NutriXense `#2E7D52`).
-   - Sub Bab (Heading 2): 14pt Semi-Bold.
-3. **Dokumentasi Visual**:
-   - Berikan caption dan nomor pada setiap gambar (contoh: *Gambar 2.1: Skema Rangkaian Wiring Cirkit Designer NutriXense*).
-   - Kotak Catatan / Callout (*Warning Box*): Berikan latar belakang warna lembut untuk menekankan aturan penting seperti *Common Grounding* dan *Regulasi Daya Baterai 2S*.
 
 ---
 *NutriXense Technical Guidance · Dokumen Resmi Sistem Monitoring Nutrisi Tanaman IoT & AI*
