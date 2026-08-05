@@ -47,12 +47,12 @@ flowchart TD
         Buzzer["Passive Buzzer (Alert Suara PWM/Tone)"]
         
         Board --> ESP32 & MAX485 & LCD & RTC & Relay & Buzzer
-        RS485 -->|Modbus RTU RS485| MAX485
-        MAX485 -->|Serial UART2 (GPIO16/17/4)| ESP32
-        ESP32 -->|I2C Bus (GPIO21 SDA / GPIO22 SCL)| LCD & RTC
-        ESP32 -->|GPIO Control (GPIO25/26/27/14)| Relay
-        Relay -->|Daya 7.4V Direct| Pumps
-        ESP32 -->|GPIO 12 PWM Signal| Buzzer
+        RS485 -->|"Modbus RTU RS485"| MAX485
+        MAX485 -->|"Serial UART2 (GPIO16/17/4)"| ESP32
+        ESP32 -->|"I2C Bus (GPIO21 SDA / GPIO22 SCL)"| LCD & RTC
+        ESP32 -->|"GPIO Control (GPIO25/26/27/14)"| Relay
+        Relay -->|"Daya 7.4V Direct"| Pumps
+        ESP32 -->|"GPIO 12 PWM Signal"| Buzzer
     end
 
     subgraph Cloud_Broker["Cloud Infrastructure"]
@@ -64,20 +64,20 @@ flowchart TD
 
     subgraph Server_Backend["Backend Service (VPS)"]
         NodeWorker["Node.js Backend Worker (PM2)"]
-        NodeWorker -->|Subscribe Telemetry & History| HiveMQ
-        NodeWorker -->|Read/Write Config & Logs| Firestore
-        NodeWorker -->|Trigger Push Alert| FCM
+        NodeWorker -->|"Subscribe Telemetry & History"| HiveMQ
+        NodeWorker -->|"Read/Write Config & Logs"| Firestore
+        NodeWorker -->|"Trigger Push Alert"| FCM
     end
 
     subgraph Mobile_App["Aplikasi Mobile (Flutter Android)"]
         App["App NutriXense Android"]
-        App -->|MQTT Realtime Stream| HiveMQ
-        App -->|Firestore History & Config| Firestore
-        App -->|Direct API Call / Insights| GeminiAPI
+        App -->|"MQTT Realtime Stream"| HiveMQ
+        App -->|"Firestore History & Config"| Firestore
+        App -->|"Direct API Call / Insights"| GeminiAPI
     end
 
-    ESP32 -->|Publish Telemetry nutrixense/sensor| HiveMQ
-    HiveMQ -->|Publish Control nutrixense/control| ESP32
+    ESP32 -->|"Publish Telemetry nutrixense/sensor"| HiveMQ
+    HiveMQ -->|"Publish Control nutrixense/control"| ESP32
 ```
 
 ---
