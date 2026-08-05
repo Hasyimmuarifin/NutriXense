@@ -50,7 +50,7 @@ flowchart TD
         RS485 -->|"Modbus RTU RS485"| MAX485
         MAX485 -->|"Serial UART2 (GPIO16/17/4)"| ESP32
         ESP32 -->|"I2C Bus (GPIO21 SDA / GPIO22 SCL)"| LCD & RTC
-        ESP32 -->|"GPIO Control (GPIO25/26/27/14)"| Relay
+        ESP32 -->|"GPIO Control (GPIO25/26/27/33)"| Relay
         Relay -->|"Daya 7.4V Direct"| Pumps
         ESP32 -->|"GPIO 12 PWM Signal"| Buzzer
     end
@@ -148,7 +148,7 @@ flowchart TD
 |                        | IN Relay 1 (Pompa A) | GPIO 25 (ESP32)                       |
 |                        | IN Relay 2 (Pompa B) | GPIO 26 (ESP32)                       |
 |                        | IN Relay 3 (Pompa pH)| GPIO 27 (ESP32)                       |
-|                        | IN Relay 4 (Utama)   | GPIO 14 (ESP32)                       |
+|                        | IN Relay 4 (Utama)   | GPIO 33 (ESP32)                       |
 |                        | COM 1, 2, 3, 4       | Positif Baterai 7.4V Line             |
 |                        | NO 1, 2, 3, 4        | Positif Kabel 4x DC Pumps             |
 +------------------------+----------------------+---------------------------------------+
