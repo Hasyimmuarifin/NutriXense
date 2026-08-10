@@ -11,11 +11,14 @@ import 'firebase_options.dart';
 import 'theme/app_theme.dart';
 
 import 'screens/splash_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/control_screen.dart';
 import 'screens/logs_screen.dart';
+import 'services/auth_service.dart';
+import 'services/device_pairing_service.dart';
 import 'services/fcm_notification_service.dart';
 import 'services/log_alert_badge_service.dart';
 import 'services/nutrient_alert_service.dart';
@@ -76,6 +79,20 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       persistenceEnabled: true,
     );
 
+    await AuthService.instance
+        .init()
+        .timeout(const Duration(seconds: 5))
+        .catchError((error) {
+      debugPrint('Auth service startup skipped: $error');
+    });
+
+    await DevicePairingService.instance
+        .init()
+        .timeout(const Duration(seconds: 5))
+        .catchError((error) {
+      debugPrint('Device pairing service startup skipped: $error');
+    });
+
     await ThresholdConfigService.instance
         .load()
         .timeout(const Duration(seconds: 5));
@@ -120,6 +137,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.done &&
               !snapshot.hasError) {
+            // ─── SINGLE DEVICE PROTOTYPE ROUTING ────────────────
+            if (!AuthService.instance.isLoggedIn) {
+              return const LoginScreen();
+            }
+
+            // Ensure single prototype device is paired
+            if (!DevicePairingService.instance.isPaired) {
+              DevicePairingService.instance.pairDevice('NTX-001',
+                  deviceName: 'NutriXense Prototype 1');
+            }
+
             return const MainNavigation();
           }
 

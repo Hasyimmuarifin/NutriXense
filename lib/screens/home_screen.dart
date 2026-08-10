@@ -11,6 +11,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/sensor_data.dart';
 
 import '../services/alert_count_service.dart';
+import '../services/auth_service.dart';
+import '../services/device_pairing_service.dart';
 import '../services/mqtt_service.dart';
 import '../services/nutrient_alert_service.dart';
 import '../services/rule_based_pump_automation_service.dart';
@@ -18,6 +20,7 @@ import '../services/threshold_config_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
 
+import '../widgets/profile_dialog.dart';
 import '../widgets/section_header.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -1166,50 +1169,110 @@ class _HomeScreenState extends State<HomeScreen>
 
                               const SizedBox(height: 16),
 
-                              // ─── Greeting + Config Button ────────────────
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'Selamat Datang,',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w600,
+                              // ─── Greeting + Config & Profile Buttons ──────
+                              ListenableBuilder(
+                                listenable: Listenable.merge([
+                                  AuthService.instance,
+                                  DevicePairingService.instance,
+                                ]),
+                                builder: (context, _) {
+                                  final userName = AuthService.instance.userName;
+                                  final deviceId = DevicePairingService.instance.pairedDeviceId;
+
+                                  return Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              'Halo, $userName',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 20,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            if (deviceId.isNotEmpty)
+                                              Text(
+                                                'Perangkat: $deviceId',
+                                                style: TextStyle(
+                                                  color: Colors.white
+                                                      .withOpacity(0.8),
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Tooltip(
-                                    message: 'Konfigurasi ambang',
-                                    child: InkWell(
-                                      onTap: _openThresholdConfigDialog,
-                                      borderRadius: BorderRadius.circular(18),
-                                      child: Container(
-                                        width: 36,
-                                        height: 36,
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.18),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color:
-                                                Colors.white.withOpacity(0.25),
+                                      const SizedBox(width: 8),
+                                      // Threshold Settings Button
+                                      Tooltip(
+                                        message: 'Konfigurasi ambang',
+                                        child: InkWell(
+                                          onTap: _openThresholdConfigDialog,
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                          child: Container(
+                                            width: 36,
+                                            height: 36,
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  Colors.white.withOpacity(0.18),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withOpacity(0.25),
+                                              ),
+                                            ),
+                                            child: const Icon(
+                                              Icons.tune_rounded,
+                                              color: Colors.white,
+                                              size: 19,
+                                            ),
                                           ),
                                         ),
-                                        child: const Icon(
-                                          Icons.tune_rounded,
-                                          color: Colors.white,
-                                          size: 19,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      // Profile & Device Button
+                                      Tooltip(
+                                        message: 'Profil Pengguna',
+                                        child: InkWell(
+                                          onTap: () =>
+                                              ProfileDialog.show(context),
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                          child: Container(
+                                            width: 36,
+                                            height: 36,
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  Colors.white.withOpacity(0.18),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withOpacity(0.25),
+                                              ),
+                                            ),
+                                            child: const Icon(
+                                              Icons.person_rounded,
+                                              color: Colors.white,
+                                              size: 19,
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                ],
+                                    ],
+                                  );
+                                },
                               ),
 
                               const SizedBox(height: 16),

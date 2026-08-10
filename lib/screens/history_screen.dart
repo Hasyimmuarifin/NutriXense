@@ -288,67 +288,68 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   List<SensorDataPoint> _applySampling(List<SensorDataPoint> source) {
     if (source.isEmpty) return [];
-    final maxNodes = _chartNodeLimitForRange();
-    final meaningfulSource = source
-        .where((item) => _chartPriorityScore(item) > 0)
-        .toList(growable: false);
-    final chartSource = meaningfulSource.isEmpty ? source : meaningfulSource;
 
-    if (chartSource.length <= maxNodes) return chartSource;
-    if (maxNodes <= 1) return [source.first];
+    final sortedSource = List<SensorDataPoint>.from(source)
+      ..sort((a, b) => a.time.compareTo(b.time));
 
-    final sampled = <SensorDataPoint>[];
+    final startDate = _historyStartDate();
+    final endDate = _historyEndDate() ?? DateTime.now();
+    final rangeDuration = endDate.difference(startDate);
 
-    for (var index = 0; index < maxNodes; index++) {
-      final start = (index * chartSource.length / maxNodes).floor();
-      final end = (((index + 1) * chartSource.length / maxNodes).ceil())
-          .clamp(start + 1, chartSource.length);
-      final bucket = chartSource.sublist(start, end);
+    final Duration bucketDuration;
+    if (_selectedFilter == 0 || rangeDuration <= const Duration(days: 1)) {
+      bucketDuration = const Duration(minutes: 2); // 2-minute interval for Hari ini
+    } else if (rangeDuration <= const Duration(days: 7)) {
+      bucketDuration = const Duration(minutes: 15);
+    } else if (rangeDuration <= const Duration(days: 30)) {
+      bucketDuration = const Duration(hours: 1);
+    } else {
+      bucketDuration = const Duration(hours: 3);
+    }
 
-      sampled.add(
-        bucket.reduce((best, item) {
-          final bestScore = _chartPriorityScore(best);
-          final itemScore = _chartPriorityScore(item);
-          if (itemScore > bestScore) return item;
-          if (itemScore == bestScore && item.time.isAfter(best.time)) {
-            return item;
-          }
-          return best;
-        }),
-      );
+    final Map<int, List<SensorDataPoint>> buckets = {};
+    for (final item in sortedSource) {
+      final bucketKey =
+          item.time.millisecondsSinceEpoch ~/ bucketDuration.inMilliseconds;
+      buckets.putIfAbsent(bucketKey, () => []).add(item);
+    }
+
+    final List<SensorDataPoint> sampled = [];
+    for (final entry in buckets.entries) {
+      final list = entry.value;
+      if (list.isEmpty) continue;
+      if (list.length == 1) {
+        sampled.add(list.first);
+      } else {
+        double sumN = 0, sumP = 0, sumK = 0;
+        double sumPh = 0, sumMoist = 0, sumTemp = 0, sumEc = 0;
+        final count = list.length;
+        for (final d in list) {
+          sumN += d.nitrogen;
+          sumP += d.phosphorus;
+          sumK += d.potassium;
+          sumPh += d.ph;
+          sumMoist += d.moisture;
+          sumTemp += d.temperature;
+          sumEc += d.ec;
+        }
+
+        final avgTime = list[list.length ~/ 2].time;
+
+        sampled.add(SensorDataPoint(
+          nitrogen: double.parse((sumN / count).toStringAsFixed(1)),
+          phosphorus: double.parse((sumP / count).toStringAsFixed(1)),
+          potassium: double.parse((sumK / count).toStringAsFixed(1)),
+          ph: double.parse((sumPh / count).toStringAsFixed(1)),
+          moisture: double.parse((sumMoist / count).toStringAsFixed(1)),
+          temperature: double.parse((sumTemp / count).toStringAsFixed(1)),
+          ec: double.parse((sumEc / count).toStringAsFixed(2)),
+          time: avgTime,
+        ));
+      }
     }
 
     return sampled..sort((a, b) => a.time.compareTo(b.time));
-  }
-
-  double _chartPriorityScore(SensorDataPoint item) {
-    return switch (_selectedSensor) {
-      0 => [
-          item.nitrogen,
-          item.phosphorus,
-          item.potassium,
-        ].reduce((a, b) => a > b ? a : b),
-      1 => item.ph,
-      2 => item.moisture,
-      3 => item.temperature,
-      4 => item.ec,
-      _ => 0,
-    };
-  }
-
-  int _chartNodeLimitForRange() {
-    final startDate = _historyStartDate();
-    final endDate = _historyEndDate() ?? DateTime.now();
-    final duration = endDate.isAfter(startDate)
-        ? endDate.difference(startDate)
-        : const Duration(hours: 1);
-
-    if (duration <= const Duration(hours: 1)) return 120;
-    if (duration <= const Duration(hours: 6)) return 180;
-    if (duration <= const Duration(days: 1)) return 240;
-    if (duration <= const Duration(days: 7)) return 288;
-    if (duration <= const Duration(days: 30)) return 360;
-    return 420;
   }
 
   Future<void> _loadInitialHistory() async {
@@ -1539,18 +1540,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     double xValueAtIndex(int index) {
       if (_selectedFilter == 0) {
-        // Today → jam desimal (0–24)
+        // Today → jam desimal (0–24) dengan presisi detik
         final time = _data[index].time;
-        return time.hour + (time.minute / 60.0);
+        return time.hour + (time.minute / 60.0) + (time.second / 3600.0);
       }
       return index.toDouble();
     }
 
     List<FlSpot> toSpots(List<double> vals) {
-      return List.generate(
-        vals.length,
-        (i) => FlSpot(xValueAtIndex(i), vals[i]),
-      );
+      final List<FlSpot> spots = [];
+      for (int i = 0; i < vals.length; i++) {
+        final x = xValueAtIndex(i);
+        // Guarantee strictly increasing X coordinate so FLChart never loops back
+        if (spots.isNotEmpty && x <= spots.last.x) {
+          continue;
+        }
+        spots.add(FlSpot(x, vals[i]));
+      }
+      return spots;
     }
 
     switch (_selectedSensor) {
@@ -1591,8 +1598,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   LineChartBarData _bar(List<FlSpot> spots, Color color, String label) {
     return LineChartBarData(
       spots: spots,
-      isCurved: true,
-      curveSmoothness: 0.35,
+      isCurved: false,
       color: color,
       barWidth: 2.5,
       isStrokeCapRound: true,
